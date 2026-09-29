@@ -425,9 +425,7 @@ impl Aurora {
         let Backend::Drm(drm) = &mut self.backend else {
             return;
         };
-        if !drm.session_active {
-            return;
-        }
+        let session_active = drm.session_active;
         let Some(surface) = drm
             .devices
             .get_mut(&node)
@@ -436,6 +434,13 @@ impl Aurora {
             tracing::debug!(?crtc, "vblank for an output that is gone");
             return;
         };
+        if !session_active {
+            // Still acknowledge the flip, otherwise the compositor keeps a pending frame
+            // that never clears and the output freezes after resume.
+            let _ = surface.drm_output.frame_submitted();
+            surface.render.frame_pending = false;
+            return;
+        }
 
         if let Some(token) = surface.render.throttle_timer.take() {
             handle.remove(token);
