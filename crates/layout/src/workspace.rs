@@ -251,6 +251,13 @@ impl Workspace {
             *p = fs_placement(id, mode);
         }
 
+        // The fullscreen window goes first so its transients stack above it.
+        if let Some((id, FsMode::Fullscreen)) = fs
+            && self.contains(id)
+        {
+            out.push(fs_placement(id, FsMode::Fullscreen));
+        }
+
         for &(id, rect) in &self.floating {
             match fs {
                 Some((f, FsMode::Fullscreen)) if f == id => continue,
@@ -267,12 +274,6 @@ impl Workspace {
                 content: rect.shrink(border),
                 kind: Kind::Floating,
             });
-        }
-        if let Some((id, mode)) = fs {
-            // Floating maximized handled above; fullscreen (either kind of window) goes last.
-            if mode == FsMode::Fullscreen && self.contains(id) {
-                out.push(fs_placement(id, mode));
-            }
         }
     }
 
@@ -353,8 +354,8 @@ mod tests {
         assert!(ws.set_fullscreen(w(1), Some(FsMode::Fullscreen)));
         let out = place(&mut ws);
         let ids: Vec<_> = out.iter().map(|p| p.id.0).collect();
-        assert_eq!(ids, [4, 1]);
-        let fs = out.last().unwrap();
+        assert_eq!(ids, [1, 4]);
+        let fs = &out[0];
         assert_eq!(
             (fs.outer, fs.content, fs.kind),
             (FULL, FULL, Kind::Fullscreen)

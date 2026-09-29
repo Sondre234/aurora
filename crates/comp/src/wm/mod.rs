@@ -162,9 +162,16 @@ impl Wm {
         let Some(win) = self.windows.get(&id) else {
             return false;
         };
-        let Some((front, _)) = self.workspaces.get(&win.ws).and_then(|w| w.fullscreen()) else {
+        let Some(workspace) = self.workspaces.get(&win.ws) else {
             return true;
         };
+        let Some((front, mode)) = workspace.fullscreen() else {
+            return true;
+        };
+        // Tiled descendants are cut from the placements while something is fullscreen.
+        if mode == FsMode::Fullscreen && id != front && workspace.floating_rect(id).is_none() {
+            return false;
+        }
         let mut cur = Some(id);
         // Bounded so a parent cycle from a client cannot hang the walk.
         for _ in 0..16 {

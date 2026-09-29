@@ -178,6 +178,7 @@ impl Aurora {
         let border = general.border_width;
         let dragging = self.wm.drag.is_some();
         let frame = self.wm.last_full.get(&ws).copied().unwrap_or_default();
+        let over_fs = placed.iter().any(|p| p.kind == Kind::Fullscreen);
 
         let mut line = String::new();
         for p in placed {
@@ -217,6 +218,7 @@ impl Aurora {
             let deco = win.element.deco();
             deco.set_z(match p.kind {
                 Kind::Fullscreen => Z_FULLSCREEN,
+                Kind::Floating if over_fs => Z_FULLSCREEN + 1,
                 Kind::Floating | Kind::Maximized => Z_FLOATING,
                 Kind::Tiled => Z_TILED,
             });
