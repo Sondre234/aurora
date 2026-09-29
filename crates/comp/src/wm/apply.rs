@@ -590,8 +590,28 @@ impl Aurora {
         }
         win.constraints = constraints;
         let ws = win.ws;
+        let border = self.config.general.border_width.max(0);
         if let Some(workspace) = self.wm.workspaces.get_mut(&ws) {
             workspace.tiling.set_constraints(id, constraints);
+            // A floating window's rectangle is not the layout's to fix: clamp it here, around
+            // its centre, when the client's new hints no longer admit its size.
+            if let Some(r) = workspace.floating_rect(id) {
+                let fit = |outer: i32, min: i32, max: i32| {
+                    let mut v = (outer - 2 * border).max(min);
+                    if max > 0 {
+                        v = v.min(max);
+                    }
+                    v.max(1) + 2 * border
+                };
+                let (w, h) = (
+                    fit(r.w, constraints.min.w, constraints.max.w),
+                    fit(r.h, constraints.min.h, constraints.max.h),
+                );
+                if (w, h) != (r.w, r.h) {
+                    let c = r.center();
+                    workspace.set_floating_rect(id, Rect::new(c.x - w / 2, c.y - h / 2, w, h));
+                }
+            }
         }
         self.relayout_ws(ws);
     }
