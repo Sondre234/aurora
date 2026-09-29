@@ -1,4 +1,4 @@
-use crate::{Aurora, state::ClientState, wm::window::window_for_surface};
+use crate::{Aurora, state::ClientState};
 use std::sync::OnceLock;
 
 use smithay::{
@@ -51,18 +51,25 @@ impl CompositorHandler for Aurora {
         // A sync subsurface shows nothing until its parent commits.
         let sync_subsurface = is_sync_subsurface(surface);
         let mut outputs = Vec::new();
+        // A window known to Wm but not in the Space (hidden workspace, not yet mapped) draws
+        // nothing, so its commits repaint nothing.
+        let mut offscreen = false;
         if !sync_subsurface {
             let root = root_surface(surface);
-            let window = window_for_surface(&self.space, &root).cloned();
+            let window = self.wm.window_of(&root).map(|w| w.element.clone());
             if let Some(window) = window {
                 window.on_commit();
                 outputs = self.space.outputs_for_element(&window);
+                offscreen = self.space.element_location(&window).is_none();
             }
         };
 
-        xdg_shell::handle_commit(&mut self.popups, &self.space, surface);
+        if self.wm.id_of(surface).is_some() {
+            self.toplevel_commit(surface);
+        }
+        xdg_shell::handle_commit(&mut self.popups, surface);
 
-        if sync_subsurface {
+        if sync_subsurface || offscreen {
             return;
         }
         if outputs.is_empty() {
@@ -112,7 +119,7 @@ impl Aurora {
             _ => None,
         }) {
             let parent = root_surface(&parent);
-            if let Some(window) = window_for_surface(&self.space, &parent) {
+            if let Some(window) = self.wm.window_of(&parent).map(|w| &w.element) {
                 return self.space.outputs_for_element(window);
             }
         }

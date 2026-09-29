@@ -45,6 +45,7 @@ pub fn init(
     );
     output.set_preferred(mode);
     state.space.map_output(&output, (0, 0));
+    state.wm_output_added(&output);
 
     state.init_dmabuf(
         crate::dmabuf::renderer_node(backend.renderer()),
@@ -66,6 +67,8 @@ pub fn init(
                     None,
                     None,
                 );
+                smithay::desktop::layer_map_for_output(&output).arrange();
+                state.relayout_all();
             }
             WinitEvent::Input(event) => state.process_input_event(event),
             WinitEvent::Redraw => {

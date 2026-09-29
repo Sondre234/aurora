@@ -390,6 +390,7 @@ impl Aurora {
         let position = (x, 0);
         output.change_current_state(None, None, None, Some(position.into()));
         self.space.map_output(&output, position);
+        self.wm.output_added(&output);
         output.user_data().insert_if_missing(|| UdevOutputId {
             device_id: node,
             crtc,
@@ -435,6 +436,7 @@ impl Aurora {
             // Pending repaints and vblank timers must not outlive the output.
             surface.render.cancel(&self.handle);
             self.space.unmap_output(&surface.output);
+            self.wm.output_removed(&surface.output);
             self.space.refresh();
             // Dropping the surface releases the crtc and removes the wl_output global.
             drop(surface);
@@ -571,6 +573,7 @@ impl Aurora {
             );
             pointer.frame(self);
         }
+        self.relayout_all();
         self.queue_redraw_all();
     }
 }

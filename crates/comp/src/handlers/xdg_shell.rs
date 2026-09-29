@@ -1,22 +1,13 @@
 use smithay::{
-    desktop::{
-        PopupKind, PopupManager, Space, Window, find_popup_root_surface, get_popup_toplevel_coords,
-    },
+    desktop::{PopupKind, PopupManager, find_popup_root_surface, get_popup_toplevel_coords},
     reexports::wayland_server::protocol::{wl_seat, wl_surface::WlSurface},
     utils::Serial,
-    wayland::{
-        compositor::with_states,
-        shell::xdg::{
-            PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
-            XdgToplevelSurfaceData,
-        },
+    wayland::shell::xdg::{
+        PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
     },
 };
 
-use crate::{
-    Aurora,
-    wm::window::{WindowElement, window_for_surface},
-};
+use crate::Aurora;
 
 impl XdgShellHandler for Aurora {
     fn xdg_shell_state(&mut self) -> &mut XdgShellState {
@@ -24,8 +15,7 @@ impl XdgShellHandler for Aurora {
     }
 
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
-        let window = WindowElement::new(Window::new_wayland_window(surface));
-        self.space.map_element(window, (0, 0), false);
+        self.new_wm_window(surface);
     }
 
     fn new_popup(&mut self, surface: PopupSurface, _positioner: PositionerState) {
@@ -48,7 +38,8 @@ impl XdgShellHandler for Aurora {
         surface.send_repositioned(token);
     }
 
-    fn toplevel_destroyed(&mut self, _surface: ToplevelSurface) {
+    fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
+        self.wm_window_destroyed(surface.wl_surface());
         self.queue_redraw_all();
     }
 
@@ -64,23 +55,7 @@ impl XdgShellHandler for Aurora {
 }
 
 /// Should be called on `WlSurface::commit`
-pub fn handle_commit(popups: &mut PopupManager, space: &Space<WindowElement>, surface: &WlSurface) {
-    // Handle toplevel commits.
-    if let Some(toplevel) = window_for_surface(space, surface).and_then(|w| w.toplevel()) {
-        let initial_configure_sent = with_states(surface, |states| {
-            states
-                .data_map
-                .get::<XdgToplevelSurfaceData>()
-                .and_then(|data| data.lock().ok())
-                .is_some_and(|data| data.initial_configure_sent)
-        });
-
-        if !initial_configure_sent {
-            toplevel.send_configure();
-        }
-    }
-
-    // Handle popup commits.
+pub fn handle_commit(popups: &mut PopupManager, surface: &WlSurface) {
     popups.commit(surface);
     if let Some(popup) = popups.find_popup(surface) {
         match popup {
@@ -103,7 +78,7 @@ impl Aurora {
         let Ok(root) = find_popup_root_surface(&PopupKind::Xdg(popup.clone())) else {
             return;
         };
-        let Some(window) = window_for_surface(&self.space, &root) else {
+        let Some(window) = self.wm.window_of(&root).map(|w| &w.element) else {
             return;
         };
         let Some(window_geo) = self.space.element_geometry(window) else {

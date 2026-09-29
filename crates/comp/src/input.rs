@@ -179,6 +179,7 @@ impl Aurora {
                 );
                 pointer.frame(self);
                 self.queue_redraw_pointer(old_pos, pos);
+                self.update_hover();
             }
             InputEvent::PointerMotionAbsolute { event, .. } => {
                 let Some(output) = self.space.outputs().next() else {
@@ -209,10 +210,10 @@ impl Aurora {
                 );
                 pointer.frame(self);
                 self.queue_redraw_pointer(old_pos, pos);
+                self.update_hover();
             }
             InputEvent::PointerButton { event, .. } => {
                 let pointer = self.pointer.clone();
-                let keyboard = self.keyboard.clone();
 
                 let serial = SERIAL_COUNTER.next_serial();
 
@@ -221,26 +222,8 @@ impl Aurora {
                 let button_state = event.state();
 
                 if ButtonState::Pressed == button_state && !pointer.is_grabbed() {
-                    if let Some((window, _loc)) = self
-                        .space
-                        .element_under(pointer.current_location())
-                        .map(|(w, l)| (w.clone(), l))
-                    {
-                        self.space.raise_element(&window, true);
-                        self.queue_redraw_all();
-                        keyboard.set_focus(self, window.focus_target(), serial);
-                        self.space
-                            .elements()
-                            .for_each(|w| w.send_pending_configure());
-                    } else {
-                        self.space.elements().for_each(|window| {
-                            window.set_activated(false);
-                            window.send_pending_configure();
-                        });
-                        keyboard.set_focus(self, None, serial);
-                    }
-                };
-
+                    self.focus_under_pointer();
+                }
                 pointer.button(
                     self,
                     &ButtonEvent {
