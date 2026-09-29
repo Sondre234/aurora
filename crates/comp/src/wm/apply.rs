@@ -440,7 +440,7 @@ impl Aurora {
             win.constraints = constraints;
             win.parent = parent;
         }
-        self.place(id, parent_surface.is_some(), &title);
+        self.place(id, parent_surface.is_some(), &title, None);
         // Nothing to lay out against (no output yet): the client still needs its configure.
         if !initial_configure_sent(surface) {
             toplevel.send_configure();
@@ -448,7 +448,14 @@ impl Aurora {
     }
 
     /// Inserts the window into the layout of the focused output's workspace.
-    pub(super) fn place(&mut self, id: WinId, has_parent: bool, title: &str) {
+    /// `size` is what the client itself asked for, used when no rule sets one.
+    pub(super) fn place(
+        &mut self,
+        id: WinId,
+        has_parent: bool,
+        title: &str,
+        size: Option<(i32, i32)>,
+    ) {
         let Some(active) = self.wm.active_output.clone() else {
             return;
         };
@@ -497,7 +504,13 @@ impl Aurora {
         self.wm.last_full.entry(ws).or_insert(full);
         let workspace = self.wm.workspaces.entry(ws).or_default();
         if decision.floating {
-            let rect = floating_rect(work, parent_rect, constraints, decision.size, params.border);
+            let rect = floating_rect(
+                work,
+                parent_rect,
+                constraints,
+                decision.size.or(size),
+                params.border,
+            );
             let rect = carry_rect(rect, full, frame);
             workspace.add_floating(id, rect);
         } else {
@@ -548,7 +561,7 @@ impl Aurora {
                 .element
                 .toplevel()
                 .map(|t| read_strings(t.wl_surface()).1);
-            self.place(id, has_parent, &title.unwrap_or_default());
+            self.place(id, has_parent, &title.unwrap_or_default(), None);
         }
         // A window opened on a workspace that is not the focused one stays in the background.
         let ws = self.wm.windows.get(&id).map_or(0, |w| w.ws);

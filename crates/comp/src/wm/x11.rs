@@ -91,7 +91,10 @@ impl Aurora {
             self.wm.by_surface.insert(surface.id(), id);
         }
         let float = x11.is_transient_for().is_some() || floats_by_type(&x11);
-        self.place(id, float, &x11.title());
+        // Its own size, set by a configure request before the map, is the default.
+        let asked = x11.geometry().size;
+        let size = (asked.w > 1 && asked.h > 1).then_some((asked.w, asked.h));
+        self.place(id, float, &x11.title(), size);
     }
 
     /// Xwayland paired the window with its wl_surface, possibly after the first buffer.
