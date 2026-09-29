@@ -80,7 +80,11 @@ impl Aurora {
             return;
         };
         if let Err(err) = drm.libinput.resume() {
-            tracing::error!(?err, "failed to resume libinput");
+            // Without input neither the quit chord nor VT switching can be received, so
+            // release the session rather than show a screen nobody can leave.
+            tracing::error!(?err, "failed to resume libinput, stopping");
+            self.loop_signal.stop();
+            return;
         }
         drm.session_active = true;
         for keyboard in &mut drm.keyboards {
