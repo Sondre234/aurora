@@ -31,9 +31,10 @@ fn open_log_file() -> Result<(fs::File, PathBuf), String> {
     Ok((file, path))
 }
 
-/// Log file writer that syncs to disk after every INFO-or-worse event. Those are lifecycle
-/// events (outputs, session, errors), rare enough to afford the sync; debug and trace, which
-/// can be per-frame, are not synced. Unbuffered writes only survive a process crash; the
+/// Log file writer that syncs to disk after every ERROR event. Errors are rare and fatal-ish
+/// enough to afford the sync; warnings and below can repeat per frame, and a sync on the
+/// compositor thread would cost milliseconds each. Unbuffered writes only survive a process
+/// crash; the
 /// sync is what keeps the tail across a hard reset after a black screen.
 struct SyncedFile(Mutex<fs::File>);
 
@@ -59,7 +60,7 @@ impl<'a> MakeWriter<'a> for SyncedFile {
     }
 
     fn make_writer_for(&'a self, meta: &Metadata<'_>) -> Self::Writer {
-        self.writer(*meta.level() <= Level::INFO)
+        self.writer(*meta.level() == Level::ERROR)
     }
 }
 
@@ -86,7 +87,7 @@ pub fn init() {
     let filter = || EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     let stderr = tracing_subscriber::fmt::layer().with_filter(filter());
 
-    // Unbuffered `File` writes, synced for INFO and above (see `SyncedFile`).
+    // Unbuffered `File` writes, synced for ERROR (see `SyncedFile`).
     let file = open_log_file();
     let file_layer = file
         .as_ref()
