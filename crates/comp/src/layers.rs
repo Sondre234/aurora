@@ -29,6 +29,9 @@ pub struct LayerFocus {
     pub exclusive: Option<LayerSurface>,
     /// Where the keyboard goes back to when the exclusive layer goes away.
     pub restore: Option<FocusTarget>,
+    /// The OnDemand layer that took the keyboard by click; dropped once it dies, unmaps or
+    /// stops asking for the keyboard.
+    pub on_demand: Option<LayerSurface>,
 }
 
 pub struct LayerHit {
@@ -222,6 +225,9 @@ impl Aurora {
     pub fn refresh_layer_focus(&mut self) {
         self.sync_top_hidden();
         let want = self.exclusive_candidate();
+        if want.is_none() {
+            self.release_on_demand();
+        }
         if want == self.layer_focus.exclusive {
             return;
         }
@@ -240,16 +246,43 @@ impl Aurora {
                     .restore
                     .take()
                     .filter(|t| t.alive())
-                    .or_else(|| {
-                        self.wm
-                            .focused
-                            .and_then(|id| self.wm.windows.get(&id))
-                            .and_then(|w| w.element.focus_target())
-                    });
+                    .or_else(|| self.window_focus_target());
                 self.layer_focus.restore = None;
                 tracing::info!("focus: layer released");
                 self.set_keyboard_focus(restore);
             }
+        }
+    }
+
+    /// The window that should hold the keyboard when no layer does.
+    fn window_focus_target(&self) -> Option<FocusTarget> {
+        self.wm
+            .focused
+            .and_then(|id| self.wm.windows.get(&id))
+            .and_then(|w| w.element.focus_target())
+    }
+
+    /// Gives the keyboard back to the focused window when the on-demand holder is gone.
+    fn release_on_demand(&mut self) {
+        let Some(layer) = self.layer_focus.on_demand.as_ref() else {
+            return;
+        };
+        let valid = layer.alive()
+            && interactivity(layer) == KeyboardInteractivity::OnDemand
+            && crate::wm::apply::has_buffer(layer.wl_surface());
+        if valid {
+            return;
+        }
+        let surface = layer.wl_surface().clone();
+        self.layer_focus.on_demand = None;
+        let holds = self
+            .keyboard
+            .current_focus()
+            .is_none_or(|f| !f.alive() || f == FocusTarget::Wl(surface));
+        if holds {
+            tracing::info!("focus: on-demand layer released");
+            let target = self.window_focus_target();
+            self.set_keyboard_focus(target);
         }
     }
 
@@ -339,6 +372,7 @@ impl Aurora {
             return;
         }
         tracing::info!("focus: layer:{}", layer.namespace());
+        self.layer_focus.on_demand = Some(layer.clone());
         self.set_keyboard_focus(Some(target));
     }
 
