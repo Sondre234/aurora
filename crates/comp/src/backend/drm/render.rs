@@ -15,17 +15,12 @@ use smithay::{
             element::{
                 Kind, RenderElementStates,
                 memory::MemoryRenderBufferRenderElement,
-                render_elements,
                 surface::{WaylandSurfaceRenderElement, render_elements_from_surface_tree},
             },
             gles::GlesRenderer,
         },
     },
-    desktop::{
-        Space, Window,
-        space::{SpaceRenderElements, space_render_elements},
-        utils::bbox_from_surface_tree,
-    },
+    desktop::{Space, utils::bbox_from_surface_tree},
     input::pointer::{CursorImageAttributes, CursorImageStatus},
     output::Output,
     reexports::{
@@ -47,20 +42,13 @@ use super::{
 };
 use crate::{
     backend::{BACKGROUND, Backend},
+    scene::{OutputElement, output_elements},
     state::{Aurora, take_presentation_feedback, update_primary_scanout_output},
+    wm::window::WindowElement,
 };
 
 /// Consecutive temporary render failures tolerated before waiting for the next damage.
 const MAX_RETRIES: u32 = 60;
-
-render_elements! {
-    /// Everything one output draws. The cursor is first so DrmCompositor can put it on the
-    /// cursor plane.
-    pub OutputElement<=GlesRenderer>;
-    Cursor=MemoryRenderBufferRenderElement<GlesRenderer>,
-    CursorSurface=WaylandSurfaceRenderElement<GlesRenderer>,
-    Space=SpaceRenderElements<GlesRenderer, WaylandSurfaceRenderElement<GlesRenderer>>,
-}
 
 enum Scheduled {
     Idle(Idle<'static>),
@@ -548,7 +536,7 @@ impl Aurora {
 fn render_output(
     surface: &mut super::device::Surface,
     renderer: &mut GlesRenderer,
-    space: &Space<Window>,
+    space: &Space<WindowElement>,
     pointer_location: Point<f64, Logical>,
     cursor_status: &mut CursorImageStatus,
     cursors: &mut CursorCache,
@@ -568,9 +556,9 @@ fn render_output(
         scale,
         output.current_scale().integer_scale(),
     );
-    match space_render_elements(renderer, [space], &output, 1.0) {
-        Ok(space_elements) => elements.extend(space_elements.into_iter().map(OutputElement::from)),
-        Err(_) => return Ok(None),
+    match output_elements(space, renderer, &output) {
+        Some(scene) => elements.extend(scene),
+        None => return Ok(None),
     }
 
     let result = surface

@@ -26,5 +26,5 @@ workspace = true
 features = [
     "backend_winit", "wayland_frontend", "desktop",
     "backend_drm", "backend_gbm", "backend_egl", "renderer_gl", "backend_libinput",
-    "backend_udev", "backend_session_libseat", "renderer_pixman",
+    "backend_udev", "backend_session_libseat", "renderer_pixman", "xwayland",
 ]

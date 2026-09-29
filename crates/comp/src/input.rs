@@ -7,7 +7,6 @@ use smithay::{
         keyboard::FilterResult,
         pointer::{AxisFrame, ButtonEvent, MotionEvent, RelativeMotionEvent},
     },
-    reexports::wayland_server::protocol::wl_surface::WlSurface,
     utils::{Logical, Point, Rectangle, SERIAL_COUNTER},
 };
 
@@ -229,20 +228,16 @@ impl Aurora {
                     {
                         self.space.raise_element(&window, true);
                         self.queue_redraw_all();
-                        keyboard.set_focus(
-                            self,
-                            Some(window.toplevel().unwrap().wl_surface().clone()),
-                            serial,
-                        );
-                        self.space.elements().for_each(|window| {
-                            window.toplevel().unwrap().send_pending_configure();
-                        });
+                        keyboard.set_focus(self, window.focus_target(), serial);
+                        self.space
+                            .elements()
+                            .for_each(|w| w.send_pending_configure());
                     } else {
                         self.space.elements().for_each(|window| {
                             window.set_activated(false);
-                            window.toplevel().unwrap().send_pending_configure();
+                            window.send_pending_configure();
                         });
-                        keyboard.set_focus(self, Option::<WlSurface>::None, serial);
+                        keyboard.set_focus(self, None, serial);
                     }
                 };
 

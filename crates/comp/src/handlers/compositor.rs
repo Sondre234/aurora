@@ -1,4 +1,6 @@
-use crate::{Aurora, state::ClientState};
+use crate::{Aurora, state::ClientState, wm::window::window_for_surface};
+use std::sync::OnceLock;
+
 use smithay::{
     backend::renderer::utils::on_commit_buffer_handler,
     desktop::PopupKind,
@@ -16,6 +18,7 @@ use smithay::{
         },
         shm::{ShmHandler, ShmState},
     },
+    xwayland::XWaylandClientData,
 };
 
 use super::xdg_shell;
@@ -26,7 +29,16 @@ impl CompositorHandler for Aurora {
     }
 
     fn client_compositor_state<'a>(&self, client: &'a Client) -> &'a CompositorClientState {
-        &client.get_data::<ClientState>().unwrap().compositor_state
+        if let Some(data) = client.get_data::<XWaylandClientData>() {
+            return &data.compositor_state;
+        }
+        if let Some(data) = client.get_data::<ClientState>() {
+            return &data.compositor_state;
+        }
+        // Unknown client data never happens by construction; a shared default keeps a
+        // misregistered client from taking the compositor down.
+        static FALLBACK: OnceLock<CompositorClientState> = OnceLock::new();
+        FALLBACK.get_or_init(CompositorClientState::default)
     }
 
     fn new_surface(&mut self, surface: &WlSurface) {
@@ -41,11 +53,7 @@ impl CompositorHandler for Aurora {
         let mut outputs = Vec::new();
         if !sync_subsurface {
             let root = root_surface(surface);
-            let window = self
-                .space
-                .elements()
-                .find(|w| w.toplevel().unwrap().wl_surface() == &root)
-                .cloned();
+            let window = window_for_surface(&self.space, &root).cloned();
             if let Some(window) = window {
                 window.on_commit();
                 outputs = self.space.outputs_for_element(&window);
@@ -104,11 +112,7 @@ impl Aurora {
             _ => None,
         }) {
             let parent = root_surface(&parent);
-            if let Some(window) = self
-                .space
-                .elements()
-                .find(|w| w.toplevel().unwrap().wl_surface() == &parent)
-            {
+            if let Some(window) = window_for_surface(&self.space, &parent) {
                 return self.space.outputs_for_element(window);
             }
         }

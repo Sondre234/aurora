@@ -1,7 +1,8 @@
 mod compositor;
 mod xdg_shell;
+mod xwayland;
 
-use crate::Aurora;
+use crate::{Aurora, focus::FocusTarget};
 
 //
 // Wl Seat
@@ -9,20 +10,22 @@ use crate::Aurora;
 
 use smithay::input::dnd::{DnDGrab, DndGrabHandler, GrabType, Source};
 use smithay::input::pointer::{CursorImageStatus, Focus};
+use smithay::input::tablet::TabletSeatHandler;
 use smithay::input::{Seat, SeatHandler, SeatState};
 use smithay::reexports::wayland_server::Resource;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::Serial;
 use smithay::wayland::output::OutputHandler;
 use smithay::wayland::pointer_constraints::PointerConstraintsHandler;
+use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::selection::SelectionHandler;
 use smithay::wayland::selection::data_device::{
     DataDeviceHandler, DataDeviceState, WaylandDndGrabHandler, set_data_device_focus,
 };
 
 impl SeatHandler for Aurora {
-    type KeyboardFocus = WlSurface;
-    type PointerFocus = WlSurface;
+    type KeyboardFocus = FocusTarget;
+    type PointerFocus = FocusTarget;
     type TouchFocus = WlSurface;
 
     fn seat_state(&mut self) -> &mut SeatState<Aurora> {
@@ -34,11 +37,17 @@ impl SeatHandler for Aurora {
         self.queue_redraw_all();
     }
 
-    fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&WlSurface>) {
+    fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&FocusTarget>) {
         let dh = &self.display_handle;
-        let client = focused.and_then(|s| dh.get_client(s.id()).ok());
+        let client = focused
+            .and_then(|f| f.wl_surface())
+            .and_then(|s| dh.get_client(s.id()).ok());
         set_data_device_focus(dh, seat, client);
     }
+}
+
+impl TabletSeatHandler for Aurora {
+    type ToolFocus = WlSurface;
 }
 
 impl PointerConstraintsHandler for Aurora {}
@@ -69,8 +78,14 @@ impl WaylandDndGrabHandler for Aurora {
     ) {
         match type_ {
             GrabType::Pointer => {
-                let ptr = seat.get_pointer().unwrap();
-                let start_data = ptr.grab_start_data().unwrap();
+                let Some(ptr) = seat.get_pointer() else {
+                    source.cancel();
+                    return;
+                };
+                let Some(start_data) = ptr.grab_start_data() else {
+                    source.cancel();
+                    return;
+                };
 
                 // create a dnd grab to start the operation
                 let grab = DnDGrab::new_pointer(&self.display_handle, start_data, source, seat);

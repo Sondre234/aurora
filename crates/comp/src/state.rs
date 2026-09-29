@@ -1,6 +1,8 @@
 use std::{ffi::OsString, path::PathBuf, sync::Arc, time::Duration};
 
 use crate::config::Config;
+use crate::focus::FocusTarget;
+use crate::wm::window::WindowElement;
 use crate::{backend::Backend, dmabuf::SurfaceDmabufFeedback};
 use smithay::input::keyboard::Keycode;
 
@@ -9,7 +11,7 @@ use smithay::{
         RenderElementStates, default_primary_scanout_output_compare, utils::select_dmabuf_feedback,
     },
     desktop::{
-        PopupManager, Space, Window, WindowSurfaceType, layer_map_for_output,
+        PopupManager, Space, WindowSurface, WindowSurfaceType, layer_map_for_output,
         utils::{
             OutputPresentationFeedback, send_frames_surface_tree,
             surface_presentation_feedback_flags_from_states, surface_primary_scanout_output,
@@ -63,7 +65,7 @@ pub struct Aurora {
     pub loop_signal: LoopSignal,
     pub handle: LoopHandle<'static, Aurora>,
 
-    pub space: Space<Window>,
+    pub space: Space<WindowElement>,
     pub popups: PopupManager,
 
     pub compositor_state: CompositorState,
@@ -180,13 +182,19 @@ impl Aurora {
     pub fn surface_under(
         &self,
         pos: Point<f64, Logical>,
-    ) -> Option<(WlSurface, Point<f64, Logical>)> {
+    ) -> Option<(FocusTarget, Point<f64, Logical>)> {
         self.space
             .element_under(pos)
             .and_then(|(window, location)| {
                 window
                     .surface_under(pos - location.to_f64(), WindowSurfaceType::ALL)
-                    .map(|(surface, p)| (surface, (p + location).to_f64()))
+                    .map(|(surface, p)| {
+                        let target = match window.underlying_surface() {
+                            WindowSurface::X11(x11) => FocusTarget::X11(x11.clone()),
+                            WindowSurface::Wayland(_) => FocusTarget::Wl(surface),
+                        };
+                        (target, (p + location).to_f64())
+                    })
             })
     }
 
@@ -238,7 +246,7 @@ impl Aurora {
 
 /// Records which output each surface is mostly presented on, from the last frame's element states.
 pub fn update_primary_scanout_output(
-    space: &Space<Window>,
+    space: &Space<WindowElement>,
     output: &Output,
     cursor_status: &CursorImageStatus,
     states: &RenderElementStates,
@@ -267,7 +275,7 @@ pub fn update_primary_scanout_output(
 /// Collects the presentation feedback requested by everything visible on `output`.
 pub fn take_presentation_feedback(
     output: &Output,
-    space: &Space<Window>,
+    space: &Space<WindowElement>,
     states: &RenderElementStates,
 ) -> OutputPresentationFeedback {
     let mut feedback = OutputPresentationFeedback::new(output);

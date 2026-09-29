@@ -34,7 +34,7 @@ use smithay_drm_extras::{
     drm_scanner::{DrmScanEvent, DrmScanner},
 };
 
-use super::render::{OutputElement, RenderState, vblank_handler};
+use super::render::{RenderState, vblank_handler};
 use crate::{
     backend::Backend,
     dmabuf::{SurfaceDmabufFeedback, surface_feedback},
@@ -47,7 +47,7 @@ pub type Feedback = Option<OutputPresentationFeedback>;
 pub type OutputManager = DrmOutputManager<Allocator, Exporter, Feedback, DrmDeviceFd>;
 pub type ConnectorOutput = DrmOutput<Allocator, Exporter, Feedback, DrmDeviceFd>;
 /// Element type the DRM compositor is instantiated with; the render loop uses the same.
-pub type Element = OutputElement;
+pub type Element = crate::scene::OutputElement;
 
 // Not Argb2101010-only: some drivers expose just one channel order, so both are offered.
 const FORMATS: &[Fourcc] = &[

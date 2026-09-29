@@ -13,7 +13,10 @@ use smithay::{
     },
 };
 
-use crate::Aurora;
+use crate::{
+    Aurora,
+    wm::window::{WindowElement, window_for_surface},
+};
 
 impl XdgShellHandler for Aurora {
     fn xdg_shell_state(&mut self) -> &mut XdgShellState {
@@ -21,7 +24,7 @@ impl XdgShellHandler for Aurora {
     }
 
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
-        let window = Window::new_wayland_window(surface);
+        let window = WindowElement::new(Window::new_wayland_window(surface));
         self.space.map_element(window, (0, 0), false);
     }
 
@@ -61,25 +64,19 @@ impl XdgShellHandler for Aurora {
 }
 
 /// Should be called on `WlSurface::commit`
-pub fn handle_commit(popups: &mut PopupManager, space: &Space<Window>, surface: &WlSurface) {
+pub fn handle_commit(popups: &mut PopupManager, space: &Space<WindowElement>, surface: &WlSurface) {
     // Handle toplevel commits.
-    if let Some(window) = space
-        .elements()
-        .find(|w| w.toplevel().unwrap().wl_surface() == surface)
-        .cloned()
-    {
+    if let Some(toplevel) = window_for_surface(space, surface).and_then(|w| w.toplevel()) {
         let initial_configure_sent = with_states(surface, |states| {
             states
                 .data_map
                 .get::<XdgToplevelSurfaceData>()
-                .unwrap()
-                .lock()
-                .unwrap()
-                .initial_configure_sent
+                .and_then(|data| data.lock().ok())
+                .is_some_and(|data| data.initial_configure_sent)
         });
 
         if !initial_configure_sent {
-            window.toplevel().unwrap().send_configure();
+            toplevel.send_configure();
         }
     }
 
@@ -106,15 +103,12 @@ impl Aurora {
         let Ok(root) = find_popup_root_surface(&PopupKind::Xdg(popup.clone())) else {
             return;
         };
-        let Some(window) = self
-            .space
-            .elements()
-            .find(|w| w.toplevel().unwrap().wl_surface() == &root)
-        else {
+        let Some(window) = window_for_surface(&self.space, &root) else {
             return;
         };
-
-        let window_geo = self.space.element_geometry(window).unwrap();
+        let Some(window_geo) = self.space.element_geometry(window) else {
+            return;
+        };
 
         // Output with the largest overlap with the window; first output if none overlaps.
         let overlap = |g: smithay::utils::Rectangle<i32, smithay::utils::Logical>| {

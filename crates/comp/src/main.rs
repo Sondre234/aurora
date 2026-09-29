@@ -4,16 +4,19 @@ mod cli;
 mod config;
 mod dmabuf;
 mod emergency;
+mod focus;
 mod handlers;
 mod input;
 mod keymap;
 mod libinput;
 mod log;
 mod safety;
+mod scene;
 mod session;
 mod spawn;
 mod state;
 mod syncobj;
+mod wm;
 
 use smithay::reexports::{calloop::EventLoop, wayland_server::Display};
 

@@ -2,18 +2,18 @@ use std::time::Duration;
 
 use smithay::{
     backend::{
-        renderer::{
-            ImportDma, damage::OutputDamageTracker, element::surface::WaylandSurfaceRenderElement,
-            gles::GlesRenderer,
-        },
-        winit::{self, WinitEvent},
+        renderer::{ImportDma, damage::OutputDamageTracker, gles::GlesRenderer},
+        winit::{self, WinitEvent, WinitGraphicsBackend},
     },
+    desktop::Space,
     output::{Mode, Output, PhysicalProperties, Subpixel},
     reexports::calloop::EventLoop,
     utils::{Rectangle, Transform},
 };
 
-use crate::{backend::BACKGROUND, state::Aurora};
+use crate::{
+    backend::BACKGROUND, scene::output_elements, state::Aurora, wm::window::WindowElement,
+};
 
 /// Nested backend: renders into a window on the host compositor.
 pub fn init(
@@ -70,27 +70,11 @@ pub fn init(
             WinitEvent::Input(event) => state.process_input_event(event),
             WinitEvent::Redraw => {
                 let size = backend.window_size();
-                {
-                    let (renderer, mut framebuffer) = backend.bind().unwrap();
-                    smithay::desktop::space::render_output::<
-                        _,
-                        WaylandSurfaceRenderElement<GlesRenderer>,
-                        _,
-                        _,
-                    >(
-                        &output,
-                        renderer,
-                        &mut framebuffer,
-                        1.0,
-                        0,
-                        [&state.space],
-                        &[],
-                        &mut damage_tracker,
-                        BACKGROUND,
-                    )
-                    .unwrap();
+                if let Err(err) = draw(&mut backend, &mut damage_tracker, &state.space, &output) {
+                    tracing::warn!(%err, "nested frame failed");
+                } else if let Err(err) = backend.submit(Some(&[Rectangle::from_size(size)])) {
+                    tracing::warn!(%err, "nested swap failed");
                 }
-                backend.submit(Some(&[Rectangle::from_size(size)])).unwrap();
 
                 state.space.elements().for_each(|window| {
                     window.send_frame(
@@ -110,5 +94,20 @@ pub fn init(
             _ => (),
         })?;
 
+    Ok(())
+}
+
+/// Renders the scene of `output` into the window's back buffer.
+fn draw(
+    backend: &mut WinitGraphicsBackend<GlesRenderer>,
+    damage_tracker: &mut OutputDamageTracker,
+    space: &Space<WindowElement>,
+    output: &Output,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (renderer, mut framebuffer) = backend.bind()?;
+    let elements = output_elements(space, renderer, output).ok_or("output is not mapped")?;
+    damage_tracker
+        .render_output(renderer, &mut framebuffer, 0, &elements, BACKGROUND)
+        .map_err(|err| format!("{err:?}"))?;
     Ok(())
 }
