@@ -205,6 +205,10 @@ impl Aurora {
         let Backend::Drm(drm) = &mut self.backend else {
             return;
         };
+        // activate_session rescans; scanning now would record connectors we cannot initialize.
+        if !drm.session_active {
+            return;
+        }
         let Some(device) = drm.devices.get_mut(&node) else {
             return;
         };
