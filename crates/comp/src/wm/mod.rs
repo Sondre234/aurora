@@ -165,11 +165,11 @@ impl Wm {
         let Some(workspace) = self.workspaces.get(&win.ws) else {
             return true;
         };
-        let Some((front, mode)) = workspace.fullscreen() else {
+        let Some((front, _)) = workspace.fullscreen() else {
             return true;
         };
-        // Tiled descendants are cut from the placements while something is fullscreen.
-        if mode == FsMode::Fullscreen && id != front && workspace.floating_rect(id).is_none() {
+        // Tiled descendants are cut from the placements while something is fullscreen or maximized.
+        if id != front && workspace.floating_rect(id).is_none() {
             return false;
         }
         let mut cur = Some(id);

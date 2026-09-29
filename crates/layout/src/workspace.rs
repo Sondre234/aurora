@@ -243,12 +243,14 @@ impl Workspace {
             },
         };
 
-        if let Some((_, FsMode::Fullscreen)) = fs {
+        // Either mode hides every other window of the workspace, except the front window's
+        // transient descendants (see `Wm::is_visible`).
+        if let Some((id, mode)) = fs {
+            let tiled_front = out[start..].iter().any(|p| p.id == id);
             out.truncate(start);
-        } else if let Some((id, mode @ FsMode::Maximized)) = fs
-            && let Some(p) = out[start..].iter_mut().find(|p| p.id == id)
-        {
-            *p = fs_placement(id, mode);
+            if mode == FsMode::Maximized && tiled_front {
+                out.push(fs_placement(id, mode));
+            }
         }
 
         // The fullscreen window goes first so its transients stack above it.
@@ -262,6 +264,7 @@ impl Workspace {
             match fs {
                 Some((f, FsMode::Fullscreen)) if f == id => continue,
                 Some((f, FsMode::Fullscreen)) if !self.is_descendant(id, f) => continue,
+                Some((f, FsMode::Maximized)) if f != id && !self.is_descendant(id, f) => continue,
                 Some((f, mode @ FsMode::Maximized)) if f == id => {
                     out.push(fs_placement(id, mode));
                     continue;
@@ -382,7 +385,7 @@ mod tests {
         let out = place(&mut ws);
         let m = out.iter().find(|p| p.id == w(2)).unwrap();
         assert_eq!((m.outer, m.content, m.kind), (WORK, WORK, Kind::Maximized));
-        assert_eq!(out.len(), 3);
+        assert_eq!(out.len(), 1);
         assert!(!ws.set_fullscreen(w(99), Some(FsMode::Maximized)));
     }
 
@@ -393,7 +396,7 @@ mod tests {
         let out = place(&mut ws);
         let m = out.iter().find(|p| p.id == w(3)).unwrap();
         assert_eq!((m.outer, m.kind), (WORK, Kind::Maximized));
-        assert_eq!(out.len(), 3);
+        assert_eq!(out.len(), 1);
     }
     #[test]
     fn rebase_scales_floating_and_keeps_it_inside() {
