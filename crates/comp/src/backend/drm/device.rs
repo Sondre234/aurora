@@ -279,6 +279,32 @@ impl Aurora {
         }
     }
 
+    /// The connector that stays on when the config disables every connected one, so a bad
+    /// config or reload never leaves the session without a display: the primary, else the
+    /// first by name.
+    fn forced_output(&self) -> Option<String> {
+        let Backend::Drm(drm) = &self.backend else {
+            return None;
+        };
+        let mut names: Vec<String> = drm
+            .devices
+            .values()
+            .flat_map(|d| d.scanner.crtcs().map(|(info, _)| connector_name(info)))
+            .collect();
+        if names
+            .iter()
+            .any(|n| self.output_rule(n).is_none_or(|r| r.enabled))
+        {
+            return None;
+        }
+        names.sort();
+        names
+            .iter()
+            .find(|n| self.output_rule(n).is_some_and(|r| r.primary))
+            .or(names.first())
+            .cloned()
+    }
+
     fn connector_connected(
         &mut self,
         node: DrmNode,
@@ -287,7 +313,11 @@ impl Aurora {
     ) {
         let name = connector_name(&connector);
         let rule = self.output_rule(&name).cloned();
-        if rule.as_ref().is_some_and(|r| !r.enabled) {
+        let forced = self.forced_output().as_deref() == Some(name.as_str());
+        if forced {
+            tracing::warn!("output: {name} stays on although the config disables every output");
+        }
+        if !forced && rule.as_ref().is_some_and(|r| !r.enabled) {
             tracing::info!("output: {name} disabled by config");
             if let Backend::Drm(drm) = &mut self.backend
                 && let Some(device) = drm.devices.get_mut(&node)
@@ -540,6 +570,7 @@ impl Aurora {
         let mut disable = Vec::new();
         let mut enable = Vec::new();
         let mut mode_changed = false;
+        let forced = self.forced_output();
         {
             let Backend::Drm(drm) = &mut self.backend else {
                 return;
@@ -557,7 +588,8 @@ impl Aurora {
                 for (info, crtc) in connectors {
                     let name = connector_name(&info);
                     let rule = config.outputs.iter().find(|r| r.name == name);
-                    let enabled = rule.is_none_or(|r| r.enabled);
+                    let enabled =
+                        rule.is_none_or(|r| r.enabled) || forced.as_deref() == Some(name.as_str());
                     let live = device.surfaces.contains_key(&crtc);
                     if live && !enabled {
                         disable.push((*node, info, crtc));
