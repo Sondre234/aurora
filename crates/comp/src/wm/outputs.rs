@@ -278,10 +278,19 @@ impl Aurora {
             // Parents first, so transients find theirs in the new workspace.
             order.sort_by_key(|id| self.wm.windows.get(id).is_some_and(|w| w.parent.is_some()));
             for id in order {
+                // A window already rescued from another absent output keeps that origin, so
+                // each output takes back only its own windows.
+                let origin = self
+                    .wm
+                    .windows
+                    .get(&id)
+                    .and_then(|w| w.rescued_from.as_ref())
+                    .map(|r| r.output.clone())
+                    .filter(|o| *o != name && !self.wm.outputs.iter().any(|x| x.name() == *o));
                 self.relocate(id, to);
                 if let Some(win) = self.wm.windows.get_mut(&id) {
                     win.rescued_from = Some(Rescue {
-                        output: name.clone(),
+                        output: origin.unwrap_or_else(|| name.clone()),
                         to_ws: to,
                     });
                     rescued += 1;
