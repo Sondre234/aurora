@@ -538,6 +538,7 @@ impl Aurora {
 
 /// Builds the element list and renders it; queues the frame for scanout if anything changed.
 /// `Ok(None)` means the output has no place in the layout right now.
+#[allow(clippy::too_many_arguments)]
 fn render_output(
     surface: &mut super::device::Surface,
     renderer: &mut GlesRenderer,

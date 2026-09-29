@@ -252,7 +252,12 @@ fn copy_into(frame: &Frame, output: &Output, rgba: &[u8]) -> Result<Size<i32, Bu
         let dst = unsafe { std::slice::from_raw_parts_mut(ptr, len) };
         for (y, row) in rgba.chunks_exact(w * 4).enumerate() {
             let out = &mut dst[offset + y * stride..][..w * 4];
-            for (o, p) in out.chunks_exact_mut(4).zip(row.chunks_exact(4)) {
+            for (o, p) in out
+                .as_chunks_mut::<4>()
+                .0
+                .iter_mut()
+                .zip(row.as_chunks::<4>().0)
+            {
                 // Memory order is B, G, R, A for both formats.
                 o[0] = p[2];
                 o[1] = p[1];
