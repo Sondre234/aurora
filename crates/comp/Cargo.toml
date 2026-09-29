@@ -12,6 +12,8 @@ path = "src/main.rs"
 [dependencies]
 tracing.workspace = true
 tracing-subscriber.workspace = true
+# Not used directly: enables the signals source in the calloop smithay re-exports.
+calloop = { version = "0.14", features = ["signals"] }
 
 [dependencies.smithay]
 workspace = true

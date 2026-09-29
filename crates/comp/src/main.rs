@@ -1,45 +1,58 @@
+mod backend;
+mod cli;
 mod handlers;
 mod input;
+mod log;
+mod safety;
 mod state;
-mod winit;
 
 use smithay::reexports::{calloop::EventLoop, wayland_server::Display};
 
+use backend::Backend;
+use cli::{BackendKind, Cli};
 use state::Aurora;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    init_logging();
+    log::install_panic_hook();
+    log::init();
 
+    let cli = Cli::parse()?;
+    tracing::info!(backend = ?cli.backend, timeout = ?cli.timeout, "aurora starting");
+
+    // Declared before `state` so the state (seat, session, devices) drops first.
     let mut event_loop: EventLoop<Aurora> = EventLoop::try_new()?;
     let display: Display<Aurora> = Display::new()?;
-    let mut state = Aurora::new(&mut event_loop, display);
 
-    winit::init(&mut event_loop, &mut state)?;
+    let backend = match cli.backend {
+        BackendKind::Winit => Backend::Winit,
+        BackendKind::Drm => return Err("the DRM backend is not implemented yet".into()),
+    };
+    let mut state = Aurora::new(&mut event_loop, display, backend);
+
+    let handle = event_loop.handle();
+    safety::insert_signals(&handle);
+    if let Some(timeout) = cli.timeout {
+        safety::insert_timeout(&handle, timeout);
+    }
+
+    match cli.backend {
+        BackendKind::Winit => backend::winit::init(&mut event_loop, &mut state)?,
+        BackendKind::Drm => unreachable!("rejected above"),
+    }
 
     // Children spawned from here on connect to us, not the host compositor.
     unsafe { std::env::set_var("WAYLAND_DISPLAY", &state.socket_name) };
     tracing::info!(socket = ?state.socket_name, "aurora listening");
 
-    spawn_client();
+    spawn_client(&cli.command);
 
     event_loop.run(None, &mut state, |_| {})?;
+    tracing::info!("aurora exiting");
     Ok(())
 }
 
-fn init_logging() {
-    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
-    tracing_subscriber::fmt().with_env_filter(filter).init();
-}
-
-/// `aurora-comp -c <command>` runs a client on startup; defaults to kitty.
-fn spawn_client() {
-    let mut args = std::env::args().skip(1);
-    let command = match (args.next().as_deref(), args.next()) {
-        (Some("-c" | "--command"), Some(cmd)) => cmd,
-        _ => "kitty".to_string(),
-    };
-    if let Err(err) = std::process::Command::new(&command).spawn() {
+fn spawn_client(command: &str) {
+    if let Err(err) = std::process::Command::new(command).spawn() {
         tracing::warn!(%command, %err, "failed to spawn startup client");
     }
 }

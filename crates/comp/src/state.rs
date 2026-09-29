@@ -1,8 +1,10 @@
 use std::{ffi::OsString, sync::Arc};
 
+use crate::backend::Backend;
+
 use smithay::{
     desktop::{PopupManager, Space, Window, WindowSurfaceType},
-    input::{Seat, SeatState},
+    input::{Seat, SeatState, pointer::CursorImageStatus},
     reexports::{
         calloop::{EventLoop, Interest, LoopSignal, Mode, PostAction, generic::Generic},
         wayland_server::{
@@ -11,7 +13,7 @@ use smithay::{
             protocol::wl_surface::WlSurface,
         },
     },
-    utils::{Logical, Point},
+    utils::{Clock, Logical, Monotonic, Point},
     wayland::{
         compositor::{CompositorClientState, CompositorState},
         output::OutputManagerState,
@@ -22,8 +24,15 @@ use smithay::{
     },
 };
 
+/// Keyboard repeat delay (ms) and rate (keys per second).
+pub const REPEAT_DELAY: i32 = 250;
+pub const REPEAT_RATE: i32 = 40;
+
 pub struct Aurora {
-    pub start_time: std::time::Instant,
+    #[allow(dead_code)] // read by the DRM paths in later M1 steps
+    pub backend: Backend,
+    pub clock: Clock<Monotonic>,
+    pub cursor_status: CursorImageStatus,
     pub socket_name: OsString,
     pub display_handle: DisplayHandle,
     pub loop_signal: LoopSignal,
@@ -43,7 +52,7 @@ pub struct Aurora {
 }
 
 impl Aurora {
-    pub fn new(event_loop: &mut EventLoop<Self>, display: Display<Self>) -> Self {
+    pub fn new(event_loop: &mut EventLoop<Self>, display: Display<Self>, backend: Backend) -> Self {
         let dh = display.handle();
 
         let compositor_state = CompositorState::new::<Self>(&dh);
@@ -53,15 +62,17 @@ impl Aurora {
         let data_device_state = DataDeviceState::new::<Self>(&dh);
 
         let mut seat_state = SeatState::new();
-        let mut seat: Seat<Self> = seat_state.new_wl_seat(&dh, "aurora");
+        let mut seat: Seat<Self> = seat_state.new_wl_seat(&dh, backend.seat_name());
         // Hotplug tracking arrives with the DRM backend (M1).
-        seat.add_keyboard(Default::default(), 200, 25).unwrap();
+        seat.add_keyboard(Default::default(), REPEAT_DELAY, REPEAT_RATE).unwrap();
         seat.add_pointer();
 
         let socket_name = Self::init_wayland_listener(display, event_loop);
 
         Self {
-            start_time: std::time::Instant::now(),
+            backend,
+            clock: Clock::new(),
+            cursor_status: CursorImageStatus::default_named(),
             socket_name,
             display_handle: dh,
             loop_signal: event_loop.get_signal(),

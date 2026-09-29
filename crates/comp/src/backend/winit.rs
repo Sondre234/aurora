@@ -17,7 +17,7 @@ use crate::state::Aurora;
 
 const BACKGROUND: [f32; 4] = [0.06, 0.06, 0.09, 1.0];
 
-/// Nested backend: renders into a window on the host compositor. M0 only.
+/// Nested backend: renders into a window on the host compositor.
 pub fn init(event_loop: &mut EventLoop<Aurora>, state: &mut Aurora) -> Result<(), Box<dyn std::error::Error>> {
     let (mut backend, winit) = winit::init()?;
 
@@ -64,7 +64,7 @@ pub fn init(event_loop: &mut EventLoop<Aurora>, state: &mut Aurora) -> Result<()
             backend.submit(Some(&[Rectangle::from_size(size)])).unwrap();
 
             state.space.elements().for_each(|window| {
-                window.send_frame(&output, state.start_time.elapsed(), Some(Duration::ZERO), |_, _| {
+                window.send_frame(&output, Duration::from(state.clock.now()), Some(Duration::ZERO), |_, _| {
                     Some(output.clone())
                 })
             });
