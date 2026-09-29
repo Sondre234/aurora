@@ -97,6 +97,14 @@ impl Aurora {
     /// motion, but only acts on a change, so a stationary hover never steals focus back.
     pub fn update_hover(&mut self) {
         let pos = self.pointer.current_location();
+        // The output under the pointer is the active one, even when it shows no window.
+        if let Some(output) = self.output_at(pos)
+            && self.wm.active_output.as_ref() != Some(&output)
+            && !self.pointer.is_grabbed()
+        {
+            tracing::info!("output: active name={}", output.name());
+            self.wm.active_output = Some(output);
+        }
         let hover = match self.hit_test(pos) {
             Hit::Window(window, _) => Some(window.id()),
             _ => None,

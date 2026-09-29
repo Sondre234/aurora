@@ -3,7 +3,7 @@ use std::sync::OnceLock;
 
 use smithay::{
     backend::renderer::utils::on_commit_buffer_handler,
-    desktop::PopupKind,
+    desktop::{PopupKind, utils::surface_primary_scanout_output},
     input::pointer::CursorImageStatus,
     output::Output,
     reexports::wayland_server::{
@@ -14,8 +14,9 @@ use smithay::{
         buffer::BufferHandler,
         compositor::{
             CompositorClientState, CompositorHandler, CompositorState, get_parent,
-            is_sync_subsurface,
+            is_sync_subsurface, with_states,
         },
+        fractional_scale::{FractionalScaleHandler, with_fractional_scale},
         shm::{ShmHandler, ShmState},
     },
     xwayland::XWaylandClientData,
@@ -138,5 +139,33 @@ impl BufferHandler for Aurora {
 impl ShmHandler for Aurora {
     fn shm_state(&self) -> &ShmState {
         &self.shm_state
+    }
+}
+
+impl FractionalScaleHandler for Aurora {
+    /// Seeds the preferred scale before the surface has been presented anywhere: the output it
+    /// was last presented on, else the one its window or layer sits on, else the primary one.
+    fn new_fractional_scale(&mut self, surface: WlSurface) {
+        let root = root_surface(&surface);
+        let presented =
+            |s: &WlSurface| with_states(s, |data| surface_primary_scanout_output(s, data));
+        let output = presented(&surface)
+            .or_else(|| presented(&root))
+            .or_else(|| {
+                let win = self.wm.window_of(&root)?;
+                self.wm.output_for_ws(win.ws).or_else(|| {
+                    self.space
+                        .outputs_for_element(&win.element)
+                        .first()
+                        .cloned()
+                })
+            })
+            .or_else(|| self.layer_of(&root).map(|(output, _)| output))
+            .or_else(|| self.primary_output());
+        let Some(output) = output else { return };
+        let scale = output.current_scale().fractional_scale();
+        with_states(&surface, |data| {
+            with_fractional_scale(data, |fs| fs.set_preferred_scale(scale));
+        });
     }
 }

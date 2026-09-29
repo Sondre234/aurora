@@ -49,7 +49,7 @@ impl Aurora {
                 let Some(geo) = self
                     .space
                     .outputs()
-                    .next()
+                    .find(|o| o.name() == "winit")
                     .and_then(|o| self.space.output_geometry(o))
                 else {
                     return;

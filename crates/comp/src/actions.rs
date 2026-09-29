@@ -47,13 +47,30 @@ impl Aurora {
             Action::ToggleFloating => self.toggle_floating(),
             Action::Fullscreen => self.toggle_mode(FsMode::Fullscreen),
             Action::Maximize => self.toggle_mode(FsMode::Maximized),
+            Action::FocusOutput(dir) => self.focus_output_dir(dir),
+            Action::MoveToOutput(dir) => self.move_to_output_dir(dir),
+            Action::DebugAddOutput {
+                name,
+                size,
+                refresh_mhz,
+                pos,
+            } => {
+                if self.qa {
+                    self.debug_add_output(name, size, refresh_mhz, pos);
+                } else {
+                    tracing::warn!("debug-add-output ignored: not running with --qa");
+                }
+            }
+            Action::DebugRemoveOutput(name) => {
+                if self.qa {
+                    self.debug_remove_output(&name);
+                } else {
+                    tracing::warn!("debug-remove-output ignored: not running with --qa");
+                }
+            }
             // Drags start from the button press itself (see `on_pointer_button`), so as a
-            // key bind they do nothing. Output actions come with the multi-monitor step.
-            Action::FocusOutput(_)
-            | Action::MoveToOutput(_)
-            | Action::DragMove
-            | Action::DragResize
-            | Action::None => {}
+            // key bind they do nothing.
+            Action::DragMove | Action::DragResize | Action::None => {}
         }
     }
 

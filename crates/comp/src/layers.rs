@@ -95,7 +95,7 @@ impl Aurora {
         })
     }
 
-    fn output_at(&self, pos: Point<f64, Logical>) -> Option<Output> {
+    pub(crate) fn output_at(&self, pos: Point<f64, Logical>) -> Option<Output> {
         self.space
             .outputs()
             .find(|o| {

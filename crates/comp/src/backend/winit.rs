@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use smithay::{
     backend::{
         renderer::{ImportDma, damage::OutputDamageTracker, gles::GlesRenderer},
@@ -12,7 +10,8 @@ use smithay::{
 };
 
 use crate::{
-    backend::BACKGROUND, scene::output_elements, state::Aurora, wm::window::WindowElement,
+    backend::BACKGROUND, scene::output_elements, state::Aurora, wm::outputs::rule_scale,
+    wm::window::WindowElement,
 };
 
 /// Nested backend: renders into a window on the host compositor.
@@ -37,15 +36,10 @@ pub fn init(
         },
     );
     output.create_global::<Aurora>(&state.display_handle);
-    output.change_current_state(
-        Some(mode),
-        Some(Transform::Flipped180),
-        None,
-        Some((0, 0).into()),
-    );
+    let scale = rule_scale(state.output_rule("winit"));
+    output.change_current_state(Some(mode), Some(Transform::Flipped180), Some(scale), None);
     output.set_preferred(mode);
-    state.space.map_output(&output, (0, 0));
-    state.wm_output_added(&output);
+    state.add_output(&output);
 
     state.init_dmabuf(
         crate::dmabuf::renderer_node(backend.renderer()),
@@ -67,8 +61,7 @@ pub fn init(
                     None,
                     None,
                 );
-                smithay::desktop::layer_map_for_output(&output).arrange();
-                state.relayout_all();
+                state.arrange_outputs();
             }
             WinitEvent::Input(event) => state.process_input_event(event),
             WinitEvent::Redraw => {
@@ -79,21 +72,7 @@ pub fn init(
                     tracing::warn!(%err, "nested swap failed");
                 }
 
-                for window in state.space.elements() {
-                    window.send_frame(
-                        &output,
-                        Duration::from(state.clock.now()),
-                        Some(Duration::ZERO),
-                        |_, _| Some(output.clone()),
-                    );
-                    if let Some(win) = state.wm.windows.get_mut(&window.id()) {
-                        win.frames_sent += 1;
-                    }
-                }
-
-                state.space.refresh();
-                state.popups.cleanup();
-                let _ = state.display_handle.flush_clients();
+                state.send_nested_frames(&output);
                 backend.window().request_redraw();
             }
             WinitEvent::CloseRequested => state.loop_signal.stop(),

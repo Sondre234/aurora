@@ -80,7 +80,7 @@ impl Aurora {
 
     /// Makes `output` the active one and focuses the most recently used window of the
     /// workspace it shows.
-    fn focus_output_ws(&mut self, output: &smithay::output::Output) {
+    pub(super) fn focus_output_ws(&mut self, output: &smithay::output::Output) {
         self.wm.active_output = Some(output.clone());
         let Some(ws) = self.wm.active_ws.get(output).copied() else {
             return;
@@ -156,7 +156,7 @@ impl Aurora {
         self.normalize();
     }
 
-    fn relocate_with_children(&mut self, id: WinId, dst: u32) {
+    pub(super) fn relocate_with_children(&mut self, id: WinId, dst: u32) {
         let Some(src) = self.wm.windows.get(&id).map(|w| w.ws) else {
             return;
         };
@@ -208,6 +208,7 @@ impl Aurora {
         workspace.set_parent(id, parent.filter(|p| workspace.contains(*p)));
         if let Some(win) = self.wm.windows.get_mut(&id) {
             win.ws = dst;
+            win.rescued_from = None;
         }
     }
 

@@ -27,7 +27,7 @@ use smithay::{
         rustix::fs::OFlags,
         wayland_server::{DisplayHandle, backend::GlobalId},
     },
-    utils::{DeviceFd, Point},
+    utils::DeviceFd,
 };
 use smithay_drm_extras::{
     display_info,
@@ -37,8 +37,11 @@ use smithay_drm_extras::{
 use super::render::{RenderState, vblank_handler};
 use crate::{
     backend::Backend,
+    config::ModeSpec,
     dmabuf::{SurfaceDmabufFeedback, surface_feedback},
+    outputs::choose_mode,
     state::Aurora,
+    wm::outputs::rule_scale,
 };
 
 pub type Allocator = GbmAllocator<DrmDeviceFd>;
@@ -60,7 +63,7 @@ const FORMATS_8BIT: &[Fourcc] = &[Fourcc::Abgr8888, Fourcc::Argb8888];
 
 /// Identifies the DRM output behind a wl_output, stored in its user data.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)] // read by the render loop
+
 pub struct UdevOutputId {
     pub device_id: DrmNode,
     pub crtc: crtc::Handle,
@@ -90,6 +93,8 @@ pub struct Device {
     pub surfaces: HashMap<crtc::Handle, Surface>,
     pub output_manager: OutputManager,
     scanner: DrmScanner,
+    /// Connectors the config turned off, kept so a reload can turn them on again.
+    disabled: HashMap<crtc::Handle, connector::Info>,
     pub render_node: DrmNode,
     registration_token: RegistrationToken,
 }
@@ -196,6 +201,7 @@ impl Aurora {
                 surfaces: HashMap::new(),
                 output_manager,
                 scanner: DrmScanner::new(),
+                disabled: HashMap::new(),
                 render_node,
                 registration_token,
             },
@@ -280,6 +286,16 @@ impl Aurora {
         crtc: crtc::Handle,
     ) {
         let name = connector_name(&connector);
+        let rule = self.output_rule(&name).cloned();
+        if rule.as_ref().is_some_and(|r| !r.enabled) {
+            tracing::info!("output: {name} disabled by config");
+            if let Backend::Drm(drm) = &mut self.backend
+                && let Some(device) = drm.devices.get_mut(&node)
+            {
+                device.disabled.insert(crtc, connector);
+            }
+            return;
+        }
         let Backend::Drm(drm) = &mut self.backend else {
             return;
         };
@@ -296,7 +312,12 @@ impl Aurora {
                 "available mode"
             );
         }
-        let Some(drm_mode) = pick_mode(&connector) else {
+        let configured = configured_mode(
+            &connector,
+            rule.as_ref().and_then(|r| r.mode.as_ref()),
+            &name,
+        );
+        let Some(drm_mode) = configured.or_else(|| pick_mode(&connector)) else {
             tracing::warn!(connector = %name, "connector has no modes, skipping");
             return;
         };
@@ -354,7 +375,7 @@ impl Aurora {
         );
         // The DRM compositor refuses an output without a current mode.
         output.set_preferred(wl_mode);
-        output.change_current_state(Some(wl_mode), None, None, None);
+        output.change_current_state(Some(wl_mode), None, Some(rule_scale(rule.as_ref())), None);
 
         let drm_output = match device
             .output_manager
@@ -379,18 +400,6 @@ impl Aurora {
             surface_feedback(device.render_node, &renderer.dmabuf_formats(), c.surface())
         });
         let global = output.create_global::<Aurora>(&self.display_handle);
-        // Append to the right of the current layout; relayout_outputs() closes any gaps.
-        let x = self
-            .space
-            .outputs()
-            .filter_map(|o| self.space.output_geometry(o))
-            .map(|geo| geo.loc.x + geo.size.w)
-            .max()
-            .unwrap_or(0);
-        let position = (x, 0);
-        output.change_current_state(None, None, None, Some(position.into()));
-        self.space.map_output(&output, position);
-        self.wm.output_added(&output, &self.config);
         output.user_data().insert_if_missing(|| UdevOutputId {
             device_id: node,
             crtc,
@@ -398,11 +407,12 @@ impl Aurora {
 
         tracing::info!(
             connector = %name, ?crtc, size = ?wl_mode.size, refresh_mhz = wl_mode.refresh,
-            position = ?position, nvidia = is_nvidia, "output initialized"
+            nvidia = is_nvidia, "output initialized"
         );
         // The first frame is queued on the loop, after this setup has finished.
         let mut render = RenderState::default();
         render.damage(&self.handle, node, crtc);
+        let registered = output.clone();
         device.surfaces.insert(
             crtc,
             Surface {
@@ -414,7 +424,7 @@ impl Aurora {
                 dh: self.display_handle.clone(),
             },
         );
-        self.relayout_outputs();
+        self.add_output(&registered);
     }
 
     fn connector_disconnected(
@@ -424,6 +434,22 @@ impl Aurora {
         crtc: crtc::Handle,
     ) {
         let name = connector_name(connector);
+        tracing::info!(connector = %name, ?crtc, "connector disconnected");
+        let Backend::Drm(drm) = &mut self.backend else {
+            return;
+        };
+        let Some(device) = drm.devices.get_mut(&node) else {
+            return;
+        };
+        device.disabled.remove(&crtc);
+        if let Some(mut surface) = device.surfaces.remove(&crtc) {
+            // Pending repaints and vblank timers must not outlive the output.
+            surface.render.cancel(&self.handle);
+            // Windows move to another output while this one is still alive.
+            self.wm_output_removed(&surface.output);
+            // Dropping the surface releases the crtc and removes the wl_output global.
+            drop(surface);
+        }
         let Backend::Drm(drm) = &mut self.backend else {
             return;
         };
@@ -431,16 +457,6 @@ impl Aurora {
         else {
             return;
         };
-        tracing::info!(connector = %name, ?crtc, "connector disconnected");
-        if let Some(mut surface) = device.surfaces.remove(&crtc) {
-            // Pending repaints and vblank timers must not outlive the output.
-            surface.render.cancel(&self.handle);
-            self.space.unmap_output(&surface.output);
-            self.wm.output_removed(&surface.output);
-            self.space.refresh();
-            // Dropping the surface releases the crtc and removes the wl_output global.
-            drop(surface);
-        }
         // Black stand-in for the frame, so the remaining outputs re-modeset without glitching.
         if let Err(err) = device
             .output_manager
@@ -449,7 +465,7 @@ impl Aurora {
         {
             tracing::debug!(%err, "could not restore modifiers after disconnect");
         }
-        self.relayout_outputs();
+        self.queue_redraw_all();
     }
 }
 
@@ -485,95 +501,129 @@ fn pick_mode(connector: &connector::Info) -> Option<smithay::reexports::drm::con
         .copied()
 }
 
-impl Aurora {
-    /// Repacks outputs left to right without gaps, carries windows along with the output
-    /// they were on, rescues windows left outside every output and re-clamps the pointer.
-    /// With no outputs left everything is kept as is, so windows return with the next output.
-    fn relayout_outputs(&mut self) {
-        let mut outputs: Vec<_> = self
-            .space
-            .outputs()
-            .filter_map(|o| Some((o.clone(), self.space.output_geometry(o)?)))
-            .collect();
-        if outputs.is_empty() {
-            return;
-        }
-        outputs.sort_by_key(|(_, geo)| geo.loc.x);
+/// The mode a config rule asks for, or `None` (with a warning) when the connector has no
+/// mode of that size.
+fn configured_mode(
+    connector: &connector::Info,
+    spec: Option<&ModeSpec>,
+    name: &str,
+) -> Option<smithay::reexports::drm::control::Mode> {
+    let spec = spec?;
+    let modes = connector.modes();
+    let list: Vec<_> = modes
+        .iter()
+        .map(|m| {
+            (
+                m.size().0 as i32,
+                m.size().1 as i32,
+                WlMode::from(*m).refresh,
+            )
+        })
+        .collect();
+    let mode = choose_mode(&list, spec).and_then(|i| modes.get(i)).copied();
+    if mode.is_none() {
+        tracing::warn!(
+            "output: {name} has no {}x{} mode, using the default one",
+            spec.width,
+            spec.height
+        );
+    }
+    mode
+}
 
-        // Old geometry decides which output a window travels with.
-        let mut shifts = Vec::new();
-        let mut x = 0;
-        for (output, geo) in &outputs {
-            if geo.loc.x != x {
-                shifts.push((*geo, x - geo.loc.x, output.clone(), x));
+impl Aurora {
+    /// Applies a reloaded config to live connectors: disables or re-enables them and switches
+    /// modes that changed. A mode the driver refuses keeps the old one. Not exercised by the
+    /// nested backend, so it is checked by reading only.
+    pub fn drm_apply_output_config(&mut self) {
+        let config = self.config.clone();
+        let mut disable = Vec::new();
+        let mut enable = Vec::new();
+        let mut mode_changed = false;
+        {
+            let Backend::Drm(drm) = &mut self.backend else {
+                return;
+            };
+            if !drm.session_active {
+                return;
             }
-            x += geo.size.w;
-        }
-        if !shifts.is_empty() {
-            let windows: Vec<_> = self
-                .space
-                .elements()
-                .filter_map(|w| {
-                    Some((
-                        w.clone(),
-                        self.space.element_location(w)?,
-                        self.space.element_bbox(w)?,
-                    ))
-                })
-                .collect();
-            for (window, loc, bbox) in windows {
-                let center = bbox.loc + bbox.size.downscale(2).to_point();
-                if let Some((_, dx, _, _)) = shifts.iter().find(|(geo, ..)| geo.contains(center)) {
-                    self.space
-                        .map_element(window, loc + Point::from((*dx, 0)), false);
+            let drm = &mut **drm;
+            for (node, device) in drm.devices.iter_mut() {
+                let connectors: Vec<_> = device
+                    .scanner
+                    .crtcs()
+                    .map(|(info, crtc)| (info.clone(), crtc))
+                    .collect();
+                for (info, crtc) in connectors {
+                    let name = connector_name(&info);
+                    let rule = config.outputs.iter().find(|r| r.name == name);
+                    let enabled = rule.is_none_or(|r| r.enabled);
+                    let live = device.surfaces.contains_key(&crtc);
+                    if live && !enabled {
+                        disable.push((*node, info, crtc));
+                        continue;
+                    }
+                    if !live && enabled && device.disabled.contains_key(&crtc) {
+                        enable.push((*node, info, crtc));
+                        continue;
+                    }
+                    let (Some(surface), Some(renderer)) =
+                        (device.surfaces.get_mut(&crtc), drm.renderer.as_mut())
+                    else {
+                        continue;
+                    };
+                    let want = configured_mode(&info, rule.and_then(|r| r.mode.as_ref()), &name)
+                        .or_else(|| pick_mode(&info));
+                    let Some(want) = want else { continue };
+                    let wl_mode = WlMode::from(want);
+                    if surface.output.current_mode() == Some(wl_mode) {
+                        continue;
+                    }
+                    match surface.drm_output.use_mode::<_, Element>(
+                        want,
+                        renderer,
+                        &DrmOutputRenderElements::default(),
+                    ) {
+                        Ok(()) => {
+                            surface
+                                .output
+                                .change_current_state(Some(wl_mode), None, None, None);
+                            tracing::info!(
+                                "output: mode name={name} {}x{}@{}",
+                                wl_mode.size.w,
+                                wl_mode.size.h,
+                                wl_mode.refresh
+                            );
+                            mode_changed = true;
+                        }
+                        Err(err) => {
+                            tracing::warn!(
+                                "output: cannot switch {name} to the new mode, keeping the old one: {err}"
+                            )
+                        }
+                    }
                 }
             }
-            for (_, _, output, new_x) in shifts {
-                output.change_current_state(None, None, None, Some((new_x, 0).into()));
-                self.space.map_output(&output, (new_x, 0));
+        }
+        for (node, info, crtc) in disable {
+            self.connector_disconnected(node, &info, crtc);
+            if let Backend::Drm(drm) = &mut self.backend
+                && let Some(device) = drm.devices.get_mut(&node)
+            {
+                tracing::info!("output: {} disabled by config", connector_name(&info));
+                device.disabled.insert(crtc, info);
             }
         }
-
-        // Anything still off every output goes to the first one.
-        let geos: Vec<_> = self
-            .space
-            .outputs()
-            .filter_map(|o| self.space.output_geometry(o))
-            .collect();
-        let first = geos.iter().min_by_key(|g| g.loc.x).map(|g| g.loc);
-        if let Some(first) = first {
-            let stray: Vec<_> = self
-                .space
-                .elements()
-                .filter(|w| {
-                    let bbox = self.space.element_bbox(w);
-                    !bbox.is_some_and(|b| geos.iter().any(|g| g.overlaps(b)))
-                })
-                .cloned()
-                .collect();
-            for window in stray {
-                self.space.map_element(window, first, false);
+        for (node, info, crtc) in enable {
+            if let Backend::Drm(drm) = &mut self.backend
+                && let Some(device) = drm.devices.get_mut(&node)
+            {
+                device.disabled.remove(&crtc);
             }
+            self.connector_connected(node, info, crtc);
         }
-        self.space.refresh();
-
-        let pointer = self.pointer.clone();
-        let old = pointer.current_location();
-        let new = self.clamp_pointer(old);
-        if new != old {
-            let under = self.surface_under(new);
-            pointer.motion(
-                self,
-                under,
-                &smithay::input::pointer::MotionEvent {
-                    location: new,
-                    serial: smithay::utils::SERIAL_COUNTER.next_serial(),
-                    time: smithay::backend::input::InputTime::now(),
-                },
-            );
-            pointer.frame(self);
+        if mode_changed {
+            self.arrange_outputs();
         }
-        self.relayout_all();
-        self.queue_redraw_all();
     }
 }

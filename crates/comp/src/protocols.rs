@@ -2,8 +2,9 @@
 use smithay::{
     reexports::wayland_server::DisplayHandle,
     wayland::{
-        output::OutputManagerState, presentation::PresentationState,
-        shell::wlr_layer::WlrLayerShellState,
+        fractional_scale::FractionalScaleManagerState, output::OutputManagerState,
+        presentation::PresentationState, shell::wlr_layer::WlrLayerShellState,
+        viewporter::ViewporterState,
     },
 };
 
@@ -12,6 +13,8 @@ use crate::{state::Aurora, virtual_input::VirtualKeyboardGlobal};
 pub struct Protocols {
     _output_manager: OutputManagerState,
     _presentation: PresentationState,
+    _fractional_scale: FractionalScaleManagerState,
+    _viewporter: ViewporterState,
     pub layer_shell: WlrLayerShellState,
     pub virtual_keyboard: VirtualKeyboardGlobal,
 }
@@ -21,6 +24,8 @@ impl Protocols {
         Self {
             _output_manager: OutputManagerState::new_with_xdg_output::<Aurora>(dh),
             _presentation: PresentationState::new::<Aurora>(dh, clock_id),
+            _fractional_scale: FractionalScaleManagerState::new::<Aurora>(dh),
+            _viewporter: ViewporterState::new::<Aurora>(dh),
             layer_shell: WlrLayerShellState::new::<Aurora>(dh),
             virtual_keyboard: VirtualKeyboardGlobal::new(dh, allow_virtual_keyboard),
         }

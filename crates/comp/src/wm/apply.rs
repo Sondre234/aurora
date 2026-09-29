@@ -138,12 +138,6 @@ impl Aurora {
         Some((work, full))
     }
 
-    /// Registers an output with the window manager and lays out what it shows.
-    pub fn wm_output_added(&mut self, output: &Output) {
-        self.wm.output_added(output, &self.config);
-        self.relayout_all();
-    }
-
     pub fn relayout_all(&mut self) {
         self.normalize();
         let visible: Vec<u32> = self.wm.active_ws.values().copied().collect();
@@ -158,7 +152,11 @@ impl Aurora {
         let (work, full) = self.work_area(&output)?;
         let params = layout_params(&self.config);
         let mut placed = Vec::new();
+        let old_full = self.wm.last_full.insert(ws, full);
         if let Some(workspace) = self.wm.workspaces.get_mut(&ws) {
+            if let Some(old) = old_full {
+                workspace.rebase(old, full);
+            }
             workspace.placements(work, full, &params, &mut placed);
         }
         Some((output, placed))
@@ -317,6 +315,7 @@ impl Aurora {
                 constraints: Constraints::default(),
                 app_id: String::new(),
                 frames_sent: 0,
+                rescued_from: None,
             },
         );
     }
