@@ -43,7 +43,7 @@ fn read_constraints(surface: &WlSurface) -> Constraints {
     })
 }
 
-fn read_strings(surface: &WlSurface) -> (String, String) {
+pub(crate) fn read_strings(surface: &WlSurface) -> (String, String) {
     with_states(surface, |states| {
         states
             .data_map
@@ -103,7 +103,7 @@ fn configure(toplevel: &ToplevelSurface, size: (i32, i32), tiled: bool, fullscre
 
 impl Aurora {
     /// The output's usable area (bars excluded) and its full area, in global coordinates.
-    fn work_area(&self, output: &Output) -> Option<(Rect, Rect)> {
+    pub(crate) fn work_area(&self, output: &Output) -> Option<(Rect, Rect)> {
         let geo = self.space.output_geometry(output)?;
         let full = rect_of(geo);
         let zone = layer_map_for_output(output).non_exclusive_zone();
@@ -148,19 +148,22 @@ impl Aurora {
         }
     }
 
-    pub fn relayout_ws(&mut self, ws: u32) {
-        let Some(output) = self.wm.output_for_ws(ws) else {
-            return;
-        };
-        let Some((work, full)) = self.work_area(&output) else {
-            return;
-        };
+    /// The workspace's placements on the output that shows it, or `None` when it is hidden.
+    pub fn ws_placements(&mut self, ws: u32) -> Option<(Output, Vec<Placement>)> {
+        let output = self.wm.output_for_ws(ws)?;
+        let (work, full) = self.work_area(&output)?;
         let params = layout_params(&self.config);
         let mut placed = Vec::new();
         if let Some(workspace) = self.wm.workspaces.get_mut(&ws) {
             workspace.placements(work, full, &params, &mut placed);
         }
-        self.apply(&output, ws, &placed);
+        Some((output, placed))
+    }
+
+    pub fn relayout_ws(&mut self, ws: u32) {
+        if let Some((output, placed)) = self.ws_placements(ws) {
+            self.apply(&output, ws, &placed);
+        }
     }
 
     /// Diffs `placed` onto the Space: map or relocate, unmap what left, configure only
@@ -270,6 +273,7 @@ impl Aurora {
                 sent_flags: (false, false),
                 constraints: Constraints::default(),
                 app_id: String::new(),
+                frames_sent: 0,
             },
         );
     }

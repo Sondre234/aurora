@@ -334,6 +334,9 @@ impl Aurora {
         match Config::load(&self.config_path) {
             Ok((config, warnings)) => {
                 config.log_loaded(&self.config_path, &warnings);
+                self.protocols
+                    .virtual_keyboard
+                    .set_allowed(config.general.allow_virtual_keyboard);
                 self.config = Arc::new(config);
             }
             Err(err) => tracing::warn!("config: error {err} keeping previous"),

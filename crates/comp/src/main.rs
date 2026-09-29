@@ -1,7 +1,9 @@
 mod action;
+mod actions;
 mod backend;
 mod cli;
 mod config;
+mod debug;
 mod dmabuf;
 mod emergency;
 mod focus;
@@ -17,6 +19,7 @@ mod session;
 mod spawn;
 mod state;
 mod syncobj;
+mod virtual_input;
 mod wm;
 
 use smithay::reexports::{calloop::EventLoop, wayland_server::Display};
@@ -60,6 +63,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     };
     let mut state =
         Aurora::new(&mut event_loop, display, backend, config, config_path).map_err(arm)?;
+    state.qa = cli.qa;
     state.apply_keymap();
     // Declared after `state`, so it drops first and bounds the teardown on every exit path.
     let _deadline = ExitDeadline;

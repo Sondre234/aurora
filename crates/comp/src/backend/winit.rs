@@ -79,14 +79,17 @@ pub fn init(
                     tracing::warn!(%err, "nested swap failed");
                 }
 
-                state.space.elements().for_each(|window| {
+                for window in state.space.elements() {
                     window.send_frame(
                         &output,
                         Duration::from(state.clock.now()),
                         Some(Duration::ZERO),
                         |_, _| Some(output.clone()),
-                    )
-                });
+                    );
+                    if let Some(win) = state.wm.windows.get_mut(&window.id()) {
+                        win.frames_sent += 1;
+                    }
+                }
 
                 state.space.refresh();
                 state.popups.cleanup();

@@ -57,6 +57,9 @@ pub struct Aurora {
     pub cursor_status: CursorImageStatus,
     /// Keys whose press was taken by a compositor shortcut; their release is swallowed too.
     pub suppressed_keys: Vec<Keycode>,
+    pub input: crate::input::InputState,
+    /// `--qa`: enables the debug input actions.
+    pub qa: bool,
     pub config: Arc<Config>,
     pub config_path: PathBuf,
     pub socket_name: OsString,
@@ -71,7 +74,6 @@ pub struct Aurora {
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShellState,
     pub shm_state: ShmState,
-    #[allow(dead_code)] // held so the globals stay alive
     pub protocols: Protocols,
     pub seat_state: SeatState<Aurora>,
     pub data_device_state: DataDeviceState,
@@ -101,7 +103,11 @@ impl Aurora {
         let shm_state = ShmState::new::<Self>(&dh, vec![]);
         let data_device_state = DataDeviceState::new::<Self>(&dh);
         let clock = Clock::new();
-        let protocols = Protocols::new(&dh, clock.id() as u32);
+        let protocols = Protocols::new(
+            &dh,
+            clock.id() as u32,
+            config.general.allow_virtual_keyboard,
+        );
 
         let mut seat_state = SeatState::new();
         let mut seat: Seat<Self> = seat_state.new_wl_seat(&dh, backend.seat_name());
@@ -118,6 +124,8 @@ impl Aurora {
             clock,
             cursor_status: CursorImageStatus::default_named(),
             suppressed_keys: Vec::new(),
+            input: Default::default(),
+            qa: false,
             config,
             config_path,
             socket_name,
@@ -210,6 +218,9 @@ impl Aurora {
         for window in self.space.elements() {
             if self.space.outputs_for_element(window).contains(output) {
                 window.send_frame(output, time, throttle, surface_primary_scanout_output);
+                if let Some(win) = self.wm.windows.get_mut(&window.id()) {
+                    win.frames_sent += 1;
+                }
             }
         }
         for layer in layer_map_for_output(output).layers() {

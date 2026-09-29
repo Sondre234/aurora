@@ -1,6 +1,6 @@
 use std::{fmt, str::FromStr};
 
-use crate::state::Aurora;
+use crate::config::keybind::WheelDir;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Dir {
@@ -67,6 +67,10 @@ pub enum Action {
     /// Mouse binds: start an interactive move/resize of the window under the pointer.
     DragMove,
     DragResize,
+    /// `--qa` only: log the state dump (same as SIGUSR2).
+    DebugDump,
+    /// `--qa` only: inject pointer input through the normal primitives.
+    DebugPointer(DebugPointer),
 }
 
 /// Workspaces are capped at 32 (`general.workspaces`); the config resolver applies the
@@ -74,6 +78,86 @@ pub enum Action {
 pub const MAX_WORKSPACES: u32 = 32;
 
 const MAX_RESIZE_PX: i32 = 10_000;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PointerButton {
+    Left,
+    Right,
+    Middle,
+}
+
+impl PointerButton {
+    /// evdev button code.
+    pub fn code(self) -> u32 {
+        match self {
+            Self::Left => 272,
+            Self::Right => 273,
+            Self::Middle => 274,
+        }
+    }
+}
+
+/// Coordinates are global logical pixels.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DebugPointer {
+    Move(i32, i32),
+    MoveBy(i32, i32),
+    Press(PointerButton),
+    Release(PointerButton),
+    Scroll(WheelDir),
+}
+
+fn parse_debug_pointer(rest: &str) -> Result<DebugPointer, String> {
+    let mut args = rest.split_whitespace();
+    let mut next = |what: &str| {
+        args.next()
+            .ok_or_else(|| format!("debug-pointer: missing {what}"))
+    };
+    let coord = |s: &str| {
+        s.parse::<i32>()
+            .map_err(|_| format!("invalid coordinate {s:?}"))
+    };
+    let button = |s: &str| match s {
+        "left" => Ok(PointerButton::Left),
+        "right" => Ok(PointerButton::Right),
+        "middle" => Ok(PointerButton::Middle),
+        other => Err(format!("unknown button {other:?} (left, right, middle)")),
+    };
+    let action = match next("subcommand")? {
+        "move" => DebugPointer::Move(coord(next("x")?)?, coord(next("y")?)?),
+        "move-by" => DebugPointer::MoveBy(coord(next("dx")?)?, coord(next("dy")?)?),
+        "press" => DebugPointer::Press(button(next("button")?)?),
+        "release" => DebugPointer::Release(button(next("button")?)?),
+        "scroll" => DebugPointer::Scroll(match next("direction")? {
+            "up" => WheelDir::Up,
+            "down" => WheelDir::Down,
+            other => return Err(format!("unknown scroll direction {other:?} (up, down)")),
+        }),
+        other => return Err(format!("unknown debug-pointer command {other:?}")),
+    };
+    if args.next().is_some() {
+        return Err("debug-pointer: too many arguments".into());
+    }
+    Ok(action)
+}
+
+impl fmt::Display for DebugPointer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let button = |b: &PointerButton| match b {
+            PointerButton::Left => "left",
+            PointerButton::Right => "right",
+            PointerButton::Middle => "middle",
+        };
+        match self {
+            Self::Move(x, y) => write!(f, "move {x} {y}"),
+            Self::MoveBy(x, y) => write!(f, "move-by {x} {y}"),
+            Self::Press(b) => write!(f, "press {}", button(b)),
+            Self::Release(b) => write!(f, "release {}", button(b)),
+            Self::Scroll(WheelDir::Up) => f.write_str("scroll up"),
+            Self::Scroll(WheelDir::Down) => f.write_str("scroll down"),
+        }
+    }
+}
 
 impl Action {
     /// Like `from_str`, but workspace numbers above `max_ws` are rejected too.
@@ -155,6 +239,8 @@ impl FromStr for Action {
             "none" => Self::None,
             "drag-move" => Self::DragMove,
             "drag-resize" => Self::DragResize,
+            "debug-dump" => Self::DebugDump,
+            "debug-pointer" => return Ok(Self::DebugPointer(parse_debug_pointer(rest)?)),
             "" => return Err("empty action".into()),
             other => return Err(format!("unknown action {other:?}")),
         };
@@ -189,15 +275,9 @@ impl fmt::Display for Action {
             Self::None => f.write_str("none"),
             Self::DragMove => f.write_str("drag-move"),
             Self::DragResize => f.write_str("drag-resize"),
+            Self::DebugDump => f.write_str("debug-dump"),
+            Self::DebugPointer(p) => write!(f, "debug-pointer {p}"),
         }
-    }
-}
-
-impl Aurora {
-    /// Stub until the keybind engine lands: bound actions are only logged for now.
-    #[allow(dead_code)] // wired to the key filter in the keybind engine step
-    pub fn run_action(&mut self, action: &Action) {
-        tracing::info!("action: {action}");
     }
 }
 
@@ -229,6 +309,12 @@ mod tests {
             "none",
             "drag-move",
             "drag-resize",
+            "debug-dump",
+            "debug-pointer move 10 -20",
+            "debug-pointer move-by -3 4",
+            "debug-pointer press left",
+            "debug-pointer release middle",
+            "debug-pointer scroll up",
         ];
         for text in ok {
             let action: Action = text.parse().unwrap_or_else(|e| panic!("{text}: {e}"));

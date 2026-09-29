@@ -58,7 +58,7 @@ impl Aurora {
         }
 
         // The VT switch swallowed the releases; without them keys would stay stuck for clients.
-        self.suppressed_keys.clear();
+        self.reset_input_state();
         let keyboard = self.keyboard.clone();
         for keycode in keyboard.pressed_keys() {
             keyboard.input::<(), _>(

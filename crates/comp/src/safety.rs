@@ -29,18 +29,23 @@ pub fn insert_timeout(handle: &LoopHandle<'static, Aurora>, dur: Duration) {
     }
 }
 
-/// SIGINT/SIGTERM/SIGHUP stop the loop so drop guards restore the TTY; SIGUSR1 reloads the config.
+/// SIGINT/SIGTERM/SIGHUP stop the loop so drop guards restore the TTY; SIGUSR1 reloads the
+/// config and SIGUSR2 logs a state dump.
 pub fn insert_signals(handle: &LoopHandle<'static, Aurora>) {
     let signals = match Signals::new(&[
         Signal::SIGINT,
         Signal::SIGTERM,
         Signal::SIGHUP,
         Signal::SIGUSR1,
+        Signal::SIGUSR2,
     ]) {
         Ok(signals) => signals,
         Err(err) => return tracing::error!(%err, "failed to set up signal handling"),
     };
     let result = handle.insert_source(signals, |event, _, state| {
+        if event.signal() == Signal::SIGUSR2 {
+            return state.dump_state();
+        }
         if event.signal() == Signal::SIGUSR1 {
             tracing::info!("SIGUSR1: reloading config");
             return state.reload_config();

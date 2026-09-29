@@ -99,7 +99,6 @@ impl BindTable {
         self.binds.len()
     }
 
-    #[allow(dead_code)] // used by the key filter in the keybind engine step
     pub fn get(&self, chord: &Chord) -> Option<&Bind> {
         self.binds.get(chord)
     }

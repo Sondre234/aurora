@@ -41,6 +41,8 @@ pub struct WinData {
     pub sent_flags: (bool, bool),
     pub constraints: Constraints,
     pub app_id: String,
+    /// Frame callbacks sent to this window, for the QA dump.
+    pub frames_sent: u64,
 }
 
 #[derive(Default)]
