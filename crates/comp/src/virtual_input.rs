@@ -155,19 +155,17 @@ impl Dispatch2<ZwpVirtualKeyboardV1, Aurora> for VirtualKeyboard {
                     return tracing::debug!(format, "virtual keyboard: unsupported keymap format");
                 }
                 let context = xkb::Context::new(xkb::CONTEXT_NO_FLAGS);
-                // Safety: the fd is the client's keymap; xkbcommon maps and parses it.
-                let keymap = unsafe {
-                    xkb::Keymap::new_from_fd(
+                let keymap = read_keymap(fd, size).and_then(|text| {
+                    xkb::Keymap::new_from_string(
                         &context,
-                        fd,
-                        size as usize,
+                        text,
                         xkb::KEYMAP_FORMAT_TEXT_V1,
                         xkb::KEYMAP_COMPILE_NO_FLAGS,
                     )
-                };
+                });
                 match keymap {
-                    Ok(Some(keymap)) => inner.xkb = Some(xkb::State::new(&keymap)),
-                    _ => tracing::debug!("virtual keyboard: unusable keymap"),
+                    Some(keymap) => inner.xkb = Some(xkb::State::new(&keymap)),
+                    None => tracing::debug!("virtual keyboard: unusable keymap"),
                 }
             }
             zwp_virtual_keyboard_v1::Request::Key {
@@ -349,4 +347,29 @@ impl Aurora {
         };
         Some((keycode, Level { shift, altgr }))
     }
+}
+
+/// Keymaps are small; anything bigger is not one.
+const MAX_KEYMAP: usize = 1 << 20;
+
+/// Reads the client's keymap with plain reads instead of mapping it: a mapping of a file the
+/// client truncates raises SIGBUS in the compositor.
+fn read_keymap(fd: std::os::fd::OwnedFd, size: u32) -> Option<String> {
+    use std::os::unix::fs::FileExt;
+    let size = size as usize;
+    if size == 0 || size > MAX_KEYMAP {
+        return None;
+    }
+    let file = std::fs::File::from(fd);
+    let meta = file.metadata().ok()?;
+    if !meta.is_file() || meta.len() < size as u64 {
+        return None;
+    }
+    let mut buf = vec![0; size];
+    file.read_exact_at(&mut buf, 0).ok()?;
+    // The protocol counts the terminating NUL in the size.
+    while buf.last() == Some(&0) {
+        buf.pop();
+    }
+    String::from_utf8(buf).ok()
 }
