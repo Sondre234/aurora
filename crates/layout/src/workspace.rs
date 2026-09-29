@@ -253,7 +253,7 @@ impl Workspace {
 
         for &(id, rect) in &self.floating {
             match fs {
-                Some((f, _)) if f == id => continue,
+                Some((f, FsMode::Fullscreen)) if f == id => continue,
                 Some((f, FsMode::Fullscreen)) if !self.is_descendant(id, f) => continue,
                 Some((f, mode @ FsMode::Maximized)) if f == id => {
                     out.push(fs_placement(id, mode));
@@ -385,6 +385,16 @@ mod tests {
         assert!(!ws.set_fullscreen(w(99), Some(FsMode::Maximized)));
     }
 
+
+    #[test]
+    fn maximized_floating_is_placed() {
+        let mut ws = ws3();
+        assert!(ws.set_fullscreen(w(3), Some(FsMode::Maximized)));
+        let out = place(&mut ws);
+        let m = out.iter().find(|p| p.id == w(3)).unwrap();
+        assert_eq!((m.outer, m.kind), (WORK, Kind::Maximized));
+        assert_eq!(out.len(), 3);
+    }
     #[test]
     fn rebase_scales_floating_and_keeps_it_inside() {
         let mut ws = Workspace::default();
