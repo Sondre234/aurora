@@ -1,0 +1,18 @@
+[package]
+name = "aurora-comp"
+description = "Aurora Wayland compositor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "aurora-comp"
+path = "src/main.rs"
+
+[dependencies]
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dependencies.smithay]
+workspace = true
+features = ["backend_winit", "wayland_frontend", "desktop"]
