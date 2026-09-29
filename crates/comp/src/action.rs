@@ -71,6 +71,15 @@ pub enum Action {
     DebugDump,
     /// `--qa` only: inject pointer input through the normal primitives.
     DebugPointer(DebugPointer),
+    /// `--qa` only: add a headless output `name` of `size` at `refresh_mhz`, optionally at `pos`.
+    DebugAddOutput {
+        name: String,
+        size: (i32, i32),
+        refresh_mhz: u32,
+        pos: Option<(i32, i32)>,
+    },
+    /// `--qa` only: remove a headless output.
+    DebugRemoveOutput(String),
 }
 
 /// Workspaces are capped at 32 (`general.workspaces`); the config resolver applies the
@@ -105,6 +114,40 @@ pub enum DebugPointer {
     Press(PointerButton),
     Release(PointerButton),
     Scroll(WheelDir),
+}
+
+/// `NAME WxH[@Hz] [+X+Y]`
+fn parse_debug_add_output(rest: &str) -> Result<Action, String> {
+    let mut it = rest.split_whitespace();
+    let name = it
+        .next()
+        .ok_or("debug-add-output: missing name")?
+        .to_string();
+    let mode = it.next().ok_or("debug-add-output: missing mode")?;
+    let spec =
+        crate::config::ModeSpec::parse(mode).ok_or_else(|| format!("invalid mode {mode:?}"))?;
+    let pos = it.next().map(parse_offset).transpose()?;
+    if it.next().is_some() {
+        return Err("debug-add-output: too many arguments".into());
+    }
+    Ok(Action::DebugAddOutput {
+        name,
+        size: (spec.width, spec.height),
+        refresh_mhz: spec.refresh_mhz.unwrap_or(60_000),
+        pos,
+    })
+}
+
+/// `+X+Y`, either sign on each.
+fn parse_offset(s: &str) -> Result<(i32, i32), String> {
+    let bad = || format!("invalid position {s:?}, expected +X+Y");
+    let split = s
+        .get(1..)
+        .and_then(|t| t.find(['+', '-']))
+        .map(|i| i + 1)
+        .ok_or_else(bad)?;
+    let num = |t: &str| t.parse::<i32>().map_err(|_| bad());
+    Ok((num(&s[..split])?, num(&s[split..])?))
 }
 
 fn parse_debug_pointer(rest: &str) -> Result<DebugPointer, String> {
@@ -241,6 +284,8 @@ impl FromStr for Action {
             "drag-resize" => Self::DragResize,
             "debug-dump" => Self::DebugDump,
             "debug-pointer" => return Ok(Self::DebugPointer(parse_debug_pointer(rest)?)),
+            "debug-add-output" => return parse_debug_add_output(rest),
+            "debug-remove-output" => Self::DebugRemoveOutput(arg()?.to_string()),
             "" => return Err("empty action".into()),
             other => return Err(format!("unknown action {other:?}")),
         };
@@ -277,6 +322,20 @@ impl fmt::Display for Action {
             Self::DragResize => f.write_str("drag-resize"),
             Self::DebugDump => f.write_str("debug-dump"),
             Self::DebugPointer(p) => write!(f, "debug-pointer {p}"),
+            Self::DebugAddOutput {
+                name,
+                size,
+                refresh_mhz,
+                pos,
+            } => {
+                let hz = f64::from(*refresh_mhz) / 1000.0;
+                write!(f, "debug-add-output {name} {}x{}@{hz}", size.0, size.1)?;
+                match pos {
+                    Some((x, y)) => write!(f, " {x:+}{y:+}"),
+                    None => Ok(()),
+                }
+            }
+            Self::DebugRemoveOutput(name) => write!(f, "debug-remove-output {name}"),
         }
     }
 }
@@ -315,6 +374,8 @@ mod tests {
             "debug-pointer press left",
             "debug-pointer release middle",
             "debug-pointer scroll up",
+            "debug-add-output HEADLESS-2 1920x1080@60 +1280+0",
+            "debug-remove-output HEADLESS-2",
         ];
         for text in ok {
             let action: Action = text.parse().unwrap_or_else(|e| panic!("{text}: {e}"));

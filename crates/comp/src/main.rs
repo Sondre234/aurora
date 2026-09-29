@@ -13,6 +13,7 @@ mod keymap;
 mod layers;
 mod libinput;
 mod log;
+mod outputs;
 mod protocols;
 mod safety;
 mod scene;
