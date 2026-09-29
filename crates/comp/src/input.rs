@@ -86,7 +86,7 @@ fn clamp_to_outputs(
 }
 
 impl Aurora {
-    fn clamp_pointer(&self, pos: Point<f64, Logical>) -> Point<f64, Logical> {
+    pub(crate) fn clamp_pointer(&self, pos: Point<f64, Logical>) -> Point<f64, Logical> {
         let geos: Vec<_> = self
             .space
             .outputs()

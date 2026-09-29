@@ -27,7 +27,7 @@ use smithay::{
         rustix::fs::OFlags,
         wayland_server::{DisplayHandle, backend::GlobalId},
     },
-    utils::DeviceFd,
+    utils::{DeviceFd, Point},
 };
 use smithay_drm_extras::{
     display_info,
@@ -371,13 +371,14 @@ impl Aurora {
             surface_feedback(device.render_node, &renderer.dmabuf_formats(), c.surface())
         });
         let global = output.create_global::<Aurora>(&self.display_handle);
-        // Lay outputs out left to right in discovery order.
+        // Append to the right of the current layout; relayout_outputs() closes any gaps.
         let x = self
             .space
             .outputs()
             .filter_map(|o| self.space.output_geometry(o))
-            .map(|geo| geo.size.w)
-            .sum::<i32>();
+            .map(|geo| geo.loc.x + geo.size.w)
+            .max()
+            .unwrap_or(0);
         let position = (x, 0);
         output.set_preferred(wl_mode);
         output.change_current_state(Some(wl_mode), None, None, Some(position.into()));
@@ -405,6 +406,7 @@ impl Aurora {
                 dh: self.display_handle.clone(),
             },
         );
+        self.relayout_outputs();
     }
 
     fn connector_disconnected(
@@ -438,6 +440,7 @@ impl Aurora {
         {
             tracing::debug!(%err, "could not restore modifiers after disconnect");
         }
+        self.relayout_outputs();
     }
 }
 
@@ -471,4 +474,96 @@ fn pick_mode(connector: &connector::Info) -> Option<smithay::reexports::drm::con
             )
         })
         .copied()
+}
+
+impl Aurora {
+    /// Repacks outputs left to right without gaps, carries windows along with the output
+    /// they were on, rescues windows left outside every output and re-clamps the pointer.
+    /// With no outputs left everything is kept as is, so windows return with the next output.
+    fn relayout_outputs(&mut self) {
+        let mut outputs: Vec<_> = self
+            .space
+            .outputs()
+            .filter_map(|o| Some((o.clone(), self.space.output_geometry(o)?)))
+            .collect();
+        if outputs.is_empty() {
+            return;
+        }
+        outputs.sort_by_key(|(_, geo)| geo.loc.x);
+
+        // Old geometry decides which output a window travels with.
+        let mut shifts = Vec::new();
+        let mut x = 0;
+        for (output, geo) in &outputs {
+            if geo.loc.x != x {
+                shifts.push((*geo, x - geo.loc.x, output.clone(), x));
+            }
+            x += geo.size.w;
+        }
+        if !shifts.is_empty() {
+            let windows: Vec<_> = self
+                .space
+                .elements()
+                .filter_map(|w| {
+                    Some((
+                        w.clone(),
+                        self.space.element_location(w)?,
+                        self.space.element_bbox(w)?,
+                    ))
+                })
+                .collect();
+            for (window, loc, bbox) in windows {
+                let center = bbox.loc + bbox.size.downscale(2).to_point();
+                if let Some((_, dx, _, _)) = shifts.iter().find(|(geo, ..)| geo.contains(center)) {
+                    self.space
+                        .map_element(window, loc + Point::from((*dx, 0)), false);
+                }
+            }
+            for (_, _, output, new_x) in shifts {
+                output.change_current_state(None, None, None, Some((new_x, 0).into()));
+                self.space.map_output(&output, (new_x, 0));
+            }
+        }
+
+        // Anything still off every output goes to the first one.
+        let geos: Vec<_> = self
+            .space
+            .outputs()
+            .filter_map(|o| self.space.output_geometry(o))
+            .collect();
+        let first = geos.iter().min_by_key(|g| g.loc.x).map(|g| g.loc);
+        if let Some(first) = first {
+            let stray: Vec<_> = self
+                .space
+                .elements()
+                .filter(|w| {
+                    let bbox = self.space.element_bbox(w);
+                    !bbox.is_some_and(|b| geos.iter().any(|g| g.overlaps(b)))
+                })
+                .cloned()
+                .collect();
+            for window in stray {
+                self.space.map_element(window, first, false);
+            }
+        }
+        self.space.refresh();
+
+        let pointer = self.pointer.clone();
+        let old = pointer.current_location();
+        let new = self.clamp_pointer(old);
+        if new != old {
+            let under = self.surface_under(new);
+            pointer.motion(
+                self,
+                under,
+                &smithay::input::pointer::MotionEvent {
+                    location: new,
+                    serial: smithay::utils::SERIAL_COUNTER.next_serial(),
+                    time: smithay::backend::input::InputTime::now(),
+                },
+            );
+            pointer.frame(self);
+        }
+        self.queue_redraw_all();
+    }
 }
