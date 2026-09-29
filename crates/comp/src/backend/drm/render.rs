@@ -78,6 +78,9 @@ pub struct RenderState {
     /// The repaint that is queued on the event loop, if any.
     scheduled: Option<Scheduled>,
     throttle_timer: Option<RegistrationToken>,
+    /// Stand-in for the vblank of an empty frame, which never flips a page. Sends the frame
+    /// callbacks so clients stay paced at the refresh rate.
+    estimated_vblank: Option<RegistrationToken>,
     last_presentation: Option<Time<Monotonic>>,
     failures: u32,
     /// Set by a session resume until the first frame lands; a failure then means stale buffers.
@@ -137,6 +140,9 @@ impl RenderState {
             None => {}
         }
         if let Some(token) = self.throttle_timer.take() {
+            handle.remove(token);
+        }
+        if let Some(token) = self.estimated_vblank.take() {
             handle.remove(token);
         }
         self.frame_pending = false;
@@ -296,14 +302,35 @@ impl Aurora {
                     tracing::debug!(?elapsed, budget = ?frame / 2, "render over budget");
                 }
                 tracing::trace!(?elapsed, queued = rendered.queued, "rendered");
-                let feedback = surface.dmabuf_feedback.clone();
-                self.post_repaint(
-                    &output,
-                    Duration::from(self.clock.now()),
-                    feedback.as_ref(),
-                    &rendered.states,
-                );
-                let _ = self.display_handle.flush_clients();
+                if rendered.queued {
+                    if let Some(token) = surface.render.estimated_vblank.take() {
+                        handle.remove(token);
+                    }
+                    let feedback = surface.dmabuf_feedback.clone();
+                    self.post_repaint(
+                        &output,
+                        Duration::from(self.clock.now()),
+                        feedback.as_ref(),
+                        &rendered.states,
+                    );
+                    let _ = self.display_handle.flush_clients();
+                } else if surface.render.estimated_vblank.is_none() {
+                    // No page flip means no vblank; without pacing a client that commits on
+                    // every callback would spin the compositor.
+                    let frame = frame_time.unwrap_or(Duration::from_millis(16));
+                    let delay = surface.render.last_presentation.map_or(frame, |last| {
+                        frame.saturating_sub(Time::elapsed(&last, self.clock.now()))
+                    });
+                    let states = rendered.states;
+                    let timer = Timer::from_duration(delay);
+                    match handle.insert_source(timer, move |_, _, state| {
+                        state.estimated_vblank(node, crtc, &states);
+                        TimeoutAction::Drop
+                    }) {
+                        Ok(token) => surface.render.estimated_vblank = Some(token),
+                        Err(err) => tracing::warn!(%err, "failed to arm the estimated vblank"),
+                    }
+                }
             }
             Some(Ok(None)) => {}
             Some(Err(err)) => {
@@ -351,6 +378,38 @@ impl Aurora {
             }
             None => {}
         }
+    }
+
+    /// Sends the frame callbacks of an empty frame at the time its vblank would have been.
+    fn estimated_vblank(
+        &mut self,
+        node: DrmNode,
+        crtc: crtc::Handle,
+        states: &RenderElementStates,
+    ) {
+        let Backend::Drm(drm) = &mut self.backend else {
+            return;
+        };
+        let Some(surface) = drm
+            .devices
+            .get_mut(&node)
+            .and_then(|d| d.surfaces.get_mut(&crtc))
+        else {
+            return;
+        };
+        surface.render.estimated_vblank = None;
+        if !drm.session_active {
+            return;
+        }
+        let output = surface.output.clone();
+        let feedback = surface.dmabuf_feedback.clone();
+        self.post_repaint(
+            &output,
+            Duration::from(self.clock.now()),
+            feedback.as_ref(),
+            states,
+        );
+        let _ = self.display_handle.flush_clients();
     }
 
     /// Handles a vblank: acknowledges the flipped frame, reports presentation, and renders
