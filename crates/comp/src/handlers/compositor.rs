@@ -1,6 +1,9 @@
 use crate::{Aurora, state::ClientState};
 use smithay::{
     backend::renderer::utils::on_commit_buffer_handler,
+    desktop::PopupKind,
+    input::pointer::CursorImageStatus,
+    output::Output,
     reexports::wayland_server::{
         Client,
         protocol::{wl_buffer, wl_surface::WlSurface},
@@ -33,12 +36,11 @@ impl CompositorHandler for Aurora {
     fn commit(&mut self, surface: &WlSurface) {
         on_commit_buffer_handler::<Self>(surface);
         self.backend.early_import(surface);
+        // A sync subsurface shows nothing until its parent commits.
+        let sync_subsurface = is_sync_subsurface(surface);
         let mut outputs = Vec::new();
-        if !is_sync_subsurface(surface) {
-            let mut root = surface.clone();
-            while let Some(parent) = get_parent(&root) {
-                root = parent;
-            }
+        if !sync_subsurface {
+            let root = root_surface(surface);
             let window = self
                 .space
                 .elements()
@@ -52,14 +54,65 @@ impl CompositorHandler for Aurora {
 
         xdg_shell::handle_commit(&mut self.popups, &self.space, surface);
 
-        // Popups, cursors and new windows are on no output yet; repaint everything then.
+        if sync_subsurface {
+            return;
+        }
         if outputs.is_empty() {
+            outputs = self.outputs_for_unmapped(surface);
+        }
+        if outputs.is_empty() {
+            // Not a window, cursor or popup we can place; repaint everything.
             self.queue_redraw_all();
         } else {
             for output in &outputs {
                 self.queue_redraw_output(output);
             }
         }
+    }
+}
+
+fn root_surface(surface: &WlSurface) -> WlSurface {
+    let mut root = surface.clone();
+    while let Some(parent) = get_parent(&root) {
+        root = parent;
+    }
+    root
+}
+
+impl Aurora {
+    /// Outputs a commit from a surface outside the space can change: the pointer's for the
+    /// cursor surface, the parent window's for a popup.
+    fn outputs_for_unmapped(&self, surface: &WlSurface) -> Vec<Output> {
+        let root = root_surface(surface);
+        if let CursorImageStatus::Surface(cursor) = &self.cursor_status
+            && cursor == &root
+        {
+            let pointer = self.pointer.current_location();
+            return self
+                .space
+                .outputs()
+                .filter(|o| {
+                    self.space
+                        .output_geometry(o)
+                        .is_some_and(|g| g.to_f64().contains(pointer))
+                })
+                .cloned()
+                .collect();
+        }
+        if let Some(parent) = self.popups.find_popup(&root).and_then(|popup| match popup {
+            PopupKind::Xdg(xdg) => xdg.get_parent_surface(),
+            _ => None,
+        }) {
+            let parent = root_surface(&parent);
+            if let Some(window) = self
+                .space
+                .elements()
+                .find(|w| w.toplevel().unwrap().wl_surface() == &parent)
+            {
+                return self.space.outputs_for_element(window);
+            }
+        }
+        Vec::new()
     }
 }
 
