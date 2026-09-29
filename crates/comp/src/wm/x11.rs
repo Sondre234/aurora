@@ -377,15 +377,14 @@ impl Aurora {
         let Some(id) = self.x11_id(x11) else {
             return;
         };
-        let focused_x11 = self
-            .wm
-            .focused
-            .and_then(|f| self.wm.windows.get(&f))
-            .and_then(|w| w.element.x11_surface().cloned());
+        // The real keyboard focus decides, not `wm.focused`: a native Wayland game or a
+        // covering override-redirect window holds focus without being the focused X11 window.
         let user_initiated = timestamp != 0
-            && (focused_x11.is_none()
-                || focused_x11.as_ref() == current
-                || focused_x11.as_ref() == Some(x11));
+            && match self.keyboard.current_focus() {
+                None => true,
+                Some(FocusTarget::X11(f)) => Some(&f) == current || &f == x11,
+                Some(FocusTarget::Wl(_)) => false,
+            };
         if !user_initiated {
             if self.wm.focused != Some(id)
                 && let Some(win) = self.wm.windows.get_mut(&id)
