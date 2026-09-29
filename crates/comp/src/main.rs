@@ -72,7 +72,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn spawn_client(command: &str) {
-    if let Err(err) = std::process::Command::new(command).spawn() {
+    use std::os::unix::process::CommandExt;
+
+    let mut cmd = std::process::Command::new(command);
+    // The signalfd source blocks SIGINT/SIGTERM/SIGHUP on this thread; children must not
+    // inherit that mask.
+    // Safety: only async-signal-safe calls between fork and exec.
+    unsafe {
+        cmd.pre_exec(|| {
+            let mut set: libc::sigset_t = std::mem::zeroed();
+            libc::sigemptyset(&mut set);
+            libc::sigprocmask(libc::SIG_SETMASK, &set, std::ptr::null_mut());
+            Ok(())
+        });
+    }
+    if let Err(err) = cmd.spawn() {
         tracing::warn!(%command, %err, "failed to spawn startup client");
     }
 }
