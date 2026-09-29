@@ -17,10 +17,17 @@ use backend::{Backend, DrmBackend};
 use cli::{BackendKind, Cli};
 use state::Aurora;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() {
     log::install_panic_hook();
     log::init();
+    // `run` owns the session and everything else that must drop before this point.
+    if let Err(err) = run() {
+        tracing::error!(%err, "aurora failed");
+        std::process::exit(1);
+    }
+}
 
+fn run() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse()?;
     tracing::info!(backend = ?cli.backend, timeout = ?cli.timeout, "aurora starting");
 
