@@ -116,6 +116,11 @@ impl Aurora {
                 OFlags::RDWR | OFlags::CLOEXEC | OFlags::NOCTTY | OFlags::NONBLOCK,
             )
             .map_err(|err| format!("failed to open {} through libseat: {err}", path.display()))?;
+        tracing::info!(
+            path = %path.display(),
+            session_active = drm.session.is_active(),
+            "opened drm device through libseat"
+        );
         let fd = DrmDeviceFd::new(DeviceFd::from(fd));
 
         let (drm_device, notifier) =
@@ -347,6 +352,9 @@ impl Aurora {
                 serial_number: serial,
             },
         );
+        // The DRM compositor refuses an output without a current mode.
+        output.set_preferred(wl_mode);
+        output.change_current_state(Some(wl_mode), None, None, None);
 
         let drm_output = match device
             .output_manager
@@ -380,8 +388,7 @@ impl Aurora {
             .max()
             .unwrap_or(0);
         let position = (x, 0);
-        output.set_preferred(wl_mode);
-        output.change_current_state(Some(wl_mode), None, None, Some(position.into()));
+        output.change_current_state(None, None, None, Some(position.into()));
         self.space.map_output(&output, position);
         output.user_data().insert_if_missing(|| UdevOutputId {
             device_id: node,
