@@ -4,30 +4,44 @@ use crate::{Dir, Edges, Point, Rect, Side, Size, WinId};
 
 /// The window to focus when moving from `from` in `dir`: strictly beyond the source's
 /// edge and overlapping it on the other axis. Nearest wins, then the larger overlap,
-/// then the most recently focused (`mru` is most recent first).
+/// then the most recently focused (`mru` is most recent first). If nothing qualifies
+/// (floating windows overlapping tiles), the same ranking is retried on window centres.
 pub fn neighbor(rects: &[(WinId, Rect)], from: WinId, dir: Dir, mru: &[WinId]) -> Option<WinId> {
     let src = rects.iter().find(|(id, _)| *id == from)?.1;
     let rank = |id: WinId| mru.iter().position(|&m| m == id).unwrap_or(usize::MAX);
-    rects
-        .iter()
-        .filter(|(id, _)| *id != from)
-        .filter_map(|&(id, r)| {
-            let (dist, overlap) = match dir {
-                Dir::Left => (
-                    src.x - r.right(),
-                    span(src.y, src.bottom(), r.y, r.bottom()),
-                ),
-                Dir::Right => (
-                    r.x - src.right(),
-                    span(src.y, src.bottom(), r.y, r.bottom()),
-                ),
-                Dir::Up => (src.y - r.bottom(), span(src.x, src.right(), r.x, r.right())),
-                Dir::Down => (r.y - src.bottom(), span(src.x, src.right(), r.x, r.right())),
-            };
-            (dist >= 0 && overlap > 0).then_some((id, dist, overlap))
+    let pick = |dist_of: &dyn Fn(Rect) -> i32| {
+        rects
+            .iter()
+            .filter(|(id, _)| *id != from)
+            .filter_map(|&(id, r)| {
+                let overlap = match dir {
+                    Dir::Left | Dir::Right => span(src.y, src.bottom(), r.y, r.bottom()),
+                    Dir::Up | Dir::Down => span(src.x, src.right(), r.x, r.right()),
+                };
+                let dist = dist_of(r);
+                (dist >= 0 && overlap > 0).then_some((id, dist, overlap))
+            })
+            .min_by_key(|&(id, dist, overlap)| (dist, std::cmp::Reverse(overlap), rank(id)))
+            .map(|(id, ..)| id)
+    };
+    let (sc, edge) = (src.center(), |r: Rect| match dir {
+        Dir::Left => src.x - r.right(),
+        Dir::Right => r.x - src.right(),
+        Dir::Up => src.y - r.bottom(),
+        Dir::Down => r.y - src.bottom(),
+    });
+    // Overlapping windows (floating over tiles) have no gap; fall back to centres.
+    pick(&edge).or_else(|| {
+        pick(&|r: Rect| {
+            let c = r.center();
+            match dir {
+                Dir::Left => sc.x - c.x,
+                Dir::Right => c.x - sc.x,
+                Dir::Up => sc.y - c.y,
+                Dir::Down => c.y - sc.y,
+            }
         })
-        .min_by_key(|&(id, dist, overlap)| (dist, std::cmp::Reverse(overlap), rank(id)))
-        .map(|(id, ..)| id)
+    })
 }
 
 fn span(a0: i32, a1: i32, b0: i32, b1: i32) -> i32 {
@@ -133,6 +147,19 @@ mod tests {
             (w(3), Rect::new(100, 80, 100, 100)),
         ];
         assert_eq!(neighbor(&s, w(1), Dir::Right, &[w(3)]), Some(w(2)));
+    }
+
+    #[test]
+    fn neighbor_reaches_floating_over_tiles() {
+        let s = vec![
+            (w(1), Rect::new(0, 0, 500, 600)),
+            (w(2), Rect::new(500, 0, 500, 600)),
+            (w(3), Rect::new(167, 100, 666, 400)),
+        ];
+        assert_eq!(neighbor(&s, w(3), Dir::Left, &[]), Some(w(1)));
+        assert_eq!(neighbor(&s, w(3), Dir::Right, &[]), Some(w(2)));
+        assert_eq!(neighbor(&s, w(1), Dir::Right, &[]), Some(w(2)));
+        assert_eq!(neighbor(&s, w(3), Dir::Up, &[]), None);
     }
 
     #[test]
