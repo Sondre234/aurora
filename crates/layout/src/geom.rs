@@ -9,7 +9,7 @@ use crate::{Dir, Edges, Point, Rect, Side, Size, WinId};
 pub fn neighbor(rects: &[(WinId, Rect)], from: WinId, dir: Dir, mru: &[WinId]) -> Option<WinId> {
     let src = rects.iter().find(|(id, _)| *id == from)?.1;
     let rank = |id: WinId| mru.iter().position(|&m| m == id).unwrap_or(usize::MAX);
-    let pick = |dist_of: &dyn Fn(Rect) -> i32| {
+    let pick = |min_dist: i32, dist_of: &dyn Fn(Rect) -> i32| {
         rects
             .iter()
             .filter(|(id, _)| *id != from)
@@ -19,7 +19,7 @@ pub fn neighbor(rects: &[(WinId, Rect)], from: WinId, dir: Dir, mru: &[WinId]) -
                     Dir::Up | Dir::Down => span(src.x, src.right(), r.x, r.right()),
                 };
                 let dist = dist_of(r);
-                (dist >= 0 && overlap > 0).then_some((id, dist, overlap))
+                (dist >= min_dist && overlap > 0).then_some((id, dist, overlap))
             })
             .min_by_key(|&(id, dist, overlap)| (dist, std::cmp::Reverse(overlap), rank(id)))
             .map(|(id, ..)| id)
@@ -31,8 +31,8 @@ pub fn neighbor(rects: &[(WinId, Rect)], from: WinId, dir: Dir, mru: &[WinId]) -
         Dir::Down => r.y - src.bottom(),
     });
     // Overlapping windows (floating over tiles) have no gap; fall back to centres.
-    pick(&edge).or_else(|| {
-        pick(&|r: Rect| {
+    pick(0, &edge).or_else(|| {
+        pick(1, &|r: Rect| {
             let c = r.center();
             match dir {
                 Dir::Left => sc.x - c.x,
