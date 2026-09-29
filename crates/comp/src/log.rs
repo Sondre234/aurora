@@ -14,7 +14,7 @@ fn log_path() -> Option<PathBuf> {
 /// Opens the log file, keeping the previous run as `comp.log.1`.
 fn open_log_file() -> Result<(fs::File, PathBuf), String> {
     let path = log_path().ok_or("neither XDG_STATE_HOME nor HOME is set")?;
-    let dir = path.parent().unwrap();
+    let dir = path.parent().ok_or("log path has no parent directory")?;
     fs::create_dir_all(dir).map_err(|err| format!("create {}: {err}", dir.display()))?;
     if path.exists() {
         let _ = fs::rename(&path, dir.join("comp.log.1"));

@@ -1,4 +1,5 @@
 use smithay::{
+    backend::drm::DrmError,
     backend::input::KeyState,
     backend::session::{
         Event as SessionEvent,
@@ -40,16 +41,25 @@ pub fn insert_notifier(
 
 impl Aurora {
     fn pause_session(&mut self) {
-        tracing::info!("session paused");
+        tracing::info!("session disabled (VT switched away or seat taken)");
+        let handle = self.handle.clone();
         let Backend::Drm(drm) = &mut self.backend else {
             return;
         };
         drm.libinput.suspend();
         drm.session_active = false;
+        for device in drm.devices.values_mut() {
+            device.output_manager.pause();
+            // Nothing may render or reschedule until the session comes back; every
+            // output restarts from scratch on resume.
+            for surface in device.surfaces.values_mut() {
+                surface.render.cancel(&handle);
+            }
+        }
 
         // The VT switch swallowed the releases; without them keys would stay stuck for clients.
         self.suppressed_keys.clear();
-        let keyboard = self.seat.get_keyboard().unwrap();
+        let keyboard = self.keyboard.clone();
         for keycode in keyboard.pressed_keys() {
             keyboard.input::<(), _>(
                 self,
@@ -61,25 +71,45 @@ impl Aurora {
             );
         }
         let _ = self.display_handle.flush_clients();
-        // DRM pause arrives with the DRM device in a later step.
     }
 
     fn activate_session(&mut self) {
-        tracing::info!("session resumed");
+        tracing::info!("session enabled");
+        let led_state = self.keyboard.led_state();
         let Backend::Drm(drm) = &mut self.backend else {
             return;
         };
-        if drm.libinput.resume().is_err() {
-            tracing::error!("failed to resume libinput");
+        if let Err(err) = drm.libinput.resume() {
+            tracing::error!(?err, "failed to resume libinput");
         }
         drm.session_active = true;
-
-        let led_state = self.seat.get_keyboard().unwrap().led_state();
         for keyboard in &mut drm.keyboards {
             keyboard.led_update(led_state.into());
         }
-        // DRM activation and re-render arrive with the DRM device in a later step.
-        // Must stay after the DRM device is re-activated once that is wired.
+
+        let mut nodes = Vec::new();
+        for (node, device) in &mut drm.devices {
+            nodes.push(*node);
+            let mut manager = device.output_manager.lock();
+            // Optimistic first: keep the hardware state and let a failed test reset it
+            // at the next frame. Only if that fails, pay for a full modeset.
+            if let Err(err) = manager.activate(false) {
+                tracing::warn!(%node, %err, "drm activate failed, retrying with connectors disabled");
+                if let Err(err) = manager.activate(true) {
+                    tracing::error!(%node, %err, "drm activate failed again");
+                    if matches!(err, DrmError::TestFailed(_))
+                        && let Err(err) = manager.device_mut().reset_state()
+                    {
+                        tracing::error!(%node, %err, "failed to reset the drm device");
+                    }
+                }
+            }
+        }
+
+        // Connectors may have come or gone while another VT owned the display.
+        for node in nodes {
+            self.drm_device_changed(node);
+        }
         self.resume_rendering();
     }
 }

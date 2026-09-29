@@ -39,6 +39,11 @@ pub struct DrmBackend {
 
 impl DrmBackend {
     pub fn new(session: LibSeatSession, libinput: Libinput, primary_gpu: DrmNode) -> Self {
+        // Launched from a non-active VT: stay dark until ActivateSession arrives.
+        let session_active = session.is_active();
+        if !session_active {
+            tracing::warn!("seat is not active yet, waiting for the session to be enabled");
+        }
         Self {
             devices: HashMap::new(),
             renderer: None,
@@ -46,7 +51,7 @@ impl DrmBackend {
             primary_gpu,
             libinput,
             keyboards: Vec::new(),
-            session_active: true,
+            session_active,
             seat_name: session.seat(),
             session,
         }

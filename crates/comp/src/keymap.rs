@@ -17,7 +17,7 @@ impl Aurora {
     /// Applies the keymap: keymap file, then XKB_DEFAULT_*, then the system
     /// xorg config, then plain us. A source that fails to compile falls through.
     pub fn apply_keymap(&mut self) {
-        let keyboard = self.seat.get_keyboard().unwrap();
+        let keyboard = self.keyboard.clone();
 
         if let Some(path) = keymap_file_path() {
             match std::fs::read_to_string(&path) {

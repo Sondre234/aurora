@@ -41,21 +41,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Backend::Drm(Box::new(DrmBackend::new(session, libinput, primary_gpu)))
         }
     };
-    let mut state = Aurora::new(&mut event_loop, display, backend);
+    let mut state = Aurora::new(&mut event_loop, display, backend)?;
     state.apply_keymap();
 
     safety::insert_signals(&handle);
     if let Some(timeout) = cli.timeout {
         safety::insert_timeout(&handle, timeout);
+        safety::spawn_watchdog(timeout);
     }
 
     match cli.backend {
         BackendKind::Winit => backend::winit::init(&mut event_loop, &mut state)?,
         BackendKind::Drm => {
-            let Backend::Drm(drm) = &state.backend else {
-                unreachable!("backend chosen above")
-            };
-            libinput::insert_source(&handle, drm.input_source())?;
+            if let Backend::Drm(drm) = &state.backend {
+                libinput::insert_source(&handle, drm.input_source())?;
+            }
             backend::drm::init(&handle, &mut state)?;
         }
     }

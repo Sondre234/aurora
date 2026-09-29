@@ -80,6 +80,8 @@ pub struct RenderState {
     throttle_timer: Option<RegistrationToken>,
     last_presentation: Option<Time<Monotonic>>,
     failures: u32,
+    /// Set by a session resume until the first frame lands; a failure then means stale buffers.
+    after_resume: bool,
 }
 
 impl RenderState {
@@ -201,6 +203,7 @@ impl Aurora {
         for (node, device) in &mut drm.devices {
             for (crtc, surface) in &mut device.surfaces {
                 surface.render.cancel(&handle);
+                surface.render.after_resume = true;
                 surface.render.damage(&handle, *node, *crtc);
             }
         }
@@ -252,9 +255,7 @@ impl Aurora {
                 surface,
                 renderer,
                 &self.space,
-                self.seat
-                    .get_pointer()
-                    .map_or_else(Default::default, |p| p.current_location()),
+                self.pointer.current_location(),
                 &mut self.cursor_status,
                 cursors,
             );
@@ -287,6 +288,7 @@ impl Aurora {
         match result {
             Some(Ok(Some(rendered))) => {
                 surface.render.failures = 0;
+                surface.render.after_resume = false;
                 surface.render.frame_pending = rendered.queued;
                 if let Some(frame) = frame_time
                     && elapsed > frame / 2
@@ -306,6 +308,22 @@ impl Aurora {
             Some(Ok(None)) => {}
             Some(Err(err)) => {
                 surface.render.damaged = true;
+                // The first frame after a resume can fail on buffers the pause invalidated.
+                let inactive = matches!(
+                    &err,
+                    SwapBuffersError::TemporaryFailure(e)
+                        if matches!(e.downcast_ref::<DrmError>(), Some(DrmError::DeviceInactive))
+                );
+                if surface.render.after_resume
+                    && !inactive
+                    && !matches!(err, SwapBuffersError::AlreadySwapped)
+                {
+                    surface.render.after_resume = false;
+                    tracing::warn!(%err, "first frame after resume failed, resetting buffers");
+                    surface.drm_output.reset_buffers();
+                    surface.render.schedule(&handle, node, crtc, frame_time);
+                    return;
+                }
                 match err {
                     // A frame is already queued; its vblank renders the pending damage.
                     SwapBuffersError::AlreadySwapped => surface.render.frame_pending = true,
@@ -348,6 +366,9 @@ impl Aurora {
         let Backend::Drm(drm) = &mut self.backend else {
             return;
         };
+        if !drm.session_active {
+            return;
+        }
         let Some(surface) = drm
             .devices
             .get_mut(&node)

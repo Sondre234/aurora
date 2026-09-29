@@ -42,3 +42,24 @@ pub fn insert_signals(handle: &LoopHandle<'static, Aurora>) {
         tracing::error!(%err, "failed to register signal source");
     }
 }
+
+/// Grace period between the timeout timer and the watchdog.
+const WATCHDOG_GRACE: Duration = Duration::from_secs(5);
+
+/// Last resort if the event loop is wedged and cannot honour `--timeout`: a plain thread
+/// that hard-exits the process. It touches no DRM state; exiting closes the seat fds, so
+/// logind/seatd hands the VT back.
+pub fn spawn_watchdog(timeout: Duration) {
+    let wait = timeout + WATCHDOG_GRACE;
+    let spawned = std::thread::Builder::new()
+        .name("watchdog".into())
+        .spawn(move || {
+            std::thread::sleep(wait);
+            tracing::error!("watchdog: event loop did not stop after --timeout, hard exit");
+            // Safety: _exit is async-signal-safe and skips destructors on purpose.
+            unsafe { libc::_exit(1) }
+        });
+    if let Err(err) = spawned {
+        tracing::error!(%err, "failed to start the watchdog thread");
+    }
+}

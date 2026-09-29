@@ -12,6 +12,7 @@ path = "src/main.rs"
 [dependencies]
 smithay-drm-extras.workspace = true
 xcursor.workspace = true
+libc.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 # Not used directly: enables the signals source in the calloop smithay re-exports.

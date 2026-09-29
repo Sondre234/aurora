@@ -91,7 +91,9 @@ pub fn handle_commit(popups: &mut PopupManager, space: &Space<Window>, surface: 
                 if !xdg.is_initial_configure_sent() {
                     // NOTE: This should never fail as the initial configure is always
                     // allowed.
-                    xdg.send_configure().expect("initial configure failed");
+                    if let Err(err) = xdg.send_configure() {
+                        tracing::warn!(%err, "initial popup configure failed");
+                    }
                 }
             }
             PopupKind::InputMethod(ref _input_method) => {}

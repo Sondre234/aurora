@@ -59,6 +59,7 @@ name = "aurora-comp"
 version = "0.1.0"
 dependencies = [
  "calloop",
+ "libc",
  "smithay",
  "smithay-drm-extras",
  "tracing",

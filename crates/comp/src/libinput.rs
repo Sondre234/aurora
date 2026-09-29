@@ -49,7 +49,7 @@ impl Aurora {
         if device.has_capability(DeviceCapability::Keyboard)
             && let Backend::Drm(drm) = &mut self.backend
         {
-            device.led_update(self.seat.get_keyboard().unwrap().led_state().into());
+            device.led_update(self.keyboard.clone().led_state().into());
             drm.keyboards.push(device.clone());
         }
     }

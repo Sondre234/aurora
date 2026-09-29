@@ -12,9 +12,12 @@ license = "GPL-3.0-or-later"
 smithay = { git = "https://github.com/Smithay/smithay.git", rev = "bc21b828af6a4f365b9ac0c4e27cf2df004f9c57", default-features = false }
 smithay-drm-extras = { git = "https://github.com/Smithay/smithay.git", rev = "bc21b828af6a4f365b9ac0c4e27cf2df004f9c57" }
 xcursor = "0.3"
+libc = "0.2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
+# Never set panic = "abort" in any profile: the session must unwind so Drop guards
+# release the seat and restore the TTY.
 [profile.release]
 lto = "thin"
 codegen-units = 1

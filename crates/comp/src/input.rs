@@ -105,7 +105,7 @@ impl Aurora {
 
                 // Runs before clients and ignores shortcut inhibitors on purpose: the quit
                 // chord and VT switch must always work.
-                let action = self.seat.get_keyboard().unwrap().input::<KeyAction, _>(
+                let action = self.keyboard.clone().input::<KeyAction, _>(
                     self,
                     keycode,
                     key_state,
@@ -145,7 +145,7 @@ impl Aurora {
                 }
             }
             InputEvent::PointerMotion { event, .. } => {
-                let pointer = self.seat.get_pointer().unwrap();
+                let pointer = self.pointer.clone();
                 let serial = SERIAL_COUNTER.next_serial();
 
                 let pos = self.clamp_pointer(pointer.current_location() + event.delta());
@@ -181,7 +181,7 @@ impl Aurora {
 
                 let serial = SERIAL_COUNTER.next_serial();
 
-                let pointer = self.seat.get_pointer().unwrap();
+                let pointer = self.pointer.clone();
 
                 let under = self.surface_under(pos);
 
@@ -198,8 +198,8 @@ impl Aurora {
                 self.queue_redraw_all();
             }
             InputEvent::PointerButton { event, .. } => {
-                let pointer = self.seat.get_pointer().unwrap();
-                let keyboard = self.seat.get_keyboard().unwrap();
+                let pointer = self.pointer.clone();
+                let keyboard = self.keyboard.clone();
 
                 let serial = SERIAL_COUNTER.next_serial();
 
@@ -278,7 +278,7 @@ impl Aurora {
                     }
                 }
 
-                let pointer = self.seat.get_pointer().unwrap();
+                let pointer = self.pointer.clone();
                 pointer.axis(self, frame);
                 pointer.frame(self);
             }

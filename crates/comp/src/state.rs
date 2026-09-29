@@ -15,7 +15,11 @@ use smithay::{
             update_surface_primary_scanout_output, with_surfaces_surface_tree,
         },
     },
-    input::{Seat, SeatState, pointer::CursorImageStatus},
+    input::{
+        Seat, SeatState,
+        keyboard::KeyboardHandle,
+        pointer::{CursorImageStatus, PointerHandle},
+    },
     output::Output,
     reexports::{
         calloop::{
@@ -73,7 +77,10 @@ pub struct Aurora {
     pub dmabuf_global: Option<DmabufGlobal>,
     pub syncobj_state: Option<DrmSyncobjState>,
 
+    #[allow(dead_code)] // held so the wl_seat global stays alive
     pub seat: Seat<Self>,
+    pub keyboard: KeyboardHandle<Self>,
+    pub pointer: PointerHandle<Self>,
 }
 
 impl Aurora {
@@ -81,7 +88,7 @@ impl Aurora {
         event_loop: &mut EventLoop<'static, Self>,
         display: Display<Self>,
         backend: Backend,
-    ) -> Self {
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let dh = display.handle();
 
         let compositor_state = CompositorState::new::<Self>(&dh);
@@ -95,13 +102,14 @@ impl Aurora {
         let mut seat_state = SeatState::new();
         let mut seat: Seat<Self> = seat_state.new_wl_seat(&dh, backend.seat_name());
         // Hotplug tracking arrives with the DRM backend (M1).
-        seat.add_keyboard(Default::default(), REPEAT_DELAY, REPEAT_RATE)
-            .unwrap();
-        seat.add_pointer();
+        let keyboard = seat
+            .add_keyboard(Default::default(), REPEAT_DELAY, REPEAT_RATE)
+            .map_err(|err| format!("failed to add the keyboard: {err}"))?;
+        let pointer = seat.add_pointer();
 
-        let socket_name = Self::init_wayland_listener(display, event_loop);
+        let socket_name = Self::init_wayland_listener(display, event_loop)?;
 
-        Self {
+        Ok(Self {
             backend,
             clock,
             cursor_status: CursorImageStatus::default_named(),
@@ -123,38 +131,43 @@ impl Aurora {
             dmabuf_global: None,
             syncobj_state: None,
             seat,
-        }
+            keyboard,
+            pointer,
+        })
     }
 
     fn init_wayland_listener(
         display: Display<Aurora>,
         event_loop: &mut EventLoop<Self>,
-    ) -> OsString {
-        let listening_socket = ListeningSocketSource::new_auto().unwrap();
+    ) -> Result<OsString, Box<dyn std::error::Error>> {
+        let listening_socket = ListeningSocketSource::new_auto()
+            .map_err(|err| format!("failed to create the wayland socket: {err}"))?;
         let socket_name = listening_socket.socket_name().to_os_string();
         let handle = event_loop.handle();
 
         handle
             .insert_source(listening_socket, |stream, _, state| {
-                state
+                if let Err(err) = state
                     .display_handle
                     .insert_client(stream, Arc::new(ClientState::default()))
-                    .unwrap();
+                {
+                    tracing::warn!(%err, "failed to accept a wayland client");
+                }
             })
-            .expect("failed to init the wayland listening socket");
+            .map_err(|err| format!("failed to register the wayland socket: {err}"))?;
 
         handle
             .insert_source(
                 Generic::new(display, Interest::READ, Mode::Level),
                 |_, display, state| {
                     // Safety: the display is owned by this source and never dropped while it runs.
-                    unsafe { display.get_mut().dispatch_clients(state).unwrap() };
+                    unsafe { display.get_mut().dispatch_clients(state)? };
                     Ok(PostAction::Continue)
                 },
             )
-            .unwrap();
+            .map_err(|err| format!("failed to register the wayland display: {err}"))?;
 
-        socket_name
+        Ok(socket_name)
     }
 
     pub fn surface_under(
