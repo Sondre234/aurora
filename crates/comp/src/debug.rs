@@ -167,7 +167,8 @@ impl Aurora {
         };
         let kbd = describe(self.keyboard.current_focus());
         let ptr = describe(self.pointer.current_focus());
-        tracing::info!("dump: focus kbd={kbd} pointer={ptr}");
+        let grab = self.wm.drag.unwrap_or("none");
+        tracing::info!("dump: focus kbd={kbd} pointer={ptr} grab={grab}");
         tracing::info!("dump: end {seq}");
     }
 

@@ -2,7 +2,7 @@
 //! projection of it that `apply` keeps in sync. Rectangles here are plain retained state.
 use std::collections::HashMap;
 
-use aurora_layout::{self as layout, Constraints, Gaps, LayoutParams, Rect, WinId};
+use aurora_layout::{self as layout, Constraints, Edges, FsMode, Gaps, LayoutParams, Rect, WinId};
 use smithay::{
     output::Output,
     reexports::wayland_server::{backend::ObjectId, protocol::wl_surface::WlSurface},
@@ -13,6 +13,8 @@ use window::WindowElement;
 
 pub mod apply;
 pub mod focus;
+pub mod grabs;
+pub mod modes;
 pub mod rules;
 pub mod window;
 pub mod workspaces;
@@ -39,11 +41,25 @@ pub struct WinData {
     pub target: Rect,
     pub current: Rect,
     pub sent_size: Option<(i32, i32)>,
-    pub sent_flags: (bool, bool),
+    pub sent_flags: (bool, bool, bool),
     pub constraints: Constraints,
     pub app_id: String,
+    /// Outer rectangle it had when last floating, restored by toggle-floating.
+    pub float_rect: Option<Rect>,
+    /// Set during a floating resize: the edges that stay put while the client catches up.
+    pub resize_anchor: Option<Anchor>,
+    /// Fullscreen or maximize asked for before the window was placed.
+    pub want_mode: Option<FsMode>,
     /// Frame callbacks sent to this window, for the QA dump.
     pub frames_sent: u64,
+}
+
+/// The far edges of a window being resized from its left or top, in content coordinates.
+#[derive(Clone, Copy)]
+pub struct Anchor {
+    pub edges: Edges,
+    pub right: i32,
+    pub bottom: i32,
 }
 
 #[derive(Default)]
@@ -66,6 +82,9 @@ pub struct Wm {
     pub last_visible: String,
     /// Last logged layout line per workspace, so only changes are logged.
     pub last_layout: HashMap<u32, String>,
+    /// The running interactive grab, if any. Layout logging is quiet and configures wait
+    /// for acks while it runs.
+    pub drag: Option<&'static str>,
     next_id: u64,
 }
 

@@ -175,7 +175,7 @@ impl Aurora {
     }
 
     /// Layout-only move of one window; callers relayout and fix focus.
-    fn relocate(&mut self, id: WinId, dst: u32) {
+    pub(super) fn relocate(&mut self, id: WinId, dst: u32) {
         let Some(win) = self.wm.windows.get(&id) else {
             return;
         };

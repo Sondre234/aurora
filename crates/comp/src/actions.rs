@@ -1,6 +1,6 @@
 //! The one place actions run, whether they come from a bind, a repeat timer, a mouse bind
 //! or the QA hooks.
-use aurora_layout::{self as layout, Edges, Kind, Side, WinId};
+use aurora_layout::{self as layout, Edges, FsMode, Kind, Side, WinId};
 use smithay::desktop::WindowSurface;
 
 use crate::{
@@ -44,12 +44,13 @@ impl Aurora {
             }
             Action::Workspace(target) => self.switch_workspace(target),
             Action::MoveToWorkspace(n) => self.move_to_workspace(n),
-            // Outputs, floating, fullscreen and mouse drags come with later steps.
+            Action::ToggleFloating => self.toggle_floating(),
+            Action::Fullscreen => self.toggle_mode(FsMode::Fullscreen),
+            Action::Maximize => self.toggle_mode(FsMode::Maximized),
+            // Drags start from the button press itself (see `on_pointer_button`), so as a
+            // key bind they do nothing. Output actions come with the multi-monitor step.
             Action::FocusOutput(_)
             | Action::MoveToOutput(_)
-            | Action::ToggleFloating
-            | Action::Fullscreen
-            | Action::Maximize
             | Action::DragMove
             | Action::DragResize
             | Action::None => {}
@@ -71,7 +72,7 @@ impl Aurora {
         }
     }
 
-    fn focused_with_ws(&self) -> Option<(WinId, u32)> {
+    pub(crate) fn focused_with_ws(&self) -> Option<(WinId, u32)> {
         let id = self.wm.focused?;
         Some((id, self.wm.windows.get(&id)?.ws))
     }
@@ -132,11 +133,13 @@ impl Aurora {
         }
     }
 
+    /// Moves the split on the window's right/bottom side (the layout falls back to the left/top
+    /// one at the screen edge) in the direction pressed.
     fn resize_split(&mut self, dir: Dir, px: i32) {
         let (edges, dx, dy) = match dir {
-            Dir::Left => (Edges::LEFT, -px, 0),
+            Dir::Left => (Edges::RIGHT, -px, 0),
             Dir::Right => (Edges::RIGHT, px, 0),
-            Dir::Up => (Edges::TOP, 0, -px),
+            Dir::Up => (Edges::BOTTOM, 0, -px),
             Dir::Down => (Edges::BOTTOM, 0, px),
         };
         self.edit_focused_tiled(|ws, id| {

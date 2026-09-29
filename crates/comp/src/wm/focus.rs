@@ -99,7 +99,14 @@ impl Aurora {
     pub fn focus_under_pointer(&mut self) {
         let pos = self.pointer.current_location();
         if let Some(id) = self.space.element_under(pos).map(|(w, _)| w.id()) {
-            self.focus_window(Some(id), true);
+            // Only floating windows change stacking on a click; tiles never overlap.
+            let raise = self
+                .wm
+                .windows
+                .get(&id)
+                .and_then(|w| self.wm.workspaces.get(&w.ws))
+                .is_some_and(|ws| ws.is_floating(id));
+            self.focus_window(Some(id), raise);
         }
     }
 }

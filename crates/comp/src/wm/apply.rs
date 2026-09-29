@@ -1,8 +1,8 @@
 //! Window lifecycle and the one place that projects layout results onto the `Space`.
 //! Relayout runs on events (map, close, config, output changes), never per frame.
-use aurora_layout::{Constraints, InsertHint, Kind, Placement, Point, Rect, Size, WinId};
+use aurora_layout::{Constraints, Edges, FsMode, InsertHint, Kind, Placement, Point, Rect, Size, WinId};
 use smithay::{
-    desktop::layer_map_for_output,
+    desktop::{layer_map_for_output, space::SpaceElement},
     output::Output,
     reexports::{
         wayland_protocols::xdg::shell::server::xdg_toplevel,
@@ -76,8 +76,20 @@ fn initial_configure_sent(surface: &WlSurface) -> bool {
     })
 }
 
+/// Whether the client still owes an ack for a configure we sent.
+fn has_unacked(toplevel: &ToplevelSurface) -> bool {
+    with_states(toplevel.wl_surface(), |states| {
+        states
+            .data_map
+            .get::<XdgToplevelSurfaceData>()
+            .and_then(|d| d.lock().ok())
+            .is_some_and(|d| !d.pending_configures().is_empty())
+    })
+}
+
 /// Sets size and state on the pending configure and sends it when something changed.
-fn configure(toplevel: &ToplevelSurface, size: (i32, i32), tiled: bool, fullscreen: bool) {
+fn configure(toplevel: &ToplevelSurface, size: (i32, i32), flags: (bool, bool, bool)) {
+    let (tiled, fullscreen, maximized) = flags;
     toplevel.with_pending_state(|s| {
         s.size = (size.0 > 0 && size.1 > 0).then(|| size.into());
         for state in [
@@ -96,6 +108,11 @@ fn configure(toplevel: &ToplevelSurface, size: (i32, i32), tiled: bool, fullscre
             s.states.set(xdg_toplevel::State::Fullscreen);
         } else {
             s.states.unset(xdg_toplevel::State::Fullscreen);
+        }
+        if maximized {
+            s.states.set(xdg_toplevel::State::Maximized);
+        } else {
+            s.states.unset(xdg_toplevel::State::Maximized);
         }
     });
     toplevel.send_pending_configure();
@@ -157,35 +174,65 @@ impl Aurora {
         let general = &self.config.general;
         let colors = [general.border_focused.0, general.border_unfocused.0];
         let border = general.border_width;
+        let dragging = self.wm.drag.is_some();
 
         let mut line = String::new();
         for p in placed {
             let Some(win) = self.wm.windows.get_mut(&p.id) else {
                 continue;
             };
-            let content = p.content;
+            let mut content = p.content;
+            let full = matches!(p.kind, Kind::Fullscreen | Kind::Maximized);
+            let bw = if full { 0 } else { border };
+            // A floating resize from the left or top keeps the far edge where it was, whatever
+            // size the client has actually committed so far.
+            if let (Some(a), Kind::Floating) = (win.resize_anchor, p.kind) {
+                let actual = win.element.geometry().size;
+                if actual.w > 0 && actual.h > 0 {
+                    if a.edges.contains(Edges::LEFT) {
+                        content.x = a.right - actual.w;
+                    }
+                    if a.edges.contains(Edges::TOP) {
+                        content.y = a.bottom - actual.h;
+                    }
+                    if content != p.content
+                        && let Some(workspace) = self.wm.workspaces.get_mut(&ws)
+                    {
+                        workspace.set_floating_rect(p.id, content.shrink(-bw));
+                    }
+                }
+            }
             win.target = content;
             win.current = content;
             win.floating = p.kind == Kind::Floating;
             win.fs = p.kind == Kind::Fullscreen;
             win.ws = ws;
+            if win.floating {
+                win.float_rect = Some(content.shrink(-bw));
+            }
 
             let deco = win.element.deco();
             deco.set_z(match p.kind {
-                Kind::Floating => Z_FLOATING,
                 Kind::Fullscreen => Z_FULLSCREEN,
-                _ => Z_TILED,
+                Kind::Floating | Kind::Maximized => Z_FLOATING,
+                Kind::Tiled => Z_TILED,
             });
-            deco.set_border(border, colors);
+            deco.set_border(bw, colors);
 
             let size = (content.w, content.h);
-            let flags = (p.kind == Kind::Tiled, win.fs);
-            if win.sent_size != Some(size) || win.sent_flags != flags {
+            let flags = (
+                p.kind == Kind::Tiled,
+                p.kind == Kind::Fullscreen,
+                p.kind == Kind::Maximized,
+            );
+            if (win.sent_size != Some(size) || win.sent_flags != flags)
+                && let Some(toplevel) = win.element.toplevel()
+                // While dragging, wait for the ack: the commit that follows re-runs this.
+                && !(dragging && has_unacked(toplevel))
+            {
                 win.sent_size = Some(size);
                 win.sent_flags = flags;
-                if let Some(toplevel) = win.element.toplevel() {
-                    configure(toplevel, size, flags.0, flags.1);
-                }
+                configure(toplevel, size, flags);
             }
 
             if win.phase == Phase::Mapped {
@@ -206,7 +253,11 @@ impl Aurora {
                 p.outer.w,
                 p.outer.h,
                 if win.floating { " float" } else { "" },
-                if win.fs { " fs" } else { "" },
+                match p.kind {
+                    Kind::Fullscreen => " fs",
+                    Kind::Maximized => " max",
+                    _ => "",
+                },
             );
         }
 
@@ -227,7 +278,7 @@ impl Aurora {
             output.name(),
             line.trim_start()
         );
-        if self.wm.last_layout.get(&ws) != Some(&line) {
+        if !dragging && self.wm.last_layout.get(&ws) != Some(&line) {
             tracing::info!("{line}");
             self.wm.last_layout.insert(ws, line);
         }
@@ -255,7 +306,10 @@ impl Aurora {
                 target: Rect::default(),
                 current: Rect::default(),
                 sent_size: None,
-                sent_flags: (false, false),
+                sent_flags: (false, false, false),
+                float_rect: None,
+                resize_anchor: None,
+                want_mode: None,
                 constraints: Constraints::default(),
                 app_id: String::new(),
                 frames_sent: 0,
@@ -275,7 +329,15 @@ impl Aurora {
         // A client that destroys its role and commits resets the initial-configure flag, so
         // the placed check keeps a dying window from being mapped again.
         match phase {
-            Phase::Mapped => self.refresh_constraints(id, surface),
+            Phase::Mapped => {
+                self.refresh_constraints(id, surface);
+                // A drag waits for the client's ack and size, which arrive with this commit.
+                if self.wm.drag.is_some()
+                    && let Some(ws) = self.wm.windows.get(&id).map(|w| w.ws)
+                {
+                    self.relayout_ws(ws);
+                }
+            }
             Phase::Pending if !placed && !initial_configure_sent(surface) => {
                 self.map_request(id, surface)
             }
@@ -349,7 +411,7 @@ impl Aurora {
 
         let workspace = self.wm.workspaces.entry(ws).or_default();
         if decision.floating {
-            let rect = floating_rect(work, parent_rect, constraints, params.border);
+            let rect = floating_rect(work, parent_rect, constraints, decision.size, params.border);
             workspace.add_floating(id, rect);
         } else {
             let after = self
@@ -368,9 +430,18 @@ impl Aurora {
             workspace.add_tiled(id, hint, constraints);
         }
         workspace.set_parent(id, parent);
+        let mode = if decision.fullscreen {
+            Some(FsMode::Fullscreen)
+        } else {
+            self.wm.windows.get(&id).and_then(|w| w.want_mode)
+        };
+        if mode.is_some() {
+            workspace.set_fullscreen(id, mode);
+        }
         if let Some(win) = self.wm.windows.get_mut(&id) {
             win.ws = ws;
             win.placed = true;
+            win.want_mode = None;
         }
         self.relayout_ws(ws);
     }
@@ -400,7 +471,11 @@ impl Aurora {
             .as_ref()
             .and_then(|o| self.wm.active_ws.get(o))
             == Some(&ws);
-        if shown_here {
+        // Behind a fullscreen window only its transient children take focus.
+        let blocked = self.wm.workspaces.get(&ws).and_then(|w| w.fullscreen()).is_some_and(|(f, _)| {
+            f != id && self.wm.windows.get(&id).is_some_and(|w| w.parent != Some(f))
+        });
+        if shown_here && !blocked {
             self.focus_window(Some(id), true);
         }
     }
@@ -449,21 +524,27 @@ impl Aurora {
 
 /// Where a new floating window goes: centred on its parent or on the work area, sized
 /// from its hints (or two thirds of the area). `border` grows the result to an outer rect.
-fn floating_rect(work: Rect, parent: Option<Rect>, c: Constraints, border: i32) -> Rect {
-    let pick = |min: i32, max: i32, area: i32| {
-        let mut v = if min > 0 && min == max {
+pub(super) fn floating_rect(
+    work: Rect,
+    parent: Option<Rect>,
+    c: Constraints,
+    size: Option<(i32, i32)>,
+    border: i32,
+) -> Rect {
+    let pick = |min: i32, max: i32, area: i32, want: Option<i32>| {
+        let mut v = want.unwrap_or(if min > 0 && min == max {
             min
         } else {
             area * 2 / 3
-        };
+        });
         v = v.max(min);
         if max > 0 {
             v = v.min(max);
         }
         v.min(area - 2 * border).max(1)
     };
-    let w = pick(c.min.w, c.max.w, work.w) + 2 * border;
-    let h = pick(c.min.h, c.max.h, work.h) + 2 * border;
+    let w = pick(c.min.w, c.max.w, work.w, size.map(|s| s.0)) + 2 * border;
+    let h = pick(c.min.h, c.max.h, work.h, size.map(|s| s.1)) + 2 * border;
     let anchor = parent.unwrap_or(work).center();
     let x = (anchor.x - w / 2).clamp(work.x, (work.right() - w).max(work.x));
     let y = (anchor.y - h / 2).clamp(work.y, (work.bottom() - h).max(work.y));

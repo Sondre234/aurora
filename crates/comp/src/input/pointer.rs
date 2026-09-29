@@ -5,8 +5,10 @@ use smithay::{
 };
 
 use crate::{
+    action::Action,
     config::keybind::{Chord, Mods, Trigger, WheelDir},
     state::Aurora,
+    wm::grabs::DragKind,
 };
 
 /// One axis of a scroll event, as the backend reported it.
@@ -50,6 +52,15 @@ fn clamp_to_outputs(
 const MAX_WHEEL_STEPS: usize = 8;
 
 impl Aurora {
+    /// Starts the drag a mouse bind asked for on the window under the pointer.
+    fn start_bound_drag(&mut self, kind: DragKind, button: u32) -> bool {
+        let pos = self.pointer.current_location();
+        let Some(id) = self.space.element_under(pos).map(|(e, _)| e.id()) else {
+            return false;
+        };
+        self.start_drag(id, kind, None, button, SERIAL_COUNTER.next_serial())
+    }
+
     pub(crate) fn clamp_pointer(&self, pos: Point<f64, Logical>) -> Point<f64, Logical> {
         let geos: Vec<_> = self
             .space
@@ -149,7 +160,6 @@ impl Aurora {
             let held = &mut self.input.suppressed_buttons;
             if let Some(i) = held.iter().position(|b| *b == button) {
                 held.swap_remove(i);
-                // Interactive drags end here once they exist.
                 return;
             }
         } else {
@@ -162,9 +172,23 @@ impl Aurora {
                     trigger: Trigger::Button(button),
                 };
                 if let Some(bind) = self.config.binds.get(&chord).cloned() {
-                    self.input.suppressed_buttons.push(button);
-                    self.dispatch(bind.action);
-                    return;
+                    let kind = match bind.action {
+                        Action::DragMove => Some(DragKind::Move),
+                        Action::DragResize => Some(DragKind::Resize),
+                        _ => None,
+                    };
+                    match kind {
+                        // The grab goes in first and then takes the press below, so the
+                        // client under the pointer never sees it; its release ends the grab.
+                        Some(kind) if self.start_bound_drag(kind, button) => {
+                            tracing::info!("action: {}", bind.action);
+                        }
+                        _ => {
+                            self.input.suppressed_buttons.push(button);
+                            self.dispatch(bind.action);
+                            return;
+                        }
+                    }
                 }
             }
         }

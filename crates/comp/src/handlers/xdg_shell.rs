@@ -1,13 +1,20 @@
 use smithay::{
     desktop::{PopupKind, PopupManager, find_popup_root_surface, get_popup_toplevel_coords},
-    reexports::wayland_server::protocol::{wl_seat, wl_surface::WlSurface},
+    reexports::{
+        wayland_protocols::xdg::shell::server::xdg_toplevel,
+        wayland_server::protocol::{wl_output::WlOutput, wl_seat, wl_surface::WlSurface},
+    },
     utils::Serial,
     wayland::shell::xdg::{
         PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
     },
 };
 
-use crate::Aurora;
+use crate::{
+    Aurora,
+    wm::grabs::{DragKind, xdg_edges},
+};
+use aurora_layout::FsMode;
 
 impl XdgShellHandler for Aurora {
     fn xdg_shell_state(&mut self) -> &mut XdgShellState {
@@ -47,7 +54,35 @@ impl XdgShellHandler for Aurora {
         self.queue_redraw_all();
     }
 
-    // Interactive move/resize arrive with the tiling layout.
+    fn move_request(&mut self, surface: ToplevelSurface, _seat: wl_seat::WlSeat, serial: Serial) {
+        self.xdg_drag(surface.wl_surface(), DragKind::Move, None, serial);
+    }
+
+    fn resize_request(
+        &mut self,
+        surface: ToplevelSurface,
+        _seat: wl_seat::WlSeat,
+        serial: Serial,
+        edges: xdg_toplevel::ResizeEdge,
+    ) {
+        self.xdg_drag(surface.wl_surface(), DragKind::Resize, xdg_edges(edges), serial);
+    }
+
+    fn fullscreen_request(&mut self, surface: ToplevelSurface, _output: Option<WlOutput>) {
+        self.request_mode(surface.wl_surface(), FsMode::Fullscreen, true);
+    }
+
+    fn unfullscreen_request(&mut self, surface: ToplevelSurface) {
+        self.request_mode(surface.wl_surface(), FsMode::Fullscreen, false);
+    }
+
+    fn maximize_request(&mut self, surface: ToplevelSurface) {
+        self.request_mode(surface.wl_surface(), FsMode::Maximized, true);
+    }
+
+    fn unmaximize_request(&mut self, surface: ToplevelSurface) {
+        self.request_mode(surface.wl_surface(), FsMode::Maximized, false);
+    }
 
     fn grab(&mut self, _surface: PopupSurface, _seat: wl_seat::WlSeat, _serial: Serial) {
         // TODO popup grabs
