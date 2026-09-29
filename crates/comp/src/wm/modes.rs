@@ -3,6 +3,7 @@
 use aurora_layout::{FsMode, InsertHint, Point, WinId};
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 
+use super::Phase;
 use super::{
     apply::floating_rect,
     layout_params,
@@ -106,6 +107,19 @@ impl Aurora {
             }
         }
         self.relayout_ws(ws);
+        // Whatever just went out of sight cannot keep the keyboard.
+        if set
+            && self.wm.focused.is_some_and(|f| {
+                !self.wm.is_visible(f) && self.wm.windows.get(&f).is_some_and(|w| w.ws == ws)
+            })
+            && self
+                .wm
+                .windows
+                .get(&id)
+                .is_some_and(|w| w.phase == Phase::Mapped)
+        {
+            self.focus_window(Some(id), true);
+        }
         // A request always gets an answer, even when the window is hidden or unchanged.
         if let Some(toplevel) = toplevel {
             toplevel.send_pending_configure();

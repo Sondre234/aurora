@@ -572,20 +572,7 @@ impl Aurora {
             .and_then(|o| self.wm.active_ws.get(o))
             == Some(&ws);
         // Behind a fullscreen window only its transient children take focus.
-        let blocked = self
-            .wm
-            .workspaces
-            .get(&ws)
-            .and_then(|w| w.fullscreen())
-            .is_some_and(|(f, _)| {
-                f != id
-                    && self
-                        .wm
-                        .windows
-                        .get(&id)
-                        .is_some_and(|w| w.parent != Some(f))
-            });
-        if shown_here && !blocked {
+        if shown_here && self.wm.is_visible(id) {
             self.focus_window(Some(id), true);
         }
     }

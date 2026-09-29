@@ -15,6 +15,21 @@ impl Aurora {
                 .get(i)
                 .is_some_and(|w| w.phase == Phase::Mapped)
         });
+        // A window hidden behind a fullscreen one cannot take the keyboard: that one does.
+        let id = id.map(|i| {
+            self.wm
+                .windows
+                .get(&i)
+                .filter(|_| !self.wm.is_visible(i))
+                .and_then(|w| self.wm.front_window(w.ws))
+                .filter(|f| {
+                    self.wm
+                        .windows
+                        .get(f)
+                        .is_some_and(|w| w.phase == Phase::Mapped)
+                })
+                .unwrap_or(i)
+        });
         let prev = self.wm.focused;
         // An exclusive layer owns the keyboard: window focus then only updates what the
         // keyboard returns to.

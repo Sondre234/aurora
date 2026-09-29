@@ -90,6 +90,7 @@ impl Aurora {
                 .windows
                 .get(id)
                 .is_some_and(|w| w.phase == Phase::Mapped)
+                && self.wm.is_visible(*id)
         };
         let target = self
             .wm
@@ -100,7 +101,7 @@ impl Aurora {
                 self.wm
                     .windows
                     .values()
-                    .filter(|w| w.ws == ws && w.phase == Phase::Mapped)
+                    .filter(|w| w.ws == ws && w.phase == Phase::Mapped && self.wm.is_visible(w.id))
                     .map(|w| w.id)
                     .min()
             });

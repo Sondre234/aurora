@@ -156,6 +156,32 @@ impl Wm {
         self.windows.get(&self.id_of(surface)?)
     }
 
+    /// Whether `id` can be seen: a fullscreen or maximized window hides every other window
+    /// of its workspace except its own transient descendants.
+    pub fn is_visible(&self, id: WinId) -> bool {
+        let Some(win) = self.windows.get(&id) else {
+            return false;
+        };
+        let Some((front, _)) = self.workspaces.get(&win.ws).and_then(|w| w.fullscreen()) else {
+            return true;
+        };
+        let mut cur = Some(id);
+        // Bounded so a parent cycle from a client cannot hang the walk.
+        for _ in 0..16 {
+            match cur {
+                Some(c) if c == front => return true,
+                Some(c) => cur = self.windows.get(&c).and_then(|w| w.parent),
+                None => break,
+            }
+        }
+        false
+    }
+
+    /// The fullscreen or maximized window of `ws`, if any.
+    pub fn front_window(&self, ws: u32) -> Option<WinId> {
+        self.workspaces.get(&ws)?.fullscreen().map(|(f, _)| f)
+    }
+
     /// Whether a fullscreen window (not merely maximized) covers what `output` shows.
     pub fn output_fullscreen(&self, output: &Output) -> bool {
         self.active_ws
