@@ -1,45 +1,230 @@
 use smithay::{
     backend::input::{
         AbsolutePositionEvent, Axis, AxisSource, ButtonState, Event, InputBackend, InputEvent,
-        KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent,
+        KeyState, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent, PointerMotionEvent,
     },
     input::{
-        keyboard::FilterResult,
-        pointer::{AxisFrame, ButtonEvent, MotionEvent},
+        keyboard::{FilterResult, Keycode, ModifiersState, keysyms},
+        pointer::{AxisFrame, ButtonEvent, MotionEvent, RelativeMotionEvent},
     },
     reexports::wayland_server::protocol::wl_surface::WlSurface,
-    utils::SERIAL_COUNTER,
+    utils::{Logical, Point, Rectangle, SERIAL_COUNTER},
 };
 
 use crate::state::Aurora;
 
+/// Compositor-level key actions, decided before clients see the key.
+#[derive(Clone, Copy)]
+enum KeyAction {
+    Quit,
+    VtSwitch(i32),
+    None,
+}
+
+/// evdev KEY_BACKSPACE (14) plus the xkb offset of 8.
+const KEYCODE_BACKSPACE: u32 = 14 + 8;
+
+fn key_action(
+    modifiers: &ModifiersState,
+    handle: &smithay::input::keyboard::KeysymHandle<'_>,
+) -> Option<KeyAction> {
+    // AltGr counts as Alt: with the altgr-intl layout the right Alt is not Mod1.
+    let ctrl_alt = modifiers.ctrl && (modifiers.alt || modifiers.iso_level3_shift);
+    let raw = handle.raw_syms();
+
+    // Matched on raw syms and keycode so no layout or level can hide it.
+    if ctrl_alt
+        && (handle.raw_code() == Keycode::new(KEYCODE_BACKSPACE)
+            || raw.iter().any(|s| {
+                matches!(
+                    s.raw(),
+                    keysyms::KEY_BackSpace | keysyms::KEY_Terminate_Server
+                )
+            }))
+    {
+        return Some(KeyAction::Quit);
+    }
+
+    let modified = handle.modified_sym().raw();
+    if (keysyms::KEY_XF86Switch_VT_1..=keysyms::KEY_XF86Switch_VT_12).contains(&modified) {
+        return Some(KeyAction::VtSwitch(
+            (modified - keysyms::KEY_XF86Switch_VT_1 + 1) as i32,
+        ));
+    }
+    if ctrl_alt {
+        let f = raw
+            .iter()
+            .map(|s| s.raw())
+            .find(|s| (keysyms::KEY_F1..=keysyms::KEY_F12).contains(s));
+        if let Some(f) = f {
+            return Some(KeyAction::VtSwitch((f - keysyms::KEY_F1 + 1) as i32));
+        }
+    } else if modifiers.ctrl
+        && raw
+            .iter()
+            .any(|s| (keysyms::KEY_F1..=keysyms::KEY_F12).contains(&s.raw()))
+    {
+        // Leaves a trace when a VT chord is pressed with the wrong modifiers.
+        tracing::info!(
+            alt = modifiers.alt,
+            altgr = modifiers.iso_level3_shift,
+            logo = modifiers.logo,
+            "Ctrl+F-key pressed without Alt, not a VT switch"
+        );
+    }
+    None
+}
+
+/// Clamps to the nearest output rectangle; free movement when there are none.
+fn clamp_to_outputs(
+    pos: Point<f64, Logical>,
+    outputs: &[Rectangle<i32, Logical>],
+) -> Point<f64, Logical> {
+    let clamp_to = |r: &Rectangle<i32, Logical>| {
+        // The far edge is exclusive, so stop one pixel short of it.
+        let x = pos
+            .x
+            .clamp(r.loc.x as f64, (r.loc.x + r.size.w - 1).max(r.loc.x) as f64);
+        let y = pos
+            .y
+            .clamp(r.loc.y as f64, (r.loc.y + r.size.h - 1).max(r.loc.y) as f64);
+        Point::<f64, Logical>::from((x, y))
+    };
+    let dist = |p: Point<f64, Logical>| (p.x - pos.x).powi(2) + (p.y - pos.y).powi(2);
+    outputs
+        .iter()
+        .map(clamp_to)
+        .min_by(|a, b| dist(*a).total_cmp(&dist(*b)))
+        .unwrap_or(pos)
+}
+
 impl Aurora {
+    pub(crate) fn clamp_pointer(&self, pos: Point<f64, Logical>) -> Point<f64, Logical> {
+        let geos: Vec<_> = self
+            .space
+            .outputs()
+            .filter_map(|o| self.space.output_geometry(o))
+            .collect();
+        clamp_to_outputs(pos, &geos)
+    }
+
+    /// Pointer motion only changes what is drawn on outputs that hold the old or new
+    /// position (cursor plane, hover state). During a grab a dragged window can span
+    /// other outputs, so everything is repainted.
+    fn queue_redraw_pointer(&mut self, old: Point<f64, Logical>, new: Point<f64, Logical>) {
+        if self.pointer.is_grabbed() {
+            self.queue_redraw_all();
+            return;
+        }
+        let touched: Vec<_> = self
+            .space
+            .outputs()
+            .filter(|o| {
+                self.space
+                    .output_geometry(o)
+                    .is_some_and(|g| g.to_f64().contains(old) || g.to_f64().contains(new))
+            })
+            .cloned()
+            .collect();
+        for output in &touched {
+            self.queue_redraw_output(output);
+        }
+    }
+
     pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>) {
         match event {
             InputEvent::Keyboard { event, .. } => {
                 let serial = SERIAL_COUNTER.next_serial();
                 let time = Event::time(&event);
+                let key_state = event.state();
+                let keycode = event.key_code();
 
-                self.seat.get_keyboard().unwrap().input::<(), _>(
+                // Runs before clients and ignores shortcut inhibitors on purpose: the quit
+                // chord and VT switch must always work.
+                let action = self.keyboard.clone().input::<KeyAction, _>(
                     self,
-                    event.key_code(),
-                    event.state(),
+                    keycode,
+                    key_state,
                     serial,
                     time,
-                    |_, _, _| FilterResult::Forward,
+                    |state, modifiers, handle| {
+                        if key_state == KeyState::Pressed {
+                            match key_action(modifiers, &handle) {
+                                Some(action) => {
+                                    state.suppressed_keys.push(keycode);
+                                    FilterResult::Intercept(action)
+                                }
+                                None => FilterResult::Forward,
+                            }
+                        } else if state.suppressed_keys.contains(&keycode) {
+                            state.suppressed_keys.retain(|k| *k != keycode);
+                            FilterResult::Intercept(KeyAction::None)
+                        } else {
+                            FilterResult::Forward
+                        }
+                    },
                 );
-            }
-            InputEvent::PointerMotion { .. } => {}
-            InputEvent::PointerMotionAbsolute { event, .. } => {
-                let output = self.space.outputs().next().unwrap();
 
-                let output_geo = self.space.output_geometry(output).unwrap();
+                match action {
+                    Some(KeyAction::Quit) => {
+                        tracing::warn!("quitting: quit chord");
+                        crate::safety::arm_exit_deadline();
+                        self.loop_signal.stop();
+                    }
+                    Some(KeyAction::VtSwitch(vt)) => {
+                        tracing::info!(vt, "VT switch requested");
+                        self.backend.change_vt(vt);
+                    }
+                    Some(KeyAction::None) | None => {}
+                }
+                if matches!(action, Some(KeyAction::Quit | KeyAction::VtSwitch(_))) {
+                    let _ = self.display_handle.flush_clients();
+                }
+            }
+            InputEvent::PointerMotion { event, .. } => {
+                let pointer = self.pointer.clone();
+                let serial = SERIAL_COUNTER.next_serial();
+
+                let old_pos = pointer.current_location();
+                let pos = self.clamp_pointer(old_pos + event.delta());
+                let under = self.surface_under(pos);
+
+                pointer.motion(
+                    self,
+                    under.clone(),
+                    &MotionEvent {
+                        location: pos,
+                        serial,
+                        time: event.time(),
+                    },
+                );
+                pointer.relative_motion(
+                    self,
+                    under,
+                    &RelativeMotionEvent {
+                        delta: event.delta(),
+                        delta_unaccel: event.delta_unaccel(),
+                        time: event.time(),
+                    },
+                );
+                pointer.frame(self);
+                self.queue_redraw_pointer(old_pos, pos);
+            }
+            InputEvent::PointerMotionAbsolute { event, .. } => {
+                let Some(output) = self.space.outputs().next() else {
+                    return;
+                };
+
+                let Some(output_geo) = self.space.output_geometry(output) else {
+                    return;
+                };
 
                 let pos = event.position_transformed(output_geo.size) + output_geo.loc.to_f64();
 
                 let serial = SERIAL_COUNTER.next_serial();
 
-                let pointer = self.seat.get_pointer().unwrap();
+                let pointer = self.pointer.clone();
+                let old_pos = pointer.current_location();
 
                 let under = self.surface_under(pos);
 
@@ -53,10 +238,11 @@ impl Aurora {
                     },
                 );
                 pointer.frame(self);
+                self.queue_redraw_pointer(old_pos, pos);
             }
             InputEvent::PointerButton { event, .. } => {
-                let pointer = self.seat.get_pointer().unwrap();
-                let keyboard = self.seat.get_keyboard().unwrap();
+                let pointer = self.pointer.clone();
+                let keyboard = self.keyboard.clone();
 
                 let serial = SERIAL_COUNTER.next_serial();
 
@@ -71,6 +257,7 @@ impl Aurora {
                         .map(|(w, l)| (w.clone(), l))
                     {
                         self.space.raise_element(&window, true);
+                        self.queue_redraw_all();
                         keyboard.set_focus(
                             self,
                             Some(window.toplevel().unwrap().wl_surface().clone()),
@@ -102,12 +289,12 @@ impl Aurora {
             InputEvent::PointerAxis { event, .. } => {
                 let source = event.source();
 
-                let horizontal_amount = event
-                    .amount(Axis::Horizontal)
-                    .unwrap_or_else(|| event.amount_v120(Axis::Horizontal).unwrap_or(0.0) * 15.0 / 120.);
-                let vertical_amount = event
-                    .amount(Axis::Vertical)
-                    .unwrap_or_else(|| event.amount_v120(Axis::Vertical).unwrap_or(0.0) * 15.0 / 120.);
+                let horizontal_amount = event.amount(Axis::Horizontal).unwrap_or_else(|| {
+                    event.amount_v120(Axis::Horizontal).unwrap_or(0.0) * 15.0 / 120.
+                });
+                let vertical_amount = event.amount(Axis::Vertical).unwrap_or_else(|| {
+                    event.amount_v120(Axis::Vertical).unwrap_or(0.0) * 15.0 / 120.
+                });
                 let horizontal_amount_discrete = event.amount_v120(Axis::Horizontal);
                 let vertical_amount_discrete = event.amount_v120(Axis::Vertical);
 
@@ -134,7 +321,7 @@ impl Aurora {
                     }
                 }
 
-                let pointer = self.seat.get_pointer().unwrap();
+                let pointer = self.pointer.clone();
                 pointer.axis(self, frame);
                 pointer.frame(self);
             }

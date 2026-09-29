@@ -1,45 +1,121 @@
+mod backend;
+mod cli;
+mod dmabuf;
 mod handlers;
 mod input;
+mod keymap;
+mod libinput;
+mod log;
+mod safety;
+mod session;
 mod state;
-mod winit;
+mod syncobj;
 
 use smithay::reexports::{calloop::EventLoop, wayland_server::Display};
 
+use backend::{Backend, DrmBackend};
+use cli::{BackendKind, Cli};
 use state::Aurora;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    init_logging();
+fn main() {
+    log::install_panic_hook();
+    log::init();
+    // `run` owns the session and everything else that must drop before this point.
+    if let Err(err) = run() {
+        tracing::error!(%err, "aurora failed");
+        std::process::exit(1);
+    }
+}
 
+fn run() -> Result<(), Box<dyn std::error::Error>> {
+    let cli = Cli::parse()?;
+    tracing::info!(backend = ?cli.backend, timeout = ?cli.timeout, "aurora starting");
+
+    // Declared before `state` so the state (seat, session, devices) drops first.
     let mut event_loop: EventLoop<Aurora> = EventLoop::try_new()?;
     let display: Display<Aurora> = Display::new()?;
-    let mut state = Aurora::new(&mut event_loop, display);
 
-    winit::init(&mut event_loop, &mut state)?;
+    let handle = event_loop.handle();
+    let backend = match cli.backend {
+        BackendKind::Winit => Backend::Winit,
+        BackendKind::Drm => {
+            // First source in the loop, and the first thing that touches the machine.
+            let (session, notifier) = session::open()?;
+            session::insert_notifier(&handle, notifier).map_err(arm)?;
+            let seat = smithay::backend::session::Session::seat(&session);
+            let primary_gpu = backend::drm::gpu::select_primary(&seat).map_err(arm)?;
+            let libinput = libinput::new_context(&session, &seat).map_err(arm)?;
+            Backend::Drm(Box::new(DrmBackend::new(session, libinput, primary_gpu)))
+        }
+    };
+    let mut state = Aurora::new(&mut event_loop, display, backend).map_err(arm)?;
+    state.apply_keymap();
+    // Declared after `state`, so it drops first and bounds the teardown on every exit path.
+    let _deadline = ExitDeadline;
+
+    safety::insert_signals(&handle);
+    if let Some(timeout) = cli.timeout {
+        safety::insert_timeout(&handle, timeout);
+        safety::spawn_watchdog(timeout);
+    }
+
+    match cli.backend {
+        BackendKind::Winit => backend::winit::init(&mut event_loop, &mut state)?,
+        BackendKind::Drm => {
+            if let Backend::Drm(drm) = &state.backend {
+                libinput::insert_source(&handle, drm.input_source())?;
+            }
+            backend::drm::init(&handle, &mut state)?;
+        }
+    }
 
     // Children spawned from here on connect to us, not the host compositor.
     unsafe { std::env::set_var("WAYLAND_DISPLAY", &state.socket_name) };
     tracing::info!(socket = ?state.socket_name, "aurora listening");
 
-    spawn_client();
+    spawn_client(&cli.command);
 
-    event_loop.run(None, &mut state, |_| {})?;
+    event_loop.run(None, &mut state, |state| {
+        // Input and request handlers only queue events; nothing else flushes them.
+        let _ = state.display_handle.flush_clients();
+    })?;
+    safety::arm_exit_deadline();
+    tracing::info!("aurora exiting");
     Ok(())
 }
 
-fn init_logging() {
-    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
-    tracing_subscriber::fmt().with_env_filter(filter).init();
-}
+fn spawn_client(command: &str) {
+    use std::os::unix::process::CommandExt;
 
-/// `aurora-comp -c <command>` runs a client on startup; defaults to kitty.
-fn spawn_client() {
-    let mut args = std::env::args().skip(1);
-    let command = match (args.next().as_deref(), args.next()) {
-        (Some("-c" | "--command"), Some(cmd)) => cmd,
-        _ => "kitty".to_string(),
-    };
-    if let Err(err) = std::process::Command::new(&command).spawn() {
+    let mut cmd = std::process::Command::new(command);
+    // The signalfd source blocks SIGINT/SIGTERM/SIGHUP on this thread; children must not
+    // inherit that mask.
+    // Safety: only async-signal-safe calls between fork and exec.
+    unsafe {
+        cmd.pre_exec(|| {
+            let mut set: libc::sigset_t = std::mem::zeroed();
+            libc::sigemptyset(&mut set);
+            libc::sigprocmask(libc::SIG_SETMASK, &set, std::ptr::null_mut());
+            Ok(())
+        });
+    }
+    if let Err(err) = cmd.spawn() {
         tracing::warn!(%command, %err, "failed to spawn startup client");
     }
+}
+
+/// Arms the hard-exit deadline when dropped, including on early `?` returns.
+struct ExitDeadline;
+
+impl Drop for ExitDeadline {
+    fn drop(&mut self) {
+        safety::arm_exit_deadline();
+    }
+}
+
+/// For `map_err` on startup steps that run before the `ExitDeadline` guard exists: their
+/// locals (session, devices) drop before any guard could.
+fn arm<E>(err: E) -> E {
+    safety::arm_exit_deadline();
+    err
 }

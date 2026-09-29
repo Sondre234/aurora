@@ -1,5 +1,7 @@
 use smithay::{
-    desktop::{PopupKind, PopupManager, Space, Window, find_popup_root_surface, get_popup_toplevel_coords},
+    desktop::{
+        PopupKind, PopupManager, Space, Window, find_popup_root_surface, get_popup_toplevel_coords,
+    },
     reexports::wayland_server::protocol::{wl_seat, wl_surface::WlSurface},
     utils::Serial,
     wayland::{
@@ -28,7 +30,12 @@ impl XdgShellHandler for Aurora {
         let _ = self.popups.track_popup(PopupKind::Xdg(surface));
     }
 
-    fn reposition_request(&mut self, surface: PopupSurface, positioner: PositionerState, token: u32) {
+    fn reposition_request(
+        &mut self,
+        surface: PopupSurface,
+        positioner: PositionerState,
+        token: u32,
+    ) {
         surface.with_pending_state(|state| {
             let geometry = positioner.get_geometry();
             state.geometry = geometry;
@@ -36,6 +43,14 @@ impl XdgShellHandler for Aurora {
         });
         self.unconstrain_popup(&surface);
         surface.send_repositioned(token);
+    }
+
+    fn toplevel_destroyed(&mut self, _surface: ToplevelSurface) {
+        self.queue_redraw_all();
+    }
+
+    fn popup_destroyed(&mut self, _surface: PopupSurface) {
+        self.queue_redraw_all();
     }
 
     // Interactive move/resize arrive with the tiling layout.
@@ -76,7 +91,9 @@ pub fn handle_commit(popups: &mut PopupManager, space: &Space<Window>, surface: 
                 if !xdg.is_initial_configure_sent() {
                     // NOTE: This should never fail as the initial configure is always
                     // allowed.
-                    xdg.send_configure().expect("initial configure failed");
+                    if let Err(err) = xdg.send_configure() {
+                        tracing::warn!(%err, "initial popup configure failed");
+                    }
                 }
             }
             PopupKind::InputMethod(ref _input_method) => {}
@@ -97,9 +114,21 @@ impl Aurora {
             return;
         };
 
-        let output = self.space.outputs().next().unwrap();
-        let output_geo = self.space.output_geometry(output).unwrap();
         let window_geo = self.space.element_geometry(window).unwrap();
+
+        // Output with the largest overlap with the window; first output if none overlaps.
+        let overlap = |g: smithay::utils::Rectangle<i32, smithay::utils::Logical>| {
+            g.intersection(window_geo)
+                .map_or(0, |r| i64::from(r.size.w) * i64::from(r.size.h))
+        };
+        let Some(output_geo) = self
+            .space
+            .outputs()
+            .filter_map(|o| self.space.output_geometry(o))
+            .max_by_key(|g| overlap(*g))
+        else {
+            return;
+        };
 
         // The target geometry for the positioner should be relative to its parent's geometry, so
         // we will compute that here.
