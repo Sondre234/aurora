@@ -13,7 +13,7 @@ impl Aurora {
             self.wm
                 .windows
                 .get(i)
-                .is_some_and(|w| w.phase == Phase::Mapped)
+                .is_some_and(|w| w.phase == Phase::Mapped && self.wm.ws_output.contains_key(&w.ws))
         });
         // A window hidden behind a fullscreen one cannot take the keyboard: that one does.
         let id = id.map(|i| {

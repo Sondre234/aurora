@@ -140,12 +140,13 @@ impl Aurora {
         if src == dst {
             return;
         }
+        self.relocate_with_children(id, dst);
+        // Chosen after the move so a transient child that travelled along is not a candidate.
         let next = self
             .wm
             .workspaces
             .get(&src)
             .and_then(|w| w.focus_after_close(id));
-        self.relocate_with_children(id, dst);
         self.relayout_ws(src);
         self.relayout_ws(dst);
         if self.config.general.move_follows {
