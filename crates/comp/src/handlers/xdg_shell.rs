@@ -107,20 +107,25 @@ impl XdgShellHandler for Aurora {
             return surface.send_popup_done();
         };
         // The serial must be one the compositor issued (a client cannot name the future) from
-        // input the user just made, and the popup must belong to what holds the keyboard.
+        // input the user just made, and the popup must belong to what holds the keyboard or the pointer.
         let issued = smithay::utils::SERIAL_COUNTER.next_serial();
-        let focus_root = keyboard
-            .current_focus()
-            .and_then(|f| f.wl_surface().map(|s| s.into_owned()))
-            .map(|s| match self.popups.find_popup(&s) {
-                Some(kind) => find_popup_root_surface(&kind).unwrap_or(s),
-                None => s,
-            });
+        let root_of = |focus: Option<FocusTarget>| {
+            focus
+                .and_then(|f| f.wl_surface().map(|s| s.into_owned()))
+                .map(|s| match self.popups.find_popup(&s) {
+                    Some(kind) => find_popup_root_surface(&kind).unwrap_or(s),
+                    None => s,
+                })
+        };
+        // Layer surfaces that never take the keyboard (bars) open menus from a click, so the
+        // pointer's target counts as well.
+        let holds_input = root_of(keyboard.current_focus()).as_ref() == Some(&root)
+            || root_of(pointer.current_focus()).as_ref() == Some(&root);
         let recent = keyboard
             .last_enter()
             .is_some_and(|e| serial.is_no_older_than(&e));
         if !issued.is_no_older_than(&serial)
-            || focus_root.as_ref() != Some(&root)
+            || !holds_input
             || !(pointer.has_grab(serial) || keyboard.has_grab(serial) || recent)
         {
             return surface.send_popup_done();
