@@ -37,8 +37,12 @@ pub struct XWaylandState {
     token: Option<RegistrationToken>,
     /// Display number of the last server; a restart reuses it.
     pub display: Option<u32>,
-    /// Only cleared from the teardown idle callback (see `XwmHandler::xwm_state`).
+    /// Only moved out from the teardown idle callback (see `XwmHandler::xwm_state`).
     pub wm: Option<X11Wm>,
+    /// The last manager whose server is gone. Selection transfers registered their own fd
+    /// sources with it, and those keep calling `xwm_state` until they notice the dead
+    /// connection, so it lives until the state drops.
+    pub retired: Option<X11Wm>,
     /// Override-redirect windows (menus, tooltips, some games): never tiled, placed by the
     /// client. Mapped outputs mirror the main space so frame callbacks reach them.
     pub unmanaged: Space<Window>,
@@ -124,7 +128,9 @@ impl Aurora {
     /// crashing.
     fn xwayland_teardown(&mut self, restart: bool) {
         // Window manager first: its X windows are gone with the server anyway.
-        self.xwayland.wm = None;
+        if let Some(old) = self.xwayland.wm.take() {
+            self.xwayland.retired = Some(old);
+        }
         if let Some(token) = self.xwayland.token.take() {
             self.handle.remove(token);
         }

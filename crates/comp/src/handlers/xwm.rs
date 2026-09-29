@@ -43,13 +43,18 @@ impl XWaylandShellHandler for Aurora {
 }
 
 impl XwmHandler for Aurora {
-    fn xwm_state(&mut self, _xwm: XwmId) -> &mut X11Wm {
-        // The X11Wm is dropped only by the teardown idle callback, which runs after its event
-        // channel closed, so smithay has no event left to deliver for a manager that is gone.
-        self.xwayland
-            .wm
-            .as_mut()
-            .expect("xwm_state called without a running X11 window manager")
+    fn xwm_state(&mut self, xwm: XwmId) -> &mut X11Wm {
+        // In-flight selection transfers outlive their manager (see `XWaylandState::retired`);
+        // a stale id finds no transfer in whichever manager answers and the source is removed.
+        let x = &mut self.xwayland;
+        match (x.wm.as_mut(), x.retired.as_mut()) {
+            (Some(wm), _) if wm.id() == xwm => wm,
+            (_, Some(old)) => old,
+            (Some(wm), None) => wm,
+            // Smithay only calls this for a manager that existed, and one is retired, never
+            // dropped, before the next starts.
+            (None, None) => unreachable!("xwm_state without any X11 window manager"),
+        }
     }
 
     fn new_window(&mut self, _xwm: XwmId, window: X11Surface) {
