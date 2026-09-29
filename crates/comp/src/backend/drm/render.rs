@@ -82,6 +82,9 @@ pub struct RenderState {
     /// callbacks so clients stay paced at the refresh rate.
     estimated_vblank: Option<RegistrationToken>,
     last_presentation: Option<Time<Monotonic>>,
+    /// When frame callbacks last went out; paces empty frames. Not `last_presentation`, which
+    /// only a real flip updates and which is therefore stale during no-damage commits.
+    last_frame_callback: Option<Time<Monotonic>>,
     failures: u32,
     /// Set by a session resume until the first frame lands; a failure then means stale buffers.
     after_resume: bool,
@@ -147,6 +150,7 @@ impl RenderState {
         }
         self.frame_pending = false;
         self.last_presentation = None;
+        self.last_frame_callback = None;
         self.failures = 0;
     }
 }
@@ -306,6 +310,7 @@ impl Aurora {
                 }
                 tracing::trace!(?elapsed, queued = rendered.queued, "rendered");
                 if rendered.queued {
+                    surface.render.last_frame_callback = Some(self.clock.now());
                     if let Some(token) = surface.render.estimated_vblank.take() {
                         handle.remove(token);
                     }
@@ -321,7 +326,7 @@ impl Aurora {
                     // No page flip means no vblank; without pacing a client that commits on
                     // every callback would spin the compositor.
                     let frame = frame_time.unwrap_or(Duration::from_millis(16));
-                    let delay = surface.render.last_presentation.map_or(frame, |last| {
+                    let delay = surface.render.last_frame_callback.map_or(frame, |last| {
                         frame.saturating_sub(Time::elapsed(&last, self.clock.now()))
                     });
                     let states = rendered.states;
@@ -405,6 +410,7 @@ impl Aurora {
         if !drm.session_active {
             return;
         }
+        surface.render.last_frame_callback = Some(self.clock.now());
         let output = surface.output.clone();
         let feedback = surface.dmabuf_feedback.clone();
         self.post_repaint(
