@@ -30,6 +30,13 @@ const RESTART_WINDOW: Duration = Duration::from_secs(60);
 /// crashed, so its restart does not count against the limit.
 const HEALTHY_UPTIME: Duration = Duration::from_secs(10);
 
+pub struct Covering {
+    pub window: Window,
+    pub loc: Point<i32, Logical>,
+    pub ws: u32,
+    pub shown: bool,
+}
+
 #[derive(Default)]
 pub struct XWaylandState {
     /// The server's event source. Removing it drops the `XWayland`, which disconnects the
@@ -46,6 +53,10 @@ pub struct XWaylandState {
     /// Override-redirect windows (menus, tooltips, some games): never tiled, placed by the
     /// client. Mapped outputs mirror the main space so frame callbacks reach them.
     pub unmanaged: Space<Window>,
+    /// Override-redirect windows that cover a whole output (games going fullscreen on their
+    /// own). They belong to the workspace the output showed when they mapped: they leave the
+    /// unmanaged space while it is hidden.
+    pub covering: Vec<Covering>,
     restarts: VecDeque<Instant>,
     started: Option<Instant>,
     down: bool,

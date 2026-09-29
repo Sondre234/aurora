@@ -298,6 +298,7 @@ impl Aurora {
         }
 
         self.hide_invisible();
+        self.sync_covering();
 
         let visible = self
             .wm

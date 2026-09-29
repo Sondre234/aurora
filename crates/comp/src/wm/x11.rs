@@ -18,7 +18,7 @@ use super::{
     grabs::DragKind,
     window::WindowElement,
 };
-use crate::{Aurora, focus::FocusTarget};
+use crate::{Aurora, focus::FocusTarget, xwayland::Covering};
 
 fn constraints(x11: &X11Surface) -> Constraints {
     let size = |s: Option<smithay::utils::Size<i32, Logical>>| {
@@ -111,20 +111,72 @@ impl Aurora {
     pub fn x11_map_override_redirect(&mut self, x11: X11Surface) {
         let geo = x11.last_configure();
         let window = Window::new_x11_window(x11.clone());
-        self.xwayland.unmanaged.map_element(window, geo.loc, true);
-        self.queue_redraw_all();
         // Full-output override-redirect windows are how some games go fullscreen without
-        // asking the window manager: they get the keyboard.
-        let covers = self
+        // asking the window manager: they get the keyboard, and belong to the workspace the
+        // output shows so that switching away hides them.
+        let covered = self
             .wm
             .outputs
             .iter()
-            .any(|o| self.space.output_geometry(o) == Some(geo));
-        if covers {
+            .find(|o| self.space.output_geometry(o) == Some(geo))
+            .map(|o| self.wm.active_ws.get(o).copied());
+        self.xwayland
+            .unmanaged
+            .map_element(window.clone(), geo.loc, true);
+        self.queue_redraw_all();
+        if let Some(ws) = covered {
             tracing::info!("x11: override-redirect window covers an output, focusing it");
+            if let Some(ws) = ws {
+                self.xwayland.covering.push(Covering {
+                    window,
+                    loc: geo.loc,
+                    ws,
+                    shown: true,
+                });
+            }
             let serial = SERIAL_COUNTER.next_serial();
             let keyboard = self.keyboard.clone();
             keyboard.set_focus(self, Some(FocusTarget::X11(x11)), serial);
+        }
+    }
+
+    /// Parks covering override-redirect windows whose workspace is hidden and brings them back
+    /// when it is shown again (the keyboard goes back to the window behind, or to the game).
+    pub(super) fn sync_covering(&mut self) {
+        let visible = |ws: u32, wm: &super::Wm| wm.ws_output.contains_key(&ws);
+        let mut hidden = Vec::new();
+        let mut back = None;
+        for c in &mut self.xwayland.covering {
+            match (visible(c.ws, &self.wm), c.shown) {
+                (false, true) => {
+                    c.shown = false;
+                    self.xwayland.unmanaged.unmap_elem(&c.window);
+                    hidden.push(c.window.x11_surface().cloned());
+                }
+                (true, false) => {
+                    c.shown = true;
+                    self.xwayland
+                        .unmanaged
+                        .map_element(c.window.clone(), c.loc, true);
+                    back = c.window.x11_surface().cloned();
+                }
+                _ => {}
+            }
+        }
+        if hidden.is_empty() && back.is_none() {
+            return;
+        }
+        self.queue_redraw_all();
+        if let Some(x11) = back {
+            let serial = SERIAL_COUNTER.next_serial();
+            let keyboard = self.keyboard.clone();
+            keyboard.set_focus(self, Some(FocusTarget::X11(x11)), serial);
+        } else if hidden
+            .into_iter()
+            .flatten()
+            .any(|x| self.keyboard.current_focus() == Some(FocusTarget::X11(x)))
+        {
+            self.focus_window(self.wm.focused, false);
         }
     }
 
@@ -134,6 +186,9 @@ impl Aurora {
         if let Some(id) = self.x11_id(x11) {
             self.wm_remove_window(id);
         }
+        self.xwayland
+            .covering
+            .retain(|c| c.window.x11_surface() != Some(x11));
         let unmanaged = self
             .xwayland
             .unmanaged
@@ -162,6 +217,7 @@ impl Aurora {
         for id in ids {
             self.wm_remove_window(id);
         }
+        self.xwayland.covering.clear();
         let windows: Vec<Window> = self.xwayland.unmanaged.elements().cloned().collect();
         for window in windows {
             self.xwayland.unmanaged.unmap_elem(&window);
@@ -214,6 +270,11 @@ impl Aurora {
 
     /// Override-redirect windows move and resize themselves.
     pub fn x11_configure_notify(&mut self, x11: &X11Surface, geo: Rectangle<i32, Logical>) {
+        for c in &mut self.xwayland.covering {
+            if c.window.x11_surface() == Some(x11) {
+                c.loc = geo.loc;
+            }
+        }
         let window = self
             .xwayland
             .unmanaged
