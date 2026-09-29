@@ -408,10 +408,16 @@ impl Aurora {
             },
             &self.config.window_rules,
         );
-        // A rule may name a workspace that is hidden or shown on another output.
+        // A rule may name a workspace that is hidden or shown on another output; an explicit
+        // workspace wins over an output.
+        let by_output = decision.output.as_deref().and_then(|name| {
+            let out = self.wm.outputs.iter().find(|o| o.name() == name)?;
+            self.wm.active_ws.get(out).copied()
+        });
         let ws = decision
             .workspace
             .filter(|w| (1..=self.config.general.workspaces).contains(w))
+            .or(by_output)
             .unwrap_or(active_ws);
         let output = self.wm.output_for_ws(ws).unwrap_or(active);
         let Some((work, _)) = self.work_area(&output) else {

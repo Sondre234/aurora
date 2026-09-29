@@ -16,6 +16,8 @@ pub struct Attrs<'a> {
 pub struct Decision {
     pub floating: bool,
     pub workspace: Option<u32>,
+    /// Connector name; the window goes to the workspace that output shows (unless `workspace` is set).
+    pub output: Option<String>,
     /// Content size for a floating window.
     pub size: Option<(i32, i32)>,
     pub fullscreen: bool,
@@ -28,6 +30,7 @@ pub fn evaluate(attrs: &Attrs, rules: &[WindowRule]) -> Decision {
     let mut decision = Decision {
         floating: attrs.has_parent || fixed,
         workspace: None,
+        output: None,
         size: None,
         fullscreen: false,
     };
@@ -37,6 +40,9 @@ pub fn evaluate(attrs: &Attrs, rules: &[WindowRule]) -> Decision {
         }
         if rule.workspace.is_some() {
             decision.workspace = rule.workspace;
+        }
+        if rule.output.is_some() {
+            decision.output.clone_from(&rule.output);
         }
         if rule.size.is_some() {
             decision.size = rule.size;
