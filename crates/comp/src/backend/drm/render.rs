@@ -208,6 +208,9 @@ impl Aurora {
         };
         for (node, device) in &mut drm.devices {
             for (crtc, surface) in &mut device.surfaces {
+                // A flip in flight at the pause leaves a stale pending frame in the DRM
+                // compositor that would block every later submit. Ok(None) means clean.
+                while let Ok(Some(_)) = surface.drm_output.frame_submitted() {}
                 surface.render.cancel(&handle);
                 surface.render.after_resume = true;
                 surface.render.damage(&handle, *node, *crtc);
