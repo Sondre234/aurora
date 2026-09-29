@@ -13,7 +13,7 @@ use smithay::{
             output::{DrmOutput, DrmOutputManager, DrmOutputRenderElements},
         },
         egl::{EGLContext, EGLDevice, EGLDisplay, context::ContextPriority},
-        renderer::{ImportMemWl, gles::GlesRenderer},
+        renderer::{ImportDma, ImportMemWl, gles::GlesRenderer},
         session::Session,
     },
     desktop::utils::OutputPresentationFeedback,
@@ -35,7 +35,11 @@ use smithay_drm_extras::{
 };
 
 use super::render::{OutputElement, RenderState, vblank_handler};
-use crate::{backend::Backend, state::Aurora};
+use crate::{
+    backend::Backend,
+    dmabuf::{SurfaceDmabufFeedback, surface_feedback},
+    state::Aurora,
+};
 
 pub type Allocator = GbmAllocator<DrmDeviceFd>;
 pub type Exporter = GbmFramebufferExporter<DrmDeviceFd>;
@@ -67,6 +71,7 @@ pub struct Surface {
     pub drm_output: ConnectorOutput,
     pub output: Output,
     pub render: RenderState,
+    pub dmabuf_feedback: Option<SurfaceDmabufFeedback>,
     global: Option<GlobalId>,
     dh: DisplayHandle,
 }
@@ -85,7 +90,6 @@ pub struct Device {
     pub surfaces: HashMap<crtc::Handle, Surface>,
     pub output_manager: OutputManager,
     scanner: DrmScanner,
-    #[allow(dead_code)] // used for dmabuf feedback
     pub render_node: DrmNode,
     registration_token: RegistrationToken,
 }
@@ -168,6 +172,9 @@ impl Aurora {
         );
 
         self.shm_state.update_formats(renderer.shm_formats());
+
+        self.init_dmabuf(Some(render_node), renderer.dmabuf_formats());
+        self.init_syncobj(output_manager.device().device_fd().clone());
 
         let registration_token = self
             .handle
@@ -356,6 +363,9 @@ impl Aurora {
             }
         };
 
+        let dmabuf_feedback = drm_output.with_compositor(|c| {
+            surface_feedback(device.render_node, &renderer.dmabuf_formats(), c.surface())
+        });
         let global = output.create_global::<Aurora>(&self.display_handle);
         // Lay outputs out left to right in discovery order.
         let x = self
@@ -387,6 +397,7 @@ impl Aurora {
                 output,
                 global: Some(global),
                 render,
+                dmabuf_feedback,
                 dh: self.display_handle.clone(),
             },
         );

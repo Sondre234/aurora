@@ -1,10 +1,12 @@
 use std::{ffi::OsString, sync::Arc, time::Duration};
 
-use crate::backend::Backend;
+use crate::{backend::Backend, dmabuf::SurfaceDmabufFeedback};
 use smithay::input::keyboard::Keycode;
 
 use smithay::{
-    backend::renderer::element::{RenderElementStates, default_primary_scanout_output_compare},
+    backend::renderer::element::{
+        RenderElementStates, default_primary_scanout_output_compare, utils::select_dmabuf_feedback,
+    },
     desktop::{
         PopupManager, Space, Window, WindowSurfaceType, layer_map_for_output,
         utils::{
@@ -28,6 +30,8 @@ use smithay::{
     utils::{Clock, Logical, Monotonic, Point},
     wayland::{
         compositor::{CompositorClientState, CompositorState},
+        dmabuf::{DmabufGlobal, DmabufState},
+        drm_syncobj::DrmSyncobjState,
         output::OutputManagerState,
         presentation::PresentationState,
         selection::data_device::DataDeviceState,
@@ -64,6 +68,10 @@ pub struct Aurora {
     pub presentation_state: PresentationState,
     pub seat_state: SeatState<Aurora>,
     pub data_device_state: DataDeviceState,
+    pub dmabuf_state: DmabufState,
+    #[allow(dead_code)] // held so the linux-dmabuf global stays alive
+    pub dmabuf_global: Option<DmabufGlobal>,
+    pub syncobj_state: Option<DrmSyncobjState>,
 
     pub seat: Seat<Self>,
 }
@@ -111,6 +119,9 @@ impl Aurora {
             presentation_state,
             seat_state,
             data_device_state,
+            dmabuf_state: DmabufState::new(),
+            dmabuf_global: None,
+            syncobj_state: None,
             seat,
         }
     }
@@ -159,10 +170,16 @@ impl Aurora {
             })
     }
 
-    /// Sends frame callbacks for everything drawn on `output`. Surfaces whose primary
-    /// scanout output is elsewhere are throttled to one callback a second.
-    /// Dmabuf feedback per surface joins this with the dmabuf step.
-    pub fn post_repaint(&mut self, output: &Output, time: Duration) {
+    /// Sends frame callbacks for everything drawn on `output`, plus dmabuf feedback when the
+    /// output has scanout feedback. Surfaces whose primary scanout output is elsewhere are
+    /// throttled to one callback a second.
+    pub fn post_repaint(
+        &mut self,
+        output: &Output,
+        time: Duration,
+        dmabuf_feedback: Option<&SurfaceDmabufFeedback>,
+        states: &RenderElementStates,
+    ) {
         let throttle = Some(Duration::from_secs(1));
 
         for window in self.space.elements() {
@@ -181,6 +198,20 @@ impl Aurora {
                 throttle,
                 surface_primary_scanout_output,
             );
+        }
+
+        // Scanout feedback exists only on DRM outputs.
+        let Some(fb) = dmabuf_feedback else { return };
+        let select = |surface: &WlSurface, _: &_| {
+            select_dmabuf_feedback(surface, states, &fb.render_feedback, &fb.scanout_feedback)
+        };
+        for window in self.space.elements() {
+            if self.space.outputs_for_element(window).contains(output) {
+                window.send_dmabuf_feedback(output, surface_primary_scanout_output, select);
+            }
+        }
+        for layer in layer_map_for_output(output).layers() {
+            layer.send_dmabuf_feedback(output, surface_primary_scanout_output, select);
         }
     }
 }

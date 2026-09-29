@@ -1,5 +1,6 @@
 mod backend;
 mod cli;
+mod dmabuf;
 mod handlers;
 mod input;
 mod keymap;
@@ -8,6 +9,7 @@ mod log;
 mod safety;
 mod session;
 mod state;
+mod syncobj;
 
 use smithay::reexports::{calloop::EventLoop, wayland_server::Display};
 

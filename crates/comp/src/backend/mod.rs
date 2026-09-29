@@ -23,8 +23,8 @@ impl Backend {
         }
     }
 
-    /// Hook for importing a surface buffer before commit (dmabuf/explicit sync on DRM).
-    #[allow(dead_code)]
+    /// Hook run on commit after buffer bookkeeping. Single-GPU, so buffers are imported by the
+    /// renderer at draw time and there is nothing to do; multi-GPU would import here.
     pub fn early_import(&mut self, _surface: &WlSurface) {}
 
     /// Switches virtual terminal; nothing to do when nested.

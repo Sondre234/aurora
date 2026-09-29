@@ -13,7 +13,7 @@ use smithay::{
         renderer::{
             damage::Error as OutputDamageTrackerError,
             element::{
-                Kind,
+                Kind, RenderElementStates,
                 memory::MemoryRenderBufferRenderElement,
                 render_elements,
                 surface::{WaylandSurfaceRenderElement, render_elements_from_surface_tree},
@@ -147,6 +147,7 @@ impl RenderState {
 struct Rendered {
     /// A frame was queued for scanout; its vblank must be awaited.
     queued: bool,
+    states: RenderElementStates,
 }
 
 fn frame_duration(output: &Output) -> Option<Duration> {
@@ -293,7 +294,13 @@ impl Aurora {
                     tracing::debug!(?elapsed, budget = ?frame / 2, "render over budget");
                 }
                 tracing::trace!(?elapsed, queued = rendered.queued, "rendered");
-                self.post_repaint(&output, Duration::from(self.clock.now()));
+                let feedback = surface.dmabuf_feedback.clone();
+                self.post_repaint(
+                    &output,
+                    Duration::from(self.clock.now()),
+                    feedback.as_ref(),
+                    &rendered.states,
+                );
                 let _ = self.display_handle.flush_clients();
             }
             Some(Ok(None)) => {}
@@ -498,7 +505,7 @@ fn render_output(
             .queue_frame(Some(feedback))
             .map_err(SwapBuffersError::from)?;
     }
-    Ok(Some(Rendered { queued }))
+    Ok(Some(Rendered { queued, states }))
 }
 
 /// The pointer as render elements, empty when it is hidden or on another output.

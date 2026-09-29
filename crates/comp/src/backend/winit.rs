@@ -3,7 +3,7 @@ use std::time::Duration;
 use smithay::{
     backend::{
         renderer::{
-            damage::OutputDamageTracker, element::surface::WaylandSurfaceRenderElement,
+            ImportDma, damage::OutputDamageTracker, element::surface::WaylandSurfaceRenderElement,
             gles::GlesRenderer,
         },
         winit::{self, WinitEvent},
@@ -45,6 +45,11 @@ pub fn init(
     );
     output.set_preferred(mode);
     state.space.map_output(&output, (0, 0));
+
+    state.init_dmabuf(
+        crate::dmabuf::renderer_node(backend.renderer()),
+        backend.renderer().dmabuf_formats(),
+    );
 
     let mut damage_tracker = OutputDamageTracker::from_output(&output);
 

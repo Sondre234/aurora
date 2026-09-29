@@ -26,8 +26,13 @@ impl CompositorHandler for Aurora {
         &client.get_data::<ClientState>().unwrap().compositor_state
     }
 
+    fn new_surface(&mut self, surface: &WlSurface) {
+        crate::syncobj::install_blocker_hook(surface);
+    }
+
     fn commit(&mut self, surface: &WlSurface) {
         on_commit_buffer_handler::<Self>(surface);
+        self.backend.early_import(surface);
         let mut outputs = Vec::new();
         if !is_sync_subsurface(surface) {
             let mut root = surface.clone();
