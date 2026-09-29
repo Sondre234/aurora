@@ -134,7 +134,7 @@ impl XdgShellHandler for Aurora {
             grab.ungrab(PopupUngrabStrategy::All);
             return;
         }
-        keyboard.set_focus(self, grab.current_grab().map(FocusTarget::from), serial);
+        keyboard.set_focus(self, grab.current_grab(), serial);
         keyboard.set_grab(self, PopupKeyboardGrab::new(&grab), serial);
         pointer.set_grab(self, PopupPointerGrab::new(&grab), serial, Focus::Keep);
     }
