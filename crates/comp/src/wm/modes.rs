@@ -3,7 +3,11 @@
 use aurora_layout::{FsMode, InsertHint, Point, WinId};
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 
-use super::{apply::floating_rect, layout_params};
+use super::{
+    apply::floating_rect,
+    layout_params,
+    workspaces::{carry_rect, clamp_into},
+};
 use crate::Aurora;
 
 impl Aurora {
@@ -21,6 +25,7 @@ impl Aurora {
             .output_for_ws(ws)
             .and_then(|o| self.work_area(&o))
             .map(|(work, _)| work);
+        let frame = self.ws_frame(ws);
         let pointer = self.pointer.current_location();
         let Some(workspace) = self.wm.workspaces.get_mut(&ws) else {
             return;
@@ -44,11 +49,18 @@ impl Aurora {
             };
             workspace.set_tiled(id, hint, constraints);
         } else {
-            let Some(rect) = remembered
-                .or_else(|| work.map(|w| floating_rect(w, None, constraints, None, params.border)))
-            else {
-                return;
+            // The remembered rectangle may come from another output or an older geometry:
+            // bring it into the current frame and keep it on the work area.
+            let rect = match (remembered, frame, work) {
+                (Some((r, from)), Some(to), Some(work)) => {
+                    Some(clamp_into(carry_rect(r, from, to), work))
+                }
+                (_, _, Some(work)) => {
+                    Some(floating_rect(work, None, constraints, None, params.border))
+                }
+                _ => None,
             };
+            let Some(rect) = rect else { return };
             workspace.add_floating(id, rect);
         }
         self.relayout_ws(ws);

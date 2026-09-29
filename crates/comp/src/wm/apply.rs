@@ -20,6 +20,7 @@ use smithay::{
 use super::{
     Phase, WinData, layout_params, rules,
     window::{WindowElement, Z_FLOATING, Z_FULLSCREEN, Z_TILED},
+    workspaces::carry_rect,
 };
 use crate::Aurora;
 
@@ -176,6 +177,7 @@ impl Aurora {
         let colors = [general.border_focused.0, general.border_unfocused.0];
         let border = general.border_width;
         let dragging = self.wm.drag.is_some();
+        let frame = self.wm.last_full.get(&ws).copied().unwrap_or_default();
 
         let mut line = String::new();
         for p in placed {
@@ -209,7 +211,7 @@ impl Aurora {
             win.fs = p.kind == Kind::Fullscreen;
             win.ws = ws;
             if win.floating {
-                win.float_rect = Some(content.shrink(-bw));
+                win.float_rect = Some((content.shrink(-bw), frame));
             }
 
             let deco = win.element.deco();
@@ -420,7 +422,7 @@ impl Aurora {
             .or(by_output)
             .unwrap_or(active_ws);
         let output = self.wm.output_for_ws(ws).unwrap_or(active);
-        let Some((work, _)) = self.work_area(&output) else {
+        let Some((work, full)) = self.work_area(&output) else {
             return;
         };
         let parent_rect = parent
@@ -430,9 +432,14 @@ impl Aurora {
         let params = layout_params(&self.config);
         let pointer = self.pointer.current_location();
 
+        // The rectangle is computed on `output`; the workspace may keep its floats in the
+        // frame of another one while it is hidden.
+        let frame = self.wm.last_full.get(&ws).copied().unwrap_or(full);
+        self.wm.last_full.entry(ws).or_insert(full);
         let workspace = self.wm.workspaces.entry(ws).or_default();
         if decision.floating {
             let rect = floating_rect(work, parent_rect, constraints, decision.size, params.border);
+            let rect = carry_rect(rect, full, frame);
             workspace.add_floating(id, rect);
         } else {
             let after = self

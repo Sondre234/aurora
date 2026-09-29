@@ -46,8 +46,9 @@ pub struct WinData {
     pub sent_flags: (bool, bool, bool),
     pub constraints: Constraints,
     pub app_id: String,
-    /// Outer rectangle it had when last floating, restored by toggle-floating.
-    pub float_rect: Option<Rect>,
+    /// Outer rectangle it had when last floating and the output frame it was in, restored by
+    /// toggle-floating.
+    pub float_rect: Option<(Rect, Rect)>,
     /// Set during a floating resize: the edges that stay put while the client catches up.
     pub resize_anchor: Option<Anchor>,
     /// Fullscreen or maximize asked for before the window was placed.

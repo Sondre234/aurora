@@ -183,12 +183,12 @@ impl Aurora {
         if src == dst {
             return;
         }
-        let rect = self
+        let floating = self
             .wm
             .workspaces
             .get(&src)
-            .and_then(|w| w.floating_rect(id))
-            .map(|r| self.carry_floating(src, dst, r));
+            .and_then(|w| w.floating_rect(id));
+        let rect = floating.map(|r| self.carry_floating(src, dst, r));
         if let Some(workspace) = self.wm.workspaces.get_mut(&src) {
             workspace.remove(id);
         }
@@ -212,18 +212,26 @@ impl Aurora {
         }
     }
 
-    /// Keeps a floating rectangle at the same place relative to the work area when it
-    /// changes workspace (and possibly output).
-    fn carry_floating(&self, src: u32, dst: u32, r: Rect) -> Rect {
-        let work = |ws: u32| {
-            let out = self
-                .wm
-                .output_for_ws(ws)
-                .or_else(|| self.wm.active_output.clone())?;
-            self.work_area(&out).map(|(work, _)| work)
-        };
-        match (work(src), work(dst)) {
-            (Some(a), Some(b)) => Rect::new(r.x + b.x - a.x, r.y + b.y - a.y, r.w, r.h),
+    /// The frame a workspace's floating rectangles are expressed in: the output rectangle it
+    /// was last laid out on. A workspace never laid out yet takes the shown (or active) output.
+    pub(super) fn ws_frame(&mut self, ws: u32) -> Option<Rect> {
+        if let Some(frame) = self.wm.last_full.get(&ws) {
+            return Some(*frame);
+        }
+        let out = self
+            .wm
+            .output_for_ws(ws)
+            .or_else(|| self.wm.active_output.clone())?;
+        let full = self.work_area(&out)?.1;
+        self.wm.last_full.insert(ws, full);
+        Some(full)
+    }
+
+    /// Expresses a floating rectangle of `src` in the frame of `dst`. The frame of `dst` stays
+    /// as it was, so the rebase on its next layout keeps translating from the right origin.
+    fn carry_floating(&mut self, src: u32, dst: u32, r: Rect) -> Rect {
+        match (self.ws_frame(src), self.ws_frame(dst)) {
+            (Some(a), Some(b)) => carry_rect(r, a, b),
             _ => r,
         }
     }
@@ -329,4 +337,28 @@ impl Aurora {
         }
         self.relayout_all();
     }
+}
+
+/// Moves `r` from the frame `from` to the frame `to`, keeping its offset, then pulls it fully
+/// inside `to`. Within one frame the rectangle is left alone.
+pub(super) fn carry_rect(r: Rect, from: Rect, to: Rect) -> Rect {
+    if from == to {
+        return r;
+    }
+    clamp_into(
+        Rect::new(r.x + to.x - from.x, r.y + to.y - from.y, r.w, r.h),
+        to,
+    )
+}
+
+/// Shrinks `r` to fit `area` and moves it inside.
+pub(super) fn clamp_into(r: Rect, area: Rect) -> Rect {
+    let w = r.w.min(area.w).max(1);
+    let h = r.h.min(area.h).max(1);
+    Rect::new(
+        r.x.clamp(area.x, (area.right() - w).max(area.x)),
+        r.y.clamp(area.y, (area.bottom() - h).max(area.y)),
+        w,
+        h,
+    )
 }
