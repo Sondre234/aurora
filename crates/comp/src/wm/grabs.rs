@@ -34,8 +34,8 @@ pub trait Drag: Send + 'static {
     fn motion(&mut self, aurora: &mut Aurora, loc: SPoint<f64, Logical>) -> bool;
     /// The last button was released.
     fn release(&mut self, _aurora: &mut Aurora, _loc: SPoint<f64, Logical>) {}
-    /// The grab is over, however it ended.
-    fn end(&mut self, aurora: &mut Aurora);
+    /// The grab is over, however it ended; a relayout follows.
+    fn end(&mut self, _aurora: &mut Aurora) {}
 }
 
 pub struct Grab<T: Drag> {
@@ -51,6 +51,8 @@ impl<T: Drag> Grab<T> {
         if !std::mem::replace(&mut self.ended, true) {
             data.wm.drag = None;
             self.op.end(data);
+            // Also logs the final layout, which stays quiet during the drag.
+            data.relayout_all();
         }
     }
 }
@@ -215,11 +217,6 @@ impl Drag for FloatMoveGrab {
         moved
     }
 
-    fn end(&mut self, a: &mut Aurora) {
-        if let Some(ws) = a.wm.windows.get(&self.id).map(|w| w.ws) {
-            a.relayout_ws(ws);
-        }
-    }
 }
 
 pub struct FloatResizeGrab {
@@ -267,8 +264,6 @@ impl Drag for FloatResizeGrab {
             return;
         };
         win.resize_anchor = None;
-        let ws = win.ws;
-        a.relayout_ws(ws);
     }
 }
 
@@ -304,9 +299,6 @@ impl Drag for TiledResizeGrab {
         true
     }
 
-    fn end(&mut self, a: &mut Aurora) {
-        a.relayout_ws(self.ws);
-    }
 }
 
 /// Drag and drop: the window is reinserted beside the tiled window it is dropped on.
@@ -344,9 +336,6 @@ impl Drag for TiledMoveGrab {
         }
     }
 
-    fn end(&mut self, a: &mut Aurora) {
-        a.relayout_ws(self.ws);
-    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
