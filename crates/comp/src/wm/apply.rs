@@ -1,6 +1,8 @@
 //! Window lifecycle and the one place that projects layout results onto the `Space`.
 //! Relayout runs on events (map, close, config, output changes), never per frame.
-use aurora_layout::{Constraints, Edges, FsMode, InsertHint, Kind, Placement, Point, Rect, Size, WinId};
+use aurora_layout::{
+    Constraints, Edges, FsMode, InsertHint, Kind, Placement, Point, Rect, Size, WinId,
+};
 use smithay::{
     desktop::{layer_map_for_output, space::SpaceElement},
     output::Output,
@@ -472,9 +474,19 @@ impl Aurora {
             .and_then(|o| self.wm.active_ws.get(o))
             == Some(&ws);
         // Behind a fullscreen window only its transient children take focus.
-        let blocked = self.wm.workspaces.get(&ws).and_then(|w| w.fullscreen()).is_some_and(|(f, _)| {
-            f != id && self.wm.windows.get(&id).is_some_and(|w| w.parent != Some(f))
-        });
+        let blocked = self
+            .wm
+            .workspaces
+            .get(&ws)
+            .and_then(|w| w.fullscreen())
+            .is_some_and(|(f, _)| {
+                f != id
+                    && self
+                        .wm
+                        .windows
+                        .get(&id)
+                        .is_some_and(|w| w.parent != Some(f))
+            });
         if shown_here && !blocked {
             self.focus_window(Some(id), true);
         }

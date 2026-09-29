@@ -65,7 +65,12 @@ impl XdgShellHandler for Aurora {
         serial: Serial,
         edges: xdg_toplevel::ResizeEdge,
     ) {
-        self.xdg_drag(surface.wl_surface(), DragKind::Resize, xdg_edges(edges), serial);
+        self.xdg_drag(
+            surface.wl_surface(),
+            DragKind::Resize,
+            xdg_edges(edges),
+            serial,
+        );
     }
 
     fn fullscreen_request(&mut self, surface: ToplevelSurface, _output: Option<WlOutput>) {

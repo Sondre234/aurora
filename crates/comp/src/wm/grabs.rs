@@ -8,16 +8,16 @@ use aurora_layout::{
     Edges, Point, Rect, ResizeHandle, Side, Size, WinId, drop_side, edges_for_point, resize_rect,
 };
 use smithay::{
-    reexports::{
-        wayland_protocols::xdg::shell::server::xdg_toplevel,
-        wayland_server::protocol::wl_surface::WlSurface,
-    },
     input::pointer::{
         AxisFrame, ButtonEvent, Focus, GestureHoldBeginEvent, GestureHoldEndEvent,
         GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
         GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent,
         GrabStartData as StartData, MotionEvent, PointerGrab, PointerInnerHandle,
         RelativeMotionEvent,
+    },
+    reexports::{
+        wayland_protocols::xdg::shell::server::xdg_toplevel,
+        wayland_server::protocol::wl_surface::WlSurface,
     },
     utils::{Logical, Point as SPoint, Serial},
 };
@@ -206,17 +206,15 @@ impl Drag for FloatMoveGrab {
         }
         let (dx, dy) = delta(self.from, loc);
         let rect = Rect::new(self.rect.x + dx, self.rect.y + dy, self.rect.w, self.rect.h);
-        let moved = a
-            .wm
-            .workspaces
-            .get_mut(&ws)
-            .is_some_and(|w| w.set_floating_rect(self.id, rect));
+        let moved =
+            a.wm.workspaces
+                .get_mut(&ws)
+                .is_some_and(|w| w.set_floating_rect(self.id, rect));
         if moved {
             a.relayout_ws(ws);
         }
         moved
     }
-
 }
 
 pub struct FloatResizeGrab {
@@ -248,11 +246,10 @@ impl Drag for FloatResizeGrab {
         };
         let (dx, dy) = delta(self.from, loc);
         let rect = resize_rect(self.rect, self.edges, dx, dy, min, max);
-        let resized = a
-            .wm
-            .workspaces
-            .get_mut(&ws)
-            .is_some_and(|w| w.set_floating_rect(self.id, rect));
+        let resized =
+            a.wm.workspaces
+                .get_mut(&ws)
+                .is_some_and(|w| w.set_floating_rect(self.id, rect));
         if resized {
             a.relayout_ws(ws);
         }
@@ -298,7 +295,6 @@ impl Drag for TiledResizeGrab {
         }
         true
     }
-
 }
 
 /// Drag and drop: the window is reinserted beside the tiled window it is dropped on.
@@ -335,7 +331,6 @@ impl Drag for TiledMoveGrab {
             workspace.tiling.move_beside(self.id, target, side);
         }
     }
-
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -459,11 +454,16 @@ impl Aurora {
         serial: Serial,
     ) {
         let name = op.name();
-        pointer.set_grab(self, Grab {
+        pointer.set_grab(
+            self,
+            Grab {
                 op,
                 start,
                 ended: false,
-            }, serial, Focus::Clear);
+            },
+            serial,
+            Focus::Clear,
+        );
         self.wm.drag = Some(name);
     }
 }

@@ -44,9 +44,9 @@ impl Aurora {
             };
             workspace.set_tiled(id, hint, constraints);
         } else {
-            let Some(rect) = remembered.or_else(|| {
-                work.map(|w| floating_rect(w, None, constraints, None, params.border))
-            }) else {
+            let Some(rect) = remembered
+                .or_else(|| work.map(|w| floating_rect(w, None, constraints, None, params.border)))
+            else {
                 return;
             };
             workspace.add_floating(id, rect);
