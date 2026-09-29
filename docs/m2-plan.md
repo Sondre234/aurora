@@ -67,3 +67,18 @@ Per-step instructions, done-criteria and smoke tests are carried by the workflow
 - **Pointer constraints:** held only while the surface has both pointer and keyboard focus. Locked: absolute motion is dropped, the client gets relative motion only. Confined: per-axis fallback to the last allowed position. Layout changes re-run `pointer.motion` so stale constraints drop. A destroyed active lock warps to its cursor position hint.
 - **Popup grabs:** rejected with `popup_done` unless the serial is backed by a grab or is no older than the keyboard's last enter.
 - **Screencopy:** ext-image-copy-capture for outputs, shm Argb8888/Xrgb8888 at the mode size (what grim 1.5 uses; wlr-screencopy is not offered). A frame request queues a redraw and waits in `Captures.pending`; the output's own render path calls `capture::serve` with the elements it is about to draw (DRM: pointer first, so sessions without cursors skip them). One offscreen render per cursor variant, CPU readback, so this suits screenshots rather than video. Not advertised: fifo, commit-timing, tearing-control.
+
+## QA (step 12)
+
+`scripts/qa-nested.sh [scenario ...]` runs one hermetic Aurora per scenario (`--winit --qa --timeout 40`, its own `XDG_STATE_HOME`/`XDG_CONFIG_HOME` under `$SCRATCH`, config from `scripts/qa/base.toml`) and greps the log contract above. Scenarios: keys, emergency, reload, tiling, workspaces, layer, xwayland, multi, robust. It must be started with `WAYLAND_DISPLAY` pointing at a host compositor that is not your live session (a headless one), refuses `wayland-1`, never passes `--drm`, and only signals pids it started. Screenshots go through Aurora's own ext-image-copy-capture (grim); pixels are read with ImageMagick. A missing contract line fails as `MISSING log contract line`.
+
+Not covered by the script: mouse drag move/resize, X11 override-redirect placement, pointer constraints, shortcut inhibit, fractional scale, DRM.
+
+## Hardware checklist (run on the real machine, from a TTY)
+
+- [ ] Multi-monitor PBP: HDMI-A-1 at 0,0 and DP-3 at 2048,0 (2560x1440 at 1.25), DP-1 at 4096,0; no gap or overlap at the seam, pointer crosses all three, `focus-output` and `move-to-output` land where expected, each output shows its own workspace.
+- [ ] DRM live mode change: edit `mode`/`scale` for one output, reload (Super+Shift+r); the mode switches without a black screen, a rejected mode keeps the old one and logs it. Unplug and replug DP-1: windows come back to it.
+- [ ] Glove80 keymap: Super+letters, Super+Shift+digits and the AltGr+ae/oe/aa characters match binds exactly as in the nested run; Super+AltGr+q does not fire Super+q; F-key layer chords (Ctrl+AltGr+F1..F12, Super+F*) arrive as normal keycodes.
+- [ ] Game pointer constraints: CS2, RDR2 and Zwift (Proton via XWayland) capture and release the mouse; no drift or stuck edge; alt-tab away and back keeps the lock consistent.
+- [ ] Shortcut-inhibit escape: with a client holding a shortcuts inhibitor, Super binds are blocked, Super+Shift+Escape revokes it, and Ctrl+AltGr+BackSpace and Ctrl+AltGr+F1..F12 still quit or switch VT.
+- [ ] Waybar (layer-shell) exclusive zone on each output, fullscreen game hides the bar and returns it.
