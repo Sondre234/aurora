@@ -10,6 +10,7 @@ mod input;
 mod keymap;
 mod libinput;
 mod log;
+mod protocols;
 mod safety;
 mod scene;
 mod session;

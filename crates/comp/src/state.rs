@@ -2,6 +2,7 @@ use std::{ffi::OsString, path::PathBuf, sync::Arc, time::Duration};
 
 use crate::config::Config;
 use crate::focus::FocusTarget;
+use crate::protocols::Protocols;
 use crate::wm::window::WindowElement;
 use crate::{backend::Backend, dmabuf::SurfaceDmabufFeedback};
 use smithay::input::keyboard::Keycode;
@@ -39,8 +40,6 @@ use smithay::{
         compositor::{CompositorClientState, CompositorState},
         dmabuf::{DmabufGlobal, DmabufState},
         drm_syncobj::DrmSyncobjState,
-        output::OutputManagerState,
-        presentation::PresentationState,
         selection::data_device::DataDeviceState,
         shell::xdg::XdgShellState,
         shm::ShmState,
@@ -71,10 +70,8 @@ pub struct Aurora {
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShellState,
     pub shm_state: ShmState,
-    #[allow(dead_code)] // held so the xdg-output globals stay alive
-    pub output_manager_state: OutputManagerState,
-    #[allow(dead_code)] // held so the wp_presentation global stays alive
-    pub presentation_state: PresentationState,
+    #[allow(dead_code)] // held so the globals stay alive
+    pub protocols: Protocols,
     pub seat_state: SeatState<Aurora>,
     pub data_device_state: DataDeviceState,
     pub dmabuf_state: DmabufState,
@@ -101,10 +98,9 @@ impl Aurora {
         let compositor_state = CompositorState::new::<Self>(&dh);
         let xdg_shell_state = XdgShellState::new::<Self>(&dh);
         let shm_state = ShmState::new::<Self>(&dh, vec![]);
-        let output_manager_state = OutputManagerState::new_with_xdg_output::<Self>(&dh);
         let data_device_state = DataDeviceState::new::<Self>(&dh);
         let clock = Clock::new();
-        let presentation_state = PresentationState::new::<Self>(&dh, clock.id() as u32);
+        let protocols = Protocols::new(&dh, clock.id() as u32);
 
         let mut seat_state = SeatState::new();
         let mut seat: Seat<Self> = seat_state.new_wl_seat(&dh, backend.seat_name());
@@ -132,8 +128,7 @@ impl Aurora {
             compositor_state,
             xdg_shell_state,
             shm_state,
-            output_manager_state,
-            presentation_state,
+            protocols,
             seat_state,
             data_device_state,
             dmabuf_state: DmabufState::new(),
