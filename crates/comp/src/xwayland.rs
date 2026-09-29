@@ -35,6 +35,8 @@ pub struct Covering {
     pub loc: Point<i32, Logical>,
     pub ws: u32,
     pub shown: bool,
+    /// Covers a whole output (a game): it takes the keyboard when it comes back.
+    pub takes_keyboard: bool,
 }
 
 #[derive(Default)]
@@ -53,9 +55,8 @@ pub struct XWaylandState {
     /// Override-redirect windows (menus, tooltips, some games): never tiled, placed by the
     /// client. Mapped outputs mirror the main space so frame callbacks reach them.
     pub unmanaged: Space<Window>,
-    /// Override-redirect windows that cover a whole output (games going fullscreen on their
-    /// own). They belong to the workspace the output showed when they mapped: they leave the
-    /// unmanaged space while it is hidden.
+    /// Every override-redirect window with the workspace it belongs to: it leaves the
+    /// unmanaged space while that workspace is hidden.
     pub covering: Vec<Covering>,
     restarts: VecDeque<Instant>,
     started: Option<Instant>,

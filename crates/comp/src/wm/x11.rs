@@ -114,38 +114,62 @@ impl Aurora {
         // Full-output override-redirect windows are how some games go fullscreen without
         // asking the window manager: they get the keyboard, and belong to the workspace the
         // output shows so that switching away hides them.
-        let covered = self
+        let covers = self
             .wm
             .outputs
             .iter()
-            .find(|o| self.space.output_geometry(o) == Some(geo))
-            .map(|o| self.wm.active_ws.get(o).copied());
-        self.xwayland
-            .unmanaged
-            .map_element(window.clone(), geo.loc, true);
-        self.queue_redraw_all();
-        if let Some(ws) = covered {
+            .any(|o| self.space.output_geometry(o) == Some(geo));
+        // Every override-redirect window belongs to a workspace, so menus and tooltips do not
+        // outlive a switch: its parent's, else the one shown where it appeared.
+        let ws = x11
+            .is_transient_for()
+            .and_then(|p| self.wm.by_x11.get(&p))
+            .and_then(|id| self.wm.windows.get(id))
+            .map(|w| w.ws)
+            .or_else(|| {
+                let at = self
+                    .wm
+                    .outputs
+                    .iter()
+                    .find(|o| {
+                        self.space
+                            .output_geometry(o)
+                            .is_some_and(|g| g.to_f64().contains(geo.loc.to_f64()))
+                    })
+                    .or(self.wm.active_output.as_ref())?;
+                self.wm.active_ws.get(at).copied()
+            });
+        let shown = ws.is_none_or(|ws| self.wm.ws_output.contains_key(&ws));
+        if shown {
+            self.xwayland
+                .unmanaged
+                .map_element(window.clone(), geo.loc, true);
+            self.queue_redraw_all();
+        }
+        if let Some(ws) = ws {
+            self.xwayland.covering.push(Covering {
+                window,
+                loc: geo.loc,
+                ws,
+                shown,
+                takes_keyboard: covers,
+            });
+        }
+        if covers && shown {
             tracing::info!("x11: override-redirect window covers an output, focusing it");
-            if let Some(ws) = ws {
-                self.xwayland.covering.push(Covering {
-                    window,
-                    loc: geo.loc,
-                    ws,
-                    shown: true,
-                });
-            }
             let serial = SERIAL_COUNTER.next_serial();
             let keyboard = self.keyboard.clone();
             keyboard.set_focus(self, Some(FocusTarget::X11(x11)), serial);
         }
     }
 
-    /// Parks covering override-redirect windows whose workspace is hidden and brings them back
-    /// when it is shown again (the keyboard goes back to the window behind, or to the game).
+    /// Parks override-redirect windows whose workspace is hidden and brings them back
+    /// when it is shown again (a covering game gets the keyboard back).
     pub(super) fn sync_covering(&mut self) {
         let visible = |ws: u32, wm: &super::Wm| wm.ws_output.contains_key(&ws);
         let mut hidden = Vec::new();
         let mut back = None;
+        let mut shown_again = false;
         for c in &mut self.xwayland.covering {
             match (visible(c.ws, &self.wm), c.shown) {
                 (false, true) => {
@@ -158,12 +182,15 @@ impl Aurora {
                     self.xwayland
                         .unmanaged
                         .map_element(c.window.clone(), c.loc, true);
-                    back = c.window.x11_surface().cloned();
+                    shown_again = true;
+                    if c.takes_keyboard {
+                        back = c.window.x11_surface().cloned();
+                    }
                 }
                 _ => {}
             }
         }
-        if hidden.is_empty() && back.is_none() {
+        if hidden.is_empty() && back.is_none() && !shown_again {
             return;
         }
         self.queue_redraw_all();
