@@ -51,8 +51,9 @@ impl<T: Drag> Grab<T> {
         if !std::mem::replace(&mut self.ended, true) {
             data.wm.drag = None;
             self.op.end(data);
-            // Also logs the final layout, which stays quiet during the drag.
-            data.relayout_all();
+            // The pointer lock is held here, so the relayout (which also logs the final
+            // layout and resends pointer focus) waits for idle.
+            data.handle.insert_idle(|a| a.relayout_all());
         }
     }
 }
