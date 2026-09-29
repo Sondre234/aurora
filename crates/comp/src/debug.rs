@@ -135,7 +135,7 @@ impl Aurora {
                 win.floating as u8,
                 win.fs as u8,
                 win.frames_sent,
-                (win.phase == crate::wm::Phase::Mapped) as u8,
+                (self.space.element_location(&win.element).is_some()) as u8,
             );
             tracing::info!("{line}");
         }

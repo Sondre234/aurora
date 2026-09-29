@@ -121,30 +121,15 @@ impl Aurora {
 
     /// Registers an output with the window manager and lays out what it shows.
     pub fn wm_output_added(&mut self, output: &Output) {
-        self.wm.output_added(output);
+        self.wm.output_added(output, &self.config);
         self.relayout_all();
     }
 
     pub fn relayout_all(&mut self) {
+        self.normalize();
         let visible: Vec<u32> = self.wm.active_ws.values().copied().collect();
         for ws in visible {
             self.relayout_ws(ws);
-        }
-        self.hide_invisible();
-    }
-
-    /// Windows on workspaces no output shows are not in the Space, so they draw nothing and
-    /// get no frame callbacks.
-    fn hide_invisible(&mut self) {
-        let hidden: Vec<WindowElement> = self
-            .wm
-            .windows
-            .values()
-            .filter(|w| !self.wm.ws_output.contains_key(&w.ws))
-            .map(|w| w.element.clone())
-            .collect();
-        for element in hidden {
-            self.space.unmap_elem(&element);
         }
     }
 
@@ -309,7 +294,7 @@ impl Aurora {
         let Some(toplevel) = win.element.toplevel().cloned() else {
             return;
         };
-        let (app_id, _title) = read_strings(surface);
+        let (app_id, title) = read_strings(surface);
         let constraints = read_constraints(surface);
         let parent_surface = toplevel.parent();
         let parent = parent_surface.as_ref().and_then(|p| self.wm.id_of(p));
@@ -318,7 +303,7 @@ impl Aurora {
             win.constraints = constraints;
             win.parent = parent;
         }
-        self.place(id, parent_surface.is_some());
+        self.place(id, parent_surface.is_some(), &title);
         // Nothing to lay out against (no output yet): the client still needs its configure.
         if !initial_configure_sent(surface) {
             toplevel.send_configure();
@@ -326,28 +311,39 @@ impl Aurora {
     }
 
     /// Inserts the window into the layout of the focused output's workspace.
-    fn place(&mut self, id: WinId, has_parent: bool) {
-        let Some(output) = self.wm.active_output.clone() else {
+    fn place(&mut self, id: WinId, has_parent: bool, title: &str) {
+        let Some(active) = self.wm.active_output.clone() else {
             return;
         };
-        let Some(ws) = self.wm.active_ws.get(&output).copied() else {
-            return;
-        };
-        let Some((work, _)) = self.work_area(&output) else {
+        let Some(active_ws) = self.wm.active_ws.get(&active).copied() else {
             return;
         };
         let Some(win) = self.wm.windows.get(&id) else {
             return;
         };
         let (constraints, parent) = (win.constraints, win.parent);
+        let decision = rules::evaluate(
+            &rules::Attrs {
+                has_parent,
+                constraints,
+                app_id: &win.app_id,
+                title,
+            },
+            &self.config.window_rules,
+        );
+        // A rule may name a workspace that is hidden or shown on another output.
+        let ws = decision
+            .workspace
+            .filter(|w| (1..=self.config.general.workspaces).contains(w))
+            .unwrap_or(active_ws);
+        let output = self.wm.output_for_ws(ws).unwrap_or(active);
+        let Some((work, _)) = self.work_area(&output) else {
+            return;
+        };
         let parent_rect = parent
             .and_then(|p| self.wm.windows.get(&p))
             .filter(|p| p.ws == ws)
             .map(|p| p.target);
-        let decision = rules::evaluate(&rules::Attrs {
-            has_parent,
-            constraints,
-        });
         let params = layout_params(&self.config);
         let pointer = self.pointer.current_location();
 
@@ -390,9 +386,23 @@ impl Aurora {
             self.relayout_ws(ws);
         } else {
             let has_parent = win.parent.is_some();
-            self.place(id, has_parent);
+            let title = win
+                .element
+                .toplevel()
+                .map(|t| read_strings(t.wl_surface()).1);
+            self.place(id, has_parent, &title.unwrap_or_default());
         }
-        self.focus_window(Some(id), true);
+        // A window opened on a workspace that is not the focused one stays in the background.
+        let ws = self.wm.windows.get(&id).map_or(0, |w| w.ws);
+        let shown_here = self
+            .wm
+            .active_output
+            .as_ref()
+            .and_then(|o| self.wm.active_ws.get(o))
+            == Some(&ws);
+        if shown_here {
+            self.focus_window(Some(id), true);
+        }
     }
 
     fn refresh_constraints(&mut self, id: WinId, surface: &WlSurface) {

@@ -42,10 +42,10 @@ impl Aurora {
                     tracing::warn!("debug-pointer ignored: not running with --qa");
                 }
             }
-            // Workspaces, outputs, floating, fullscreen and mouse drags come with later steps.
-            Action::Workspace(_)
-            | Action::MoveToWorkspace(_)
-            | Action::FocusOutput(_)
+            Action::Workspace(target) => self.switch_workspace(target),
+            Action::MoveToWorkspace(n) => self.move_to_workspace(n),
+            // Outputs, floating, fullscreen and mouse drags come with later steps.
+            Action::FocusOutput(_)
             | Action::MoveToOutput(_)
             | Action::ToggleFloating
             | Action::Fullscreen

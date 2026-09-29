@@ -97,6 +97,8 @@ allow_virtual_keyboard = true
 [mousebinds]
 "Mod+left" = "drag-move"
 "Mod+right" = "drag-resize"
+"Mod+wheel_down" = "workspace next"
+"Mod+wheel_up" = "workspace prev"
 
 # Outputs, by connector name. Every field is optional; an output without an entry is
 # enabled, placed to the right of the previous one in connector-name order, at its

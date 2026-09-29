@@ -338,6 +338,7 @@ impl Aurora {
                     .virtual_keyboard
                     .set_allowed(config.general.allow_virtual_keyboard);
                 self.config = Arc::new(config);
+                self.apply_config();
             }
             Err(err) => tracing::warn!("config: error {err} keeping previous"),
         }

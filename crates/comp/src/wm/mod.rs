@@ -15,6 +15,7 @@ pub mod apply;
 pub mod focus;
 pub mod rules;
 pub mod window;
+pub mod workspaces;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Phase {
@@ -59,6 +60,10 @@ pub struct Wm {
     pub active_output: Option<Output>,
     /// Window under the pointer at the last motion, for focus-follows-mouse.
     pub hover: Option<WinId>,
+    /// What each output showed before its current workspace, for back-and-forth.
+    pub previous: HashMap<Output, u32>,
+    /// Last logged `ws: visible` line.
+    pub last_visible: String,
     /// Last logged layout line per workspace, so only changes are logged.
     pub last_layout: HashMap<u32, String>,
     next_id: u64,
@@ -83,12 +88,32 @@ impl Wm {
         self.ws_output.get(&ws).cloned()
     }
 
-    /// Registers an output; it shows the lowest workspace that no output shows yet.
-    pub fn output_added(&mut self, output: &Output) {
+    /// Registers an output. It shows the workspace pinned to it by a rule (the `default` one
+    /// first), else the lowest workspace that no output shows and no rule pins elsewhere.
+    pub fn output_added(&mut self, output: &Output, config: &Config) {
         if self.outputs.contains(output) {
             return;
         }
-        let ws = (1..).find(|w| !self.ws_output.contains_key(w)).unwrap_or(1);
+        let name = output.name();
+        let free = |w: &u32| !self.ws_output.contains_key(w);
+        let count = config.general.workspaces;
+        let pinned = config
+            .workspace_rules
+            .iter()
+            .filter(|r| r.output.as_deref() == Some(name.as_str()) && r.id <= count && free(&r.id))
+            .max_by_key(|r| r.default)
+            .map(|r| r.id);
+        let unpinned = |w: &u32| {
+            free(w)
+                && !config
+                    .workspace_rules
+                    .iter()
+                    .any(|r| r.id == *w && r.output.is_some())
+        };
+        let ws = pinned
+            .or_else(|| (1..=count).find(unpinned))
+            .or_else(|| (1..=count).find(free))
+            .unwrap_or(1);
         self.outputs.push(output.clone());
         self.active_ws.insert(output.clone(), ws);
         self.ws_output.insert(ws, output.clone());
@@ -102,6 +127,7 @@ impl Wm {
         self.outputs.retain(|o| o != output);
         self.active_ws.remove(output);
         self.ws_output.retain(|_, o| o != output);
+        self.previous.remove(output);
         if self.active_output.as_ref() == Some(output) {
             self.active_output = self.outputs.first().cloned();
         }

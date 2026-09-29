@@ -390,7 +390,7 @@ impl Aurora {
         let position = (x, 0);
         output.change_current_state(None, None, None, Some(position.into()));
         self.space.map_output(&output, position);
-        self.wm.output_added(&output);
+        self.wm.output_added(&output, &self.config);
         output.user_data().insert_if_missing(|| UdevOutputId {
             device_id: node,
             crtc,
