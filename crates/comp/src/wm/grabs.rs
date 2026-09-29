@@ -328,7 +328,7 @@ impl Drag for TiledMoveGrab {
             && let Some(rect) = rect
         {
             let side: Side = drop_side(rect, at);
-            workspace.tiling.move_beside(self.id, target, side);
+            workspace.tiling.move_beside(self.id, target, side, None);
         }
     }
 }

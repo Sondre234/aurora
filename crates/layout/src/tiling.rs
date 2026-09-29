@@ -37,8 +37,8 @@ pub trait TilingLayout {
         self.len() == 0
     }
     fn swap(&mut self, a: WinId, b: WinId) -> bool;
-    /// Moves `id` next to `target`, on `side` of it.
-    fn move_beside(&mut self, id: WinId, target: WinId, side: Side) -> bool;
+    /// Moves `id` next to `target`, on `side` of it; `axis` forces the split direction.
+    fn move_beside(&mut self, id: WinId, target: WinId, side: Side, axis: Option<Axis>) -> bool;
     fn set_constraints(&mut self, id: WinId, c: Constraints) -> bool;
     fn toggle_split(&mut self, id: WinId) -> bool;
     fn resize_start(&self, id: WinId, edges: Edges) -> Option<ResizeHandle>;

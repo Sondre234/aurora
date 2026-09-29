@@ -141,9 +141,11 @@ impl Dwindle {
     }
 
     /// Splits leaf `target`, putting the already-allocated `leaf` on `first` or second.
-    fn split_leaf(&mut self, target: usize, leaf: usize, first: bool) {
+    fn split_leaf(&mut self, target: usize, leaf: usize, first: bool, forced: Option<Axis>) {
         let trect = self.nodes[target].rect;
-        let axis = if trect.h > trect.w {
+        let axis = if let Some(axis) = forced {
+            axis
+        } else if trect.h > trect.w {
             Axis::Vertical
         } else {
             Axis::Horizontal
@@ -285,6 +287,38 @@ impl Dwindle {
             len,
         })
     }
+
+    /// `forced` overrides the split axis that the target box shape would pick.
+    fn insert_axis(&mut self, id: WinId, hint: InsertHint, c: Constraints, forced: Option<Axis>) {
+        self.remove(id);
+        let target = self.pick_target(&hint);
+        let leaf = self.alloc(Node {
+            parent: NONE,
+            rect: self.area,
+            min: (0, 0),
+            body: Body::Leaf {
+                win: id,
+                constraints: c,
+            },
+        });
+        self.index.insert(id, leaf);
+        self.last = Some(id);
+        self.touch(true);
+        let Some(target) = target else {
+            self.root = leaf;
+            return;
+        };
+        let first = match hint.side {
+            NewWindowSide::First => true,
+            NewWindowSide::Second => false,
+            NewWindowSide::Pointer => hint.pointer.is_some_and(|p| {
+                let r = self.nodes[target].rect;
+                let c = r.center();
+                if r.h > r.w { p.y < c.y } else { p.x < c.x }
+            }),
+        };
+        self.split_leaf(target, leaf, first, forced);
+    }
 }
 
 /// Size of the first child: honours the ratio, clamped to both minimums; when the
@@ -318,34 +352,7 @@ fn split_rect(r: Rect, axis: Axis, ratio: f32, min_a: i32, min_b: i32) -> (Rect,
 
 impl TilingLayout for Dwindle {
     fn insert(&mut self, id: WinId, hint: InsertHint, c: Constraints) {
-        self.remove(id);
-        let target = self.pick_target(&hint);
-        let leaf = self.alloc(Node {
-            parent: NONE,
-            rect: self.area,
-            min: (0, 0),
-            body: Body::Leaf {
-                win: id,
-                constraints: c,
-            },
-        });
-        self.index.insert(id, leaf);
-        self.last = Some(id);
-        self.touch(true);
-        let Some(target) = target else {
-            self.root = leaf;
-            return;
-        };
-        let first = match hint.side {
-            NewWindowSide::First => true,
-            NewWindowSide::Second => false,
-            NewWindowSide::Pointer => hint.pointer.is_some_and(|p| {
-                let r = self.nodes[target].rect;
-                let c = r.center();
-                if r.h > r.w { p.y < c.y } else { p.x < c.x }
-            }),
-        };
-        self.split_leaf(target, leaf, first);
+        self.insert_axis(id, hint, c, None);
     }
 
     fn remove(&mut self, id: WinId) -> bool {
@@ -394,7 +401,7 @@ impl TilingLayout for Dwindle {
         true
     }
 
-    fn move_beside(&mut self, id: WinId, target: WinId, side: Side) -> bool {
+    fn move_beside(&mut self, id: WinId, target: WinId, side: Side, axis: Option<Axis>) -> bool {
         let (Some(&li), Some(&lt)) = (self.index.get(&id), self.index.get(&target)) else {
             return false;
         };
@@ -406,16 +413,26 @@ impl TilingLayout for Dwindle {
         };
         let parent = self.nodes[li].parent;
         if parent != NONE && parent == self.nodes[lt].parent {
-            // Siblings: keep the split (axis and ratio), only put them in the wanted order.
-            if let Body::Split { a, b, .. } = &mut self.nodes[parent].body {
+            // Siblings: keep the ratio, only put them in the wanted order (and axis).
+            if let Body::Split { axis: ax, a, b, .. } = &mut self.nodes[parent].body {
                 let (first, second) = if side == Side::First {
                     (li, lt)
                 } else {
                     (lt, li)
                 };
+                let mut changed = false;
                 if *a != first {
                     *a = first;
                     *b = second;
+                    changed = true;
+                }
+                if let Some(want) = axis
+                    && *ax != want
+                {
+                    *ax = want;
+                    changed = true;
+                }
+                if changed {
                     self.touch(true);
                 }
             }
@@ -429,7 +446,7 @@ impl TilingLayout for Dwindle {
             },
             pointer: None,
         };
-        self.insert(id, hint, constraints);
+        self.insert_axis(id, hint, constraints, axis);
         true
     }
 
@@ -739,7 +756,7 @@ mod tests {
     fn move_beside_sibling_flips_order() {
         let p = params(0, 0, 0);
         let mut d = tree(&[1, 2], &p);
-        assert!(d.move_beside(w(2), w(1), Side::First));
+        assert!(d.move_beside(w(2), w(1), Side::First, None));
         d.relayout(AREA, &p);
         assert_eq!(r(&d, 2), Rect::new(0, 0, 500, 800));
         assert_eq!(r(&d, 1), Rect::new(500, 0, 500, 800));
@@ -750,15 +767,31 @@ mod tests {
         let p = params(0, 0, 0);
         let mut d = tree(&[1, 2, 3], &p);
         // 3 (bottom right) goes before 1; 1 is tall (500x800) so 3 lands above it.
-        assert!(d.move_beside(w(3), w(1), Side::First));
+        assert!(d.move_beside(w(3), w(1), Side::First, None));
         d.relayout(AREA, &p);
         assert_eq!(d.len(), 3);
         assert_eq!(r(&d, 3), Rect::new(0, 0, 500, 400));
         assert_eq!(r(&d, 1), Rect::new(0, 400, 500, 400));
         assert_eq!(r(&d, 2), Rect::new(500, 0, 500, 800));
-        assert!(!d.move_beside(w(3), w(99), Side::First));
+        assert!(!d.move_beside(w(3), w(99), Side::First, None));
     }
 
+
+    #[test]
+    fn move_beside_forced_axis() {
+        let p = params(0, 0, 0);
+        // 1 | (2 over 3): moving 3 left of 2 must give a side-by-side split despite 2 being wide-ish.
+        let mut d = tree(&[1, 2, 3], &p);
+        assert!(d.move_beside(w(3), w(2), Side::First, Some(Axis::Horizontal)));
+        d.relayout(AREA, &p);
+        assert_eq!(r(&d, 3).y, r(&d, 2).y);
+        assert!(r(&d, 3).x < r(&d, 2).x);
+        // Siblings rewrite the axis too.
+        let mut d = tree(&[1, 2], &p);
+        assert!(d.move_beside(w(2), w(1), Side::First, Some(Axis::Vertical)));
+        d.relayout(AREA, &p);
+        assert_eq!(r(&d, 2), Rect::new(0, 0, 1000, 400));
+    }
     #[test]
     fn resize_ratio_is_absolute_and_clamped() {
         let p = params(0, 0, 0);

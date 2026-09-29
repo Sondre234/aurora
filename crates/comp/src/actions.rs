@@ -1,6 +1,6 @@
 //! The one place actions run, whether they come from a bind, a repeat timer, a mouse bind
 //! or the QA hooks.
-use aurora_layout::{self as layout, Edges, FsMode, Kind, Side, WinId};
+use aurora_layout::{self as layout, Axis, Edges, FsMode, Kind, Side, WinId};
 use smithay::desktop::WindowSurface;
 
 use crate::{
@@ -137,14 +137,16 @@ impl Aurora {
         let Some(target) = workspace.neighbor(&placed, id, layout_dir(dir)) else {
             return;
         };
-        let side = match dir {
-            Dir::Left | Dir::Up => Side::First,
-            Dir::Right | Dir::Down => Side::Second,
+        let (side, axis) = match dir {
+            Dir::Left => (Side::First, Axis::Horizontal),
+            Dir::Up => (Side::First, Axis::Vertical),
+            Dir::Right => (Side::Second, Axis::Horizontal),
+            Dir::Down => (Side::Second, Axis::Vertical),
         };
         let changed = if swap {
             workspace.tiling.swap(id, target)
         } else {
-            workspace.tiling.move_beside(id, target, side)
+            workspace.tiling.move_beside(id, target, side, Some(axis))
         };
         if changed {
             self.relayout_ws(ws);
