@@ -18,7 +18,6 @@ use smithay::reexports::wayland_server::Resource;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::Serial;
 use smithay::wayland::output::OutputHandler;
-use smithay::wayland::pointer_constraints::PointerConstraintsHandler;
 use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::selection::data_device::{
     DataDeviceHandler, DataDeviceState, WaylandDndGrabHandler, set_data_device_focus,
@@ -57,8 +56,6 @@ impl SeatHandler for Aurora {
 impl TabletSeatHandler for Aurora {
     type ToolFocus = WlSurface;
 }
-
-impl PointerConstraintsHandler for Aurora {}
 
 //
 // Wl Data Device

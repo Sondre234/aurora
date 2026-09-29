@@ -13,6 +13,7 @@ use crate::state::Aurora;
 use keyboard::Repeat;
 use pointer::{AxisInput, AxisValue};
 
+pub mod constraints;
 pub mod keyboard;
 pub mod pointer;
 

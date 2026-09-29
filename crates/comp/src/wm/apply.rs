@@ -298,6 +298,8 @@ impl Aurora {
         if !dragging && self.wm.last_layout.get(&ws) != Some(&line) {
             tracing::info!("{line}");
             self.wm.last_layout.insert(ws, line);
+            // Windows moved under a still pointer: focus and constraints must follow.
+            self.resend_pointer_focus();
         }
         self.queue_redraw_output(output);
         // Fullscreen decides whether Top layers show and who may hold the keyboard.

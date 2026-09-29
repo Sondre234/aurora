@@ -101,17 +101,25 @@ impl Aurora {
     ) {
         let pointer = self.pointer.clone();
         let old = pointer.current_location();
-        let pos = self.clamp_pointer(old + delta);
-        let under = self.surface_under(pos);
-        pointer.motion(
-            self,
-            under.clone(),
-            &MotionEvent {
-                location: pos,
-                serial: SERIAL_COUNTER.next_serial(),
-                time,
-            },
-        );
+        let constraint = self.current_constraint().filter(|c| c.active);
+        let mut pos = self.clamp_pointer(old + delta);
+        let locked = constraint.as_ref().is_some_and(|c| c.locked);
+        if let Some(c) = constraint.as_ref().filter(|c| !c.locked) {
+            pos = self.confine(c, old, pos);
+        }
+        let under = self.surface_under(if locked { old } else { pos });
+        // A locked pointer stays put; the client only hears the relative movement.
+        if !locked {
+            pointer.motion(
+                self,
+                under.clone(),
+                &MotionEvent {
+                    location: pos,
+                    serial: SERIAL_COUNTER.next_serial(),
+                    time,
+                },
+            );
+        }
         pointer.relative_motion(
             self,
             under,
@@ -122,15 +130,25 @@ impl Aurora {
             },
         );
         pointer.frame(self);
-        self.queue_redraw_pointer(old, pos);
-        self.update_hover();
+        if !locked {
+            self.activate_constraint_at(pos);
+            self.queue_redraw_pointer(old, pos);
+            self.update_hover();
+        }
     }
 
     /// `pos` is in global logical coordinates.
     pub fn on_pointer_motion_absolute(&mut self, pos: Point<f64, Logical>, time: InputTime) {
         let pointer = self.pointer.clone();
         let old = pointer.current_location();
-        let pos = self.clamp_pointer(pos);
+        let constraint = self.current_constraint().filter(|c| c.active);
+        if constraint.as_ref().is_some_and(|c| c.locked) {
+            return;
+        }
+        let mut pos = self.clamp_pointer(pos);
+        if let Some(c) = &constraint {
+            pos = self.confine(c, old, pos);
+        }
         let under = self.surface_under(pos);
         pointer.motion(
             self,
@@ -142,6 +160,7 @@ impl Aurora {
             },
         );
         pointer.frame(self);
+        self.activate_constraint_at(pos);
         self.queue_redraw_pointer(old, pos);
         self.update_hover();
     }

@@ -324,6 +324,7 @@ impl Aurora {
             },
         );
         pointer.frame(self);
+        self.activate_constraint_at(pos);
     }
 
     /// A click on a layer that accepts keyboard focus on demand gives it the keyboard.
