@@ -55,7 +55,16 @@ pub fn spawn_watchdog(timeout: Duration) {
         .name("watchdog".into())
         .spawn(move || {
             std::thread::sleep(wait);
-            tracing::error!("watchdog: event loop did not stop after --timeout, hard exit");
+            // The log writers may be the very thing that is wedged, so the line goes out on a
+            // helper thread and the exit does not wait for it for long.
+            let (done, logged) = std::sync::mpsc::channel();
+            let _ = std::thread::Builder::new()
+                .name("watchdog-log".into())
+                .spawn(move || {
+                    tracing::error!("watchdog: event loop did not stop after --timeout, hard exit");
+                    let _ = done.send(());
+                });
+            let _ = logged.recv_timeout(Duration::from_millis(500));
             // Safety: _exit is async-signal-safe and skips destructors on purpose.
             unsafe { libc::_exit(1) }
         });
