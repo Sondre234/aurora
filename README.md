@@ -43,7 +43,7 @@ Crates are added as their milestone is reached.
 
 - [x] **M0** Nested compositor under an existing desktop (winit backend), one client shows
 - [x] **M1** Real session: DRM backend on the 4090, libinput, launch from a TTY
-- [x] **M2** Usable: tiling, workspaces, XWayland, layer-shell, config, multi-monitor (verified nested; DRM hardware checklist pending in docs/m2-plan.md)
+- [x] **M2** Usable: tiling, workspaces, XWayland, layer-shell, config, multi-monitor. Verified nested only (headless host); real DRM, mouse drags, override-redirect placement, pointer constraints and fractional scale are unproven until the hardware checklist in docs/m2-plan.md is run
 - [ ] **M3** The look: animation engine, blur/shadows, live overview
 - [ ] **M4+** Services: `ipc`, shell, launcher, notifd, lock, then `term` and `files`
 
@@ -80,7 +80,7 @@ Emergency chords are hardcoded and cannot be rebound or removed: Ctrl+Alt+BackSp
 Ctrl+AltGr+BackSpace quits, Ctrl+Alt+F1..F12 or Ctrl+AltGr+F1..F12 switches VT.
 
 Known limits: there is no ext-workspace or foreign-toplevel protocol yet, so a bar's
-workspace widget waits for the M4 IPC. X11 apps are not fractionally scaled. wlr-screencopy
+workspace widget waits for the M4 IPC. X11 apps are never scaled (M3 item), so keep the monitor you run Proton games on at scale 1. wlr-screencopy
 is not offered (ext-image-copy-capture is, which is what grim uses). Aurora owns
 `zwp_virtual_keyboard_v1` and routes its keys through the bind table, so any client can
 inject key presses and trigger binds; set `allow_virtual_keyboard = false` to turn that off.

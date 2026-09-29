@@ -53,7 +53,7 @@ Per-step instructions, done-criteria and smoke tests are carried by the workflow
 ## XWayland notes (step 10)
 
 - `xwayland.rs` owns the lifecycle, `handlers/xwm.rs` the callbacks and selection bridge, `wm/x11.rs` the window logic. Managed X11 windows are ordinary `WinData` (`Wm.by_x11`, `by_surface` once Xwayland pairs the wl_surface) and go through the same rules, layout and focus as xdg toplevels; rules match `class` for X11 and `app_id` for Wayland. Override-redirect windows live in `XWaylandState.unmanaged`, drawn above workspace windows and below Top layers, hit-tested the same way, never tiled.
-- X11 windows are not scaled: their coordinates are the global logical ones, so with a fractional output scale they render at scale 1 and are upscaled by nothing (documented limit).
+- X11 windows are not scaled: their coordinates are the global logical ones, so on a scaled output they render at scale 1 and look small (integer scale) or are not resampled at all (fractional). Accepted for M2 and tracked as an M3 item (candidates: an `xwayland.scale` config key with `-force-xrandr-emulation`, or per-output unscaling). Until then keep the output that hosts Proton games (Zwift, RDR2, CS2) at scale 1;.
 - The display number is chosen by us (first without lock or socket) so smithay never probes other sessions' leftovers. Children get `DISPLAY` from `Aurora::spawn_env()` as soon as the server is spawned. Xwayland is not observed to exit when its last client does here, but smithay hardcodes `-terminate`, so exits are handled: teardown from an idle callback, restart on the same display. Only instances that lived under 10 s count towards the limit of 5 restarts per 60 s.
 - Smithay ignores every X event carrying the sequence number of `set_randr_primary_output`, and events only carry a newer one once the manager sends another request. `xwayland_ready` therefore sets the cursor after it; reordering them silences the window manager.
 - Clipboard and primary selection bridge both ways; X clients may only touch selections while an X11 window has the keyboard.
@@ -72,7 +72,7 @@ Per-step instructions, done-criteria and smoke tests are carried by the workflow
 
 `scripts/qa-nested.sh [scenario ...]` runs one hermetic Aurora per scenario (`--winit --qa --timeout 40`, its own `XDG_STATE_HOME`/`XDG_CONFIG_HOME` under `$SCRATCH`, config from `scripts/qa/base.toml`) and greps the log contract above. Scenarios: keys, emergency, reload, tiling, workspaces, layer, xwayland, multi, robust. It must be started with `WAYLAND_DISPLAY` pointing at a host compositor that is not your live session (a headless one), refuses `wayland-1`, never passes `--drm`, and only signals pids it started. Screenshots go through Aurora's own ext-image-copy-capture (grim); pixels are read with ImageMagick. A missing contract line fails as `MISSING log contract line`.
 
-Not covered by the script: mouse drag move/resize, X11 override-redirect placement, pointer constraints, shortcut inhibit, fractional scale, DRM.
+Not covered by the script, hence unproven until the hardware checklist below is done: mouse drag move/resize, X11 override-redirect placement, pointer constraints, shortcut inhibit, fractional scale, DRM.
 
 ## Hardware checklist (run on the real machine, from a TTY)
 
