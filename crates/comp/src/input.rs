@@ -95,6 +95,29 @@ impl Aurora {
         clamp_to_outputs(pos, &geos)
     }
 
+    /// Pointer motion only changes what is drawn on outputs that hold the old or new
+    /// position (cursor plane, hover state). During a grab a dragged window can span
+    /// other outputs, so everything is repainted.
+    fn queue_redraw_pointer(&mut self, old: Point<f64, Logical>, new: Point<f64, Logical>) {
+        if self.pointer.is_grabbed() {
+            self.queue_redraw_all();
+            return;
+        }
+        let touched: Vec<_> = self
+            .space
+            .outputs()
+            .filter(|o| {
+                self.space
+                    .output_geometry(o)
+                    .is_some_and(|g| g.to_f64().contains(old) || g.to_f64().contains(new))
+            })
+            .cloned()
+            .collect();
+        for output in &touched {
+            self.queue_redraw_output(output);
+        }
+    }
+
     pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>) {
         match event {
             InputEvent::Keyboard { event, .. } => {
@@ -148,7 +171,8 @@ impl Aurora {
                 let pointer = self.pointer.clone();
                 let serial = SERIAL_COUNTER.next_serial();
 
-                let pos = self.clamp_pointer(pointer.current_location() + event.delta());
+                let old_pos = pointer.current_location();
+                let pos = self.clamp_pointer(old_pos + event.delta());
                 let under = self.surface_under(pos);
 
                 pointer.motion(
@@ -170,7 +194,7 @@ impl Aurora {
                     },
                 );
                 pointer.frame(self);
-                self.queue_redraw_all();
+                self.queue_redraw_pointer(old_pos, pos);
             }
             InputEvent::PointerMotionAbsolute { event, .. } => {
                 let Some(output) = self.space.outputs().next() else {
@@ -186,6 +210,7 @@ impl Aurora {
                 let serial = SERIAL_COUNTER.next_serial();
 
                 let pointer = self.pointer.clone();
+                let old_pos = pointer.current_location();
 
                 let under = self.surface_under(pos);
 
@@ -199,7 +224,7 @@ impl Aurora {
                     },
                 );
                 pointer.frame(self);
-                self.queue_redraw_all();
+                self.queue_redraw_pointer(old_pos, pos);
             }
             InputEvent::PointerButton { event, .. } => {
                 let pointer = self.pointer.clone();
