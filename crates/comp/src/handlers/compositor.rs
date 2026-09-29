@@ -87,15 +87,14 @@ impl CompositorHandler for Aurora {
             return;
         }
         if outputs.is_empty() {
-            outputs = self.outputs_for_unmapped(surface);
-        }
-        if outputs.is_empty() {
-            // Not a window, cursor or popup we can place; repaint everything.
-            self.queue_redraw_all();
-        } else {
-            for output in &outputs {
-                self.queue_redraw_output(output);
+            match self.outputs_for_unmapped(surface) {
+                Some(found) => outputs = found,
+                // Not a window, cursor or popup we can place; repaint everything.
+                None => return self.queue_redraw_all(),
             }
+        }
+        for output in &outputs {
+            self.queue_redraw_output(output);
         }
     }
 }
@@ -111,33 +110,43 @@ fn root_surface(surface: &WlSurface) -> WlSurface {
 impl Aurora {
     /// Outputs a commit from a surface outside the space can change: the pointer's for the
     /// cursor surface, the parent window's for a popup.
-    fn outputs_for_unmapped(&self, surface: &WlSurface) -> Vec<Output> {
+    fn outputs_for_unmapped(&self, surface: &WlSurface) -> Option<Vec<Output>> {
         let root = root_surface(surface);
         if let CursorImageStatus::Surface(cursor) = &self.cursor_status
             && cursor == &root
         {
             let pointer = self.pointer.current_location();
-            return self
-                .space
-                .outputs()
-                .filter(|o| {
-                    self.space
-                        .output_geometry(o)
-                        .is_some_and(|g| g.to_f64().contains(pointer))
-                })
-                .cloned()
-                .collect();
+            return Some(
+                self.space
+                    .outputs()
+                    .filter(|o| {
+                        self.space
+                            .output_geometry(o)
+                            .is_some_and(|g| g.to_f64().contains(pointer))
+                    })
+                    .cloned()
+                    .collect(),
+            );
         }
-        if let Some(parent) = self.popups.find_popup(&root).and_then(|popup| match popup {
-            PopupKind::Xdg(xdg) => xdg.get_parent_surface(),
-            _ => None,
-        }) {
-            let parent = root_surface(&parent);
-            if let Some(window) = self.wm.window_of(&parent).map(|w| &w.element) {
-                return self.space.outputs_for_element(window);
+        if self.popups.find_popup(&root).is_some() {
+            // Walk up through nested popups to the window or layer that owns the menu. One
+            // whose owner is not on any output has nothing to repaint.
+            let mut owner = root;
+            for _ in 0..16 {
+                let Some(PopupKind::Xdg(xdg)) = self.popups.find_popup(&owner) else {
+                    break;
+                };
+                let Some(parent) = xdg.get_parent_surface() else {
+                    return Some(Vec::new());
+                };
+                owner = root_surface(&parent);
             }
+            if let Some(window) = self.wm.window_of(&owner).map(|w| &w.element) {
+                return Some(self.space.outputs_for_element(window));
+            }
+            return Some(self.layer_of(&owner).map(|(o, _)| o).into_iter().collect());
         }
-        Vec::new()
+        None
     }
 }
 
