@@ -80,7 +80,7 @@ impl Aurora {
 
     /// Makes `output` the active one and focuses the most recently used window of the
     /// workspace it shows.
-    pub(super) fn focus_output_ws(&mut self, output: &smithay::output::Output) {
+    pub(crate) fn focus_output_ws(&mut self, output: &smithay::output::Output) {
         self.wm.active_output = Some(output.clone());
         let Some(ws) = self.wm.active_ws.get(output).copied() else {
             return;

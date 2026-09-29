@@ -74,6 +74,8 @@ focus_on_activate = false
 
 "Mod+comma" = "focus-output left"
 "Mod+period" = "focus-output right"
+"Mod+Shift+comma" = "move-to-output left"
+"Mod+Shift+period" = "move-to-output right"
 
 "Mod+1" = "workspace 1"
 "Mod+2" = "workspace 2"

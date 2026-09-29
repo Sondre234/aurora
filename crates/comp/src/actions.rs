@@ -116,6 +116,47 @@ impl Aurora {
             .and_then(|w| w.neighbor(&placed, id, layout_dir(dir)));
         if let Some(target) = target {
             self.focus_window(Some(target), true);
+        } else if let Some(rect) = placed.iter().find(|p| p.id == id).map(|p| p.outer) {
+            self.focus_across_output(ws, rect, dir);
+        }
+    }
+
+    /// Focus by direction past the edge of an output: the window on the neighbouring output
+    /// nearest to the focused one along the edge it crosses.
+    fn focus_across_output(&mut self, ws: u32, from: layout::Rect, dir: Dir) {
+        let Some(output) = self.wm.output_for_ws(ws) else {
+            return;
+        };
+        let Some(target) = self.output_in_direction(&output, dir) else {
+            return;
+        };
+        let Some(dst) = self.wm.active_ws.get(&target).copied() else {
+            return;
+        };
+        let Some((_, mut placed)) = self.ws_placements(dst) else {
+            return;
+        };
+        placed.retain(|p| {
+            self.wm
+                .windows
+                .get(&p.id)
+                .is_some_and(|w| w.phase == crate::wm::Phase::Mapped)
+                && self.wm.is_visible(p.id)
+        });
+        let (cx, cy) = (from.x + from.w / 2, from.y + from.h / 2);
+        // Closest along the crossed edge first, then closest to the seam.
+        let score = |r: &layout::Rect| match dir {
+            Dir::Left => ((r.y + r.h / 2 - cy).abs(), (cx - (r.x + r.w)).abs()),
+            Dir::Right => ((r.y + r.h / 2 - cy).abs(), (r.x - cx).abs()),
+            Dir::Up => ((r.x + r.w / 2 - cx).abs(), (cy - (r.y + r.h)).abs()),
+            Dir::Down => ((r.x + r.w / 2 - cx).abs(), (r.y - cy).abs()),
+        };
+        match placed.iter().min_by_key(|p| score(&p.outer)).map(|p| p.id) {
+            Some(next) => {
+                self.wm.active_output = Some(target);
+                self.focus_window(Some(next), true);
+            }
+            None => self.focus_output_ws(&target),
         }
     }
 
@@ -135,6 +176,7 @@ impl Aurora {
             return;
         }
         let Some(target) = workspace.neighbor(&placed, id, layout_dir(dir)) else {
+            self.move_to_output_dir(dir);
             return;
         };
         let (side, axis) = match dir {
