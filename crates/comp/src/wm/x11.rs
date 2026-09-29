@@ -311,12 +311,30 @@ impl Aurora {
         );
     }
 
-    /// `_NET_ACTIVE_WINDOW`: focus it when it can be seen. There is no urgency marker yet, so a
-    /// window on a hidden workspace just stays where it is.
-    pub fn x11_activate(&mut self, x11: &X11Surface) {
+    /// `_NET_ACTIVE_WINDOW`: honoured only as a user-initiated request (a real timestamp from
+    /// the client that already has focus); anything else marks the window urgent so a background
+    /// launcher cannot pull focus off a game.
+    pub fn x11_activate(&mut self, x11: &X11Surface, timestamp: u32, current: Option<&X11Surface>) {
         let Some(id) = self.x11_id(x11) else {
             return;
         };
+        let focused_x11 = self
+            .wm
+            .focused
+            .and_then(|f| self.wm.windows.get(&f))
+            .and_then(|w| w.element.x11_surface().cloned());
+        let user_initiated = timestamp != 0
+            && (focused_x11.is_none()
+                || focused_x11.as_ref() == current
+                || focused_x11.as_ref() == Some(x11));
+        if !user_initiated {
+            if self.wm.focused != Some(id)
+                && let Some(win) = self.wm.windows.get_mut(&id)
+            {
+                win.urgent = true;
+            }
+            return;
+        }
         // A window still waiting for its first buffer gets focus when it maps.
         let visible = self
             .wm

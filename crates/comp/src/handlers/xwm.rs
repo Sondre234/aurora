@@ -140,10 +140,10 @@ impl XwmHandler for Aurora {
         &mut self,
         _xwm: XwmId,
         window: X11Surface,
-        _timestamp: u32,
-        _currently_active_window: Option<X11Surface>,
+        timestamp: u32,
+        currently_active_window: Option<X11Surface>,
     ) {
-        self.x11_activate(&window);
+        self.x11_activate(&window, timestamp, currently_active_window.as_ref());
     }
 
     /// Only the focused X11 client may touch the clipboard: a background X client cannot
