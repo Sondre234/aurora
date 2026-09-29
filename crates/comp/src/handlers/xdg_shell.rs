@@ -1,5 +1,9 @@
 use smithay::{
-    desktop::{PopupKind, PopupManager, find_popup_root_surface, get_popup_toplevel_coords},
+    desktop::{
+        PopupKeyboardGrab, PopupKind, PopupManager, PopupPointerGrab, PopupUngrabStrategy,
+        find_popup_root_surface, get_popup_toplevel_coords,
+    },
+    input::{Seat, pointer::Focus},
     reexports::{
         wayland_protocols::xdg::shell::server::xdg_toplevel,
         wayland_server::protocol::{wl_output::WlOutput, wl_seat, wl_surface::WlSurface},
@@ -12,6 +16,7 @@ use smithay::{
 
 use crate::{
     Aurora,
+    focus::FocusTarget,
     wm::grabs::{DragKind, xdg_edges},
 };
 use aurora_layout::FsMode;
@@ -89,8 +94,49 @@ impl XdgShellHandler for Aurora {
         self.request_mode(surface.wl_surface(), FsMode::Maximized, false);
     }
 
-    fn grab(&mut self, _surface: PopupSurface, _seat: wl_seat::WlSeat, _serial: Serial) {
-        // TODO popup grabs
+    fn grab(&mut self, surface: PopupSurface, wl_seat: wl_seat::WlSeat, serial: Serial) {
+        let Some(seat) = Seat::<Aurora>::from_resource(&wl_seat) else {
+            return surface.send_popup_done();
+        };
+        let kind = PopupKind::Xdg(surface.clone());
+        let Ok(root) = find_popup_root_surface(&kind) else {
+            return surface.send_popup_done();
+        };
+        let (Some(keyboard), Some(pointer)) = (seat.get_keyboard(), seat.get_pointer()) else {
+            return surface.send_popup_done();
+        };
+        // The serial must come from input the user just made: a grab in progress, or an event
+        // no older than the keyboard's last enter.
+        let recent = keyboard
+            .last_enter()
+            .is_none_or(|e| serial.is_no_older_than(&e));
+        if !(pointer.has_grab(serial) || keyboard.has_grab(serial) || recent) {
+            return surface.send_popup_done();
+        }
+        let Ok(mut grab) = self
+            .popups
+            .grab_popup(FocusTarget::Wl(root), kind, &seat, serial)
+        else {
+            return surface.send_popup_done();
+        };
+        // A grab already held by something else (a drag, a move) that this popup is not
+        // nested in wins; the popup is dismissed.
+        let previous = grab.previous_serial();
+        if keyboard.is_grabbed()
+            && !(keyboard.has_grab(serial) || keyboard.has_grab(previous.unwrap_or(serial)))
+        {
+            grab.ungrab(PopupUngrabStrategy::All);
+            return;
+        }
+        if pointer.is_grabbed()
+            && !(pointer.has_grab(serial) || pointer.has_grab(previous.unwrap_or(grab.serial())))
+        {
+            grab.ungrab(PopupUngrabStrategy::All);
+            return;
+        }
+        keyboard.set_focus(self, grab.current_grab().map(FocusTarget::from), serial);
+        keyboard.set_grab(self, PopupKeyboardGrab::new(&grab), serial);
+        pointer.set_grab(self, PopupPointerGrab::new(&grab), serial, Focus::Keep);
     }
 }
 
