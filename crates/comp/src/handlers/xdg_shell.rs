@@ -9,6 +9,7 @@ use smithay::{
         wayland_server::protocol::{wl_output::WlOutput, wl_seat, wl_surface::WlSurface},
     },
     utils::Serial,
+    wayland::seat::WaylandFocus,
     wayland::shell::xdg::{
         PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
     },
@@ -105,12 +106,23 @@ impl XdgShellHandler for Aurora {
         let (Some(keyboard), Some(pointer)) = (seat.get_keyboard(), seat.get_pointer()) else {
             return surface.send_popup_done();
         };
-        // The serial must come from input the user just made: a grab in progress, or an event
-        // no older than the keyboard's last enter.
+        // The serial must be one the compositor issued (a client cannot name the future) from
+        // input the user just made, and the popup must belong to what holds the keyboard.
+        let issued = smithay::utils::SERIAL_COUNTER.next_serial();
+        let focus_root = keyboard
+            .current_focus()
+            .and_then(|f| f.wl_surface().map(|s| s.into_owned()))
+            .map(|s| match self.popups.find_popup(&s) {
+                Some(kind) => find_popup_root_surface(&kind).unwrap_or(s),
+                None => s,
+            });
         let recent = keyboard
             .last_enter()
-            .is_none_or(|e| serial.is_no_older_than(&e));
-        if !(pointer.has_grab(serial) || keyboard.has_grab(serial) || recent) {
+            .is_some_and(|e| serial.is_no_older_than(&e));
+        if !issued.is_no_older_than(&serial)
+            || focus_root.as_ref() != Some(&root)
+            || !(pointer.has_grab(serial) || keyboard.has_grab(serial) || recent)
+        {
             return surface.send_popup_done();
         }
         let Ok(mut grab) = self

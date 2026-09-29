@@ -71,10 +71,12 @@ impl XdgActivationHandler for Aurora {
         };
         let ours =
             smithay::input::Seat::<Aurora>::from_resource(wl_seat).is_some_and(|s| s == self.seat);
-        ours && self
-            .keyboard
-            .last_enter()
-            .is_none_or(|enter| serial.is_no_older_than(&enter))
+        let issued = smithay::utils::SERIAL_COUNTER.next_serial();
+        ours && issued.is_no_older_than(serial)
+            && self
+                .keyboard
+                .last_enter()
+                .is_none_or(|enter| serial.is_no_older_than(&enter))
     }
 
     fn request_activation(
