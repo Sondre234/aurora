@@ -108,7 +108,11 @@ impl DmabufHandler for Aurora {
     ) {
         match &mut self.backend {
             Backend::Drm(drm) => {
-                let node = drm.primary_gpu;
+                // Must be the node the scanout exporter filters on, or direct scanout never matches.
+                let node = drm
+                    .devices
+                    .get(&drm.primary_gpu)
+                    .map_or(drm.primary_gpu, |d| d.render_node);
                 let imported = drm
                     .renderer
                     .as_mut()
