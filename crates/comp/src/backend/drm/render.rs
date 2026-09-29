@@ -42,6 +42,7 @@ use super::{
 };
 use crate::{
     backend::{BACKGROUND, Backend},
+    capture::{self, Captures},
     scene::{OutputElement, output_elements},
     state::{Aurora, take_presentation_feedback, update_primary_scanout_output},
     wm::window::WindowElement,
@@ -258,6 +259,8 @@ impl Aurora {
                 renderer,
                 &self.space,
                 &self.xwayland.unmanaged,
+                &mut self.captures,
+                Duration::from(self.clock.now()),
                 self.pointer.current_location(),
                 &mut self.cursor_status,
                 cursors,
@@ -540,6 +543,8 @@ fn render_output(
     renderer: &mut GlesRenderer,
     space: &Space<WindowElement>,
     unmanaged: &Space<Window>,
+    captures: &mut Captures,
+    now: Duration,
     pointer_location: Point<f64, Logical>,
     cursor_status: &mut CursorImageStatus,
     cursors: &mut CursorCache,
@@ -559,10 +564,12 @@ fn render_output(
         scale,
         output.current_scale().integer_scale(),
     );
+    let n_cursor = elements.len();
     match output_elements(space, unmanaged, renderer, &output) {
         Some(scene) => elements.extend(scene),
         None => return Ok(None),
     }
+    capture::serve(captures, renderer, &output, &elements, n_cursor, now);
 
     let result = surface
         .drm_output

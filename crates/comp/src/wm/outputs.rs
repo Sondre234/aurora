@@ -150,6 +150,7 @@ impl Aurora {
         let outputs = self.wm.outputs.clone();
         for output in &outputs {
             self.send_output_scale(output);
+            self.captures.output_changed(output);
         }
         self.queue_redraw_all();
     }
@@ -258,6 +259,7 @@ impl Aurora {
     /// first remaining output shows, then the bookkeeping forgets it. With no output left the
     /// windows keep their workspace and return with the next output. Returns the window count.
     pub fn wm_output_removed(&mut self, output: &Output) -> usize {
+        self.captures.output_removed(output);
         let name = output.name();
         let shown = self.wm.active_ws.get(output).copied();
         let target = self

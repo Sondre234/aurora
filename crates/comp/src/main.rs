@@ -1,6 +1,7 @@
 mod action;
 mod actions;
 mod backend;
+mod capture;
 mod cli;
 mod config;
 mod debug;

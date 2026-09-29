@@ -80,6 +80,7 @@ pub struct Aurora {
     pub xdg_shell_state: XdgShellState,
     pub shm_state: ShmState,
     pub protocols: Protocols,
+    pub captures: crate::capture::Captures,
     pub seat_state: SeatState<Aurora>,
     pub data_device_state: DataDeviceState,
     pub dmabuf_state: DmabufState,
@@ -114,6 +115,7 @@ impl Aurora {
             config.general.allow_virtual_keyboard,
         );
 
+        let captures = crate::capture::Captures::new(&dh);
         let mut seat_state = SeatState::new();
         let mut seat: Seat<Self> = seat_state.new_wl_seat(&dh, backend.seat_name());
         // Hotplug tracking arrives with the DRM backend (M1).
@@ -147,6 +149,7 @@ impl Aurora {
             xdg_shell_state,
             shm_state,
             protocols,
+            captures,
             seat_state,
             data_device_state,
             dmabuf_state: DmabufState::new(),

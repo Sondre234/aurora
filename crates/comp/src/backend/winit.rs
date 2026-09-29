@@ -9,8 +9,14 @@ use smithay::{
     utils::{Rectangle, Transform},
 };
 
+use std::time::Duration;
+
 use crate::{
-    backend::BACKGROUND, scene::output_elements, state::Aurora, wm::outputs::rule_scale,
+    backend::BACKGROUND,
+    capture::{self, Captures},
+    scene::output_elements,
+    state::Aurora,
+    wm::outputs::rule_scale,
     wm::window::WindowElement,
 };
 
@@ -71,6 +77,8 @@ pub fn init(
                     &mut damage_tracker,
                     &state.space,
                     &state.xwayland.unmanaged,
+                    &mut state.captures,
+                    Duration::from(state.clock.now()),
                     &output,
                 ) {
                     tracing::warn!(%err, "nested frame failed");
@@ -94,11 +102,15 @@ fn draw(
     damage_tracker: &mut OutputDamageTracker,
     space: &Space<WindowElement>,
     unmanaged: &Space<Window>,
+    captures: &mut Captures,
+    now: Duration,
     output: &Output,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (renderer, mut framebuffer) = backend.bind()?;
     let elements =
         output_elements(space, unmanaged, renderer, output).ok_or("output is not mapped")?;
+    // The nested window draws no pointer; the host does.
+    capture::serve(captures, renderer, output, &elements, 0, now);
     damage_tracker
         .render_output(renderer, &mut framebuffer, 0, &elements, BACKGROUND)
         .map_err(|err| format!("{err:?}"))?;
