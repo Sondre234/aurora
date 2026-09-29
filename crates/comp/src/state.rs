@@ -1,6 +1,7 @@
 use std::{ffi::OsString, sync::Arc};
 
 use crate::backend::Backend;
+use smithay::input::keyboard::Keycode;
 
 use smithay::{
     desktop::{PopupManager, Space, Window, WindowSurfaceType},
@@ -29,10 +30,11 @@ pub const REPEAT_DELAY: i32 = 250;
 pub const REPEAT_RATE: i32 = 40;
 
 pub struct Aurora {
-    #[allow(dead_code)] // read by the DRM paths in later M1 steps
     pub backend: Backend,
     pub clock: Clock<Monotonic>,
     pub cursor_status: CursorImageStatus,
+    /// Keys whose press was taken by a compositor shortcut; their release is swallowed too.
+    pub suppressed_keys: Vec<Keycode>,
     pub socket_name: OsString,
     pub display_handle: DisplayHandle,
     pub loop_signal: LoopSignal,
@@ -64,7 +66,8 @@ impl Aurora {
         let mut seat_state = SeatState::new();
         let mut seat: Seat<Self> = seat_state.new_wl_seat(&dh, backend.seat_name());
         // Hotplug tracking arrives with the DRM backend (M1).
-        seat.add_keyboard(Default::default(), REPEAT_DELAY, REPEAT_RATE).unwrap();
+        seat.add_keyboard(Default::default(), REPEAT_DELAY, REPEAT_RATE)
+            .unwrap();
         seat.add_pointer();
 
         let socket_name = Self::init_wayland_listener(display, event_loop);
@@ -73,6 +76,7 @@ impl Aurora {
             backend,
             clock: Clock::new(),
             cursor_status: CursorImageStatus::default_named(),
+            suppressed_keys: Vec::new(),
             socket_name,
             display_handle: dh,
             loop_signal: event_loop.get_signal(),
@@ -88,7 +92,10 @@ impl Aurora {
         }
     }
 
-    fn init_wayland_listener(display: Display<Aurora>, event_loop: &mut EventLoop<Self>) -> OsString {
+    fn init_wayland_listener(
+        display: Display<Aurora>,
+        event_loop: &mut EventLoop<Self>,
+    ) -> OsString {
         let listening_socket = ListeningSocketSource::new_auto().unwrap();
         let socket_name = listening_socket.socket_name().to_os_string();
         let handle = event_loop.handle();
@@ -103,22 +110,30 @@ impl Aurora {
             .expect("failed to init the wayland listening socket");
 
         handle
-            .insert_source(Generic::new(display, Interest::READ, Mode::Level), |_, display, state| {
-                // Safety: the display is owned by this source and never dropped while it runs.
-                unsafe { display.get_mut().dispatch_clients(state).unwrap() };
-                Ok(PostAction::Continue)
-            })
+            .insert_source(
+                Generic::new(display, Interest::READ, Mode::Level),
+                |_, display, state| {
+                    // Safety: the display is owned by this source and never dropped while it runs.
+                    unsafe { display.get_mut().dispatch_clients(state).unwrap() };
+                    Ok(PostAction::Continue)
+                },
+            )
             .unwrap();
 
         socket_name
     }
 
-    pub fn surface_under(&self, pos: Point<f64, Logical>) -> Option<(WlSurface, Point<f64, Logical>)> {
-        self.space.element_under(pos).and_then(|(window, location)| {
-            window
-                .surface_under(pos - location.to_f64(), WindowSurfaceType::ALL)
-                .map(|(surface, p)| (surface, (p + location).to_f64()))
-        })
+    pub fn surface_under(
+        &self,
+        pos: Point<f64, Logical>,
+    ) -> Option<(WlSurface, Point<f64, Logical>)> {
+        self.space
+            .element_under(pos)
+            .and_then(|(window, location)| {
+                window
+                    .surface_under(pos - location.to_f64(), WindowSurfaceType::ALL)
+                    .map(|(surface, p)| (surface, (p + location).to_f64()))
+            })
     }
 }
 

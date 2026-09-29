@@ -19,7 +19,8 @@ fn open_log_file() -> Result<(fs::File, PathBuf), String> {
     if path.exists() {
         let _ = fs::rename(&path, dir.join("comp.log.1"));
     }
-    let file = fs::File::create(&path).map_err(|err| format!("create {}: {err}", path.display()))?;
+    let file =
+        fs::File::create(&path).map_err(|err| format!("create {}: {err}", path.display()))?;
     Ok((file, path))
 }
 
@@ -30,11 +31,21 @@ pub fn init() {
 
     // Unbuffered `File` writes: every event reaches the kernel before we can crash or hang.
     let file = open_log_file();
-    let file_layer = file.as_ref().ok().and_then(|(f, _)| f.try_clone().ok()).map(|f| {
-        tracing_subscriber::fmt::layer().with_ansi(false).with_writer(Mutex::new(f)).with_filter(filter())
-    });
+    let file_layer = file
+        .as_ref()
+        .ok()
+        .and_then(|(f, _)| f.try_clone().ok())
+        .map(|f| {
+            tracing_subscriber::fmt::layer()
+                .with_ansi(false)
+                .with_writer(Mutex::new(f))
+                .with_filter(filter())
+        });
 
-    tracing_subscriber::registry().with(stderr).with(file_layer).init();
+    tracing_subscriber::registry()
+        .with(stderr)
+        .with(file_layer)
+        .init();
 
     match file {
         Ok((_, path)) => tracing::info!(path = %path.display(), "logging to file"),

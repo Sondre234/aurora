@@ -17,11 +17,13 @@ pub struct Cli {
     pub command: String,
 }
 
-const USAGE: &str = "usage: aurora-comp [--winit | --drm] [--timeout <secs>] [--no-timeout] [-c <command>]";
+const USAGE: &str =
+    "usage: aurora-comp [--winit | --drm] [--timeout <secs>] [--no-timeout] [-c <command>]";
 
 impl Cli {
     pub fn parse() -> Result<Self, String> {
-        let nested = std::env::var_os("WAYLAND_DISPLAY").is_some() || std::env::var_os("DISPLAY").is_some();
+        let nested =
+            std::env::var_os("WAYLAND_DISPLAY").is_some() || std::env::var_os("DISPLAY").is_some();
         Self::parse_from(std::env::args().skip(1), nested)
     }
 
@@ -38,7 +40,9 @@ impl Cli {
                 "--no-timeout" => no_timeout = true,
                 "--timeout" => {
                     let secs = args.next().ok_or("--timeout needs a value")?;
-                    let secs: u64 = secs.parse().map_err(|_| format!("invalid --timeout value {secs:?}"))?;
+                    let secs: u64 = secs
+                        .parse()
+                        .map_err(|_| format!("invalid --timeout value {secs:?}"))?;
                     timeout = Some(Duration::from_secs(secs));
                 }
                 "-c" | "--command" => command = Some(args.next().ok_or("-c needs a command")?),
@@ -63,13 +67,19 @@ impl Cli {
 
         if backend == BackendKind::Drm && timeout.is_none() {
             if no_timeout {
-                tracing::warn!("DRM backend running WITHOUT a timeout; only the quit chord or a signal ends the session");
+                tracing::warn!(
+                    "DRM backend running WITHOUT a timeout; only the quit chord or a signal ends the session"
+                );
             } else {
                 timeout = Some(DRM_DEFAULT_TIMEOUT);
             }
         }
 
-        Ok(Self { backend, timeout, command: command.unwrap_or_else(|| "kitty".to_string()) })
+        Ok(Self {
+            backend,
+            timeout,
+            command: command.unwrap_or_else(|| "kitty".to_string()),
+        })
     }
 }
 
@@ -87,8 +97,17 @@ mod tests {
         assert_eq!(parse(&[], false).unwrap().backend, BackendKind::Drm);
         assert!(parse(&["--winit", "--drm"], true).is_err());
         assert_eq!(parse(&[], true).unwrap().timeout, None);
-        assert_eq!(parse(&["--drm"], true).unwrap().timeout, Some(DRM_DEFAULT_TIMEOUT));
-        assert_eq!(parse(&["--drm", "--no-timeout"], true).unwrap().timeout, None);
-        assert_eq!(parse(&["--drm", "--timeout", "5"], true).unwrap().timeout, Some(Duration::from_secs(5)));
+        assert_eq!(
+            parse(&["--drm"], true).unwrap().timeout,
+            Some(DRM_DEFAULT_TIMEOUT)
+        );
+        assert_eq!(
+            parse(&["--drm", "--no-timeout"], true).unwrap().timeout,
+            None
+        );
+        assert_eq!(
+            parse(&["--drm", "--timeout", "5"], true).unwrap().timeout,
+            Some(Duration::from_secs(5))
+        );
     }
 }

@@ -10,6 +10,8 @@ license = "GPL-3.0-or-later"
 [workspace.dependencies]
 # Pinned to git: the released 0.7.0 predates the API the reference compositor uses.
 smithay = { git = "https://github.com/Smithay/smithay.git", rev = "bc21b828af6a4f365b9ac0c4e27cf2df004f9c57", default-features = false }
+smithay-drm-extras = { git = "https://github.com/Smithay/smithay.git", rev = "bc21b828af6a4f365b9ac0c4e27cf2df004f9c57" }
+xcursor = "0.3"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
