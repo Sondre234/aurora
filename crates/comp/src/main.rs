@@ -73,7 +73,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     spawn_client(&cli.command);
 
-    event_loop.run(None, &mut state, |_| {})?;
+    event_loop.run(None, &mut state, |state| {
+        // Input and request handlers only queue events; nothing else flushes them.
+        let _ = state.display_handle.flush_clients();
+    })?;
     safety::arm_exit_deadline();
     tracing::info!("aurora exiting");
     Ok(())
