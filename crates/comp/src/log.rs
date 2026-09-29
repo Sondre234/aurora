@@ -1,6 +1,13 @@
-use std::{fs, path::PathBuf, sync::Mutex};
+use std::{
+    fs, io,
+    path::PathBuf,
+    sync::{Mutex, MutexGuard},
+};
 
-use tracing_subscriber::{EnvFilter, Layer, layer::SubscriberExt, util::SubscriberInitExt};
+use tracing::{Level, Metadata};
+use tracing_subscriber::{
+    EnvFilter, Layer, fmt::MakeWriter, layer::SubscriberExt, util::SubscriberInitExt,
+};
 
 /// `$XDG_STATE_HOME/aurora/comp.log`, falling back to `~/.local/state`.
 fn log_path() -> Option<PathBuf> {
@@ -24,12 +31,62 @@ fn open_log_file() -> Result<(fs::File, PathBuf), String> {
     Ok((file, path))
 }
 
+/// Log file writer that syncs to disk after every INFO-or-worse event. Those are lifecycle
+/// events (outputs, session, errors), rare enough to afford the sync; debug and trace, which
+/// can be per-frame, are not synced. Unbuffered writes only survive a process crash; the
+/// sync is what keeps the tail across a hard reset after a black screen.
+struct SyncedFile(Mutex<fs::File>);
+
+struct SyncedWriter<'a> {
+    file: MutexGuard<'a, fs::File>,
+    sync: bool,
+}
+
+impl SyncedFile {
+    fn writer(&self, sync: bool) -> SyncedWriter<'_> {
+        SyncedWriter {
+            file: self.0.lock().unwrap_or_else(|e| e.into_inner()),
+            sync,
+        }
+    }
+}
+
+impl<'a> MakeWriter<'a> for SyncedFile {
+    type Writer = SyncedWriter<'a>;
+
+    fn make_writer(&'a self) -> Self::Writer {
+        self.writer(false)
+    }
+
+    fn make_writer_for(&'a self, meta: &Metadata<'_>) -> Self::Writer {
+        self.writer(*meta.level() <= Level::INFO)
+    }
+}
+
+impl io::Write for SyncedWriter<'_> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.file.write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.file.flush()
+    }
+}
+
+impl Drop for SyncedWriter<'_> {
+    fn drop(&mut self) {
+        if self.sync {
+            let _ = self.file.sync_data();
+        }
+    }
+}
+
 /// Logs to stderr and to the log file, so a black screen can be diagnosed afterwards.
 pub fn init() {
     let filter = || EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     let stderr = tracing_subscriber::fmt::layer().with_filter(filter());
 
-    // Unbuffered `File` writes: every event reaches the kernel before we can crash or hang.
+    // Unbuffered `File` writes, synced for INFO and above (see `SyncedFile`).
     let file = open_log_file();
     let file_layer = file
         .as_ref()
@@ -38,7 +95,7 @@ pub fn init() {
         .map(|f| {
             tracing_subscriber::fmt::layer()
                 .with_ansi(false)
-                .with_writer(Mutex::new(f))
+                .with_writer(SyncedFile(Mutex::new(f)))
                 .with_filter(filter())
         });
 
