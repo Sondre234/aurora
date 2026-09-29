@@ -4,7 +4,7 @@ use aurora_layout::WinId;
 use smithay::{desktop::space::SpaceElement, utils::SERIAL_COUNTER};
 
 use super::Phase;
-use crate::{Aurora, layers::Hit};
+use crate::{Aurora, focus::FocusTarget, layers::Hit};
 
 impl Aurora {
     /// Focuses `id` (or nothing). `raise` also lifts it above other windows of its layer.
@@ -163,7 +163,19 @@ impl Aurora {
                 self.focus_window(Some(id), raise);
             }
             Hit::Layer(hit) => self.focus_layer_on_click(&hit.layer),
-            Hit::Unmanaged(..) | Hit::Nothing => {}
+            Hit::Unmanaged(window, _) => {
+                if let Some(x11) = window.x11_surface()
+                    && Aurora::x11_takes_click_focus(x11)
+                {
+                    let target = FocusTarget::X11(x11.clone());
+                    if self.keyboard.current_focus().as_ref() != Some(&target) {
+                        let serial = SERIAL_COUNTER.next_serial();
+                        let keyboard = self.keyboard.clone();
+                        keyboard.set_focus(self, Some(target), serial);
+                    }
+                }
+            }
+            Hit::Nothing => {}
         }
     }
 }

@@ -108,21 +108,19 @@ impl Aurora {
         }
     }
 
-    pub fn x11_map_override_redirect(&mut self, x11: X11Surface) {
-        let geo = x11.last_configure();
-        let window = Window::new_x11_window(x11.clone());
-        // Full-output override-redirect windows are how some games go fullscreen without
-        // asking the window manager: they get the keyboard, and belong to the workspace the
-        // output shows so that switching away hides them.
-        let covers = self
-            .wm
+    /// Whether `geo` is exactly an output: an override-redirect window that size is how some
+    /// games go fullscreen without asking the window manager.
+    fn covers_output(&self, geo: Rectangle<i32, Logical>) -> bool {
+        self.wm
             .outputs
             .iter()
-            .any(|o| self.space.output_geometry(o) == Some(geo));
-        // Every override-redirect window belongs to a workspace, so menus and tooltips do not
-        // outlive a switch: its parent's, else the one shown where it appeared.
-        let ws = x11
-            .is_transient_for()
+            .any(|o| self.space.output_geometry(o) == Some(geo))
+    }
+
+    /// Every override-redirect window belongs to a workspace, so menus and tooltips do not
+    /// outlive a switch: its parent's, else the one shown where it is.
+    fn override_redirect_ws(&self, x11: &X11Surface, geo: Rectangle<i32, Logical>) -> Option<u32> {
+        x11.is_transient_for()
             .and_then(|p| self.wm.by_x11.get(&p))
             .and_then(|id| self.wm.windows.get(id))
             .map(|w| w.ws)
@@ -138,7 +136,16 @@ impl Aurora {
                     })
                     .or(self.wm.active_output.as_ref())?;
                 self.wm.active_ws.get(at).copied()
-            });
+            })
+    }
+
+    pub fn x11_map_override_redirect(&mut self, x11: X11Surface) {
+        let geo = x11.last_configure();
+        let window = Window::new_x11_window(x11.clone());
+        // Covering windows get the keyboard, and belong to the workspace the output shows so
+        // that switching away hides them.
+        let covers = self.covers_output(geo);
+        let ws = self.override_redirect_ws(&x11, geo);
         let shown = ws.is_none_or(|ws| self.wm.ws_output.contains_key(&ws));
         if shown {
             self.xwayland
@@ -295,13 +302,21 @@ impl Aurora {
         self.relayout_ws(ws);
     }
 
-    /// Override-redirect windows move and resize themselves.
+    /// Override-redirect windows move and resize themselves. What they cover and which
+    /// workspace they belong to follows, since games map first and resize afterwards.
     pub fn x11_configure_notify(&mut self, x11: &X11Surface, geo: Rectangle<i32, Logical>) {
+        let covers = self.covers_output(geo);
+        let owner = self.override_redirect_ws(x11, geo);
+        let mut take_keyboard = false;
         for c in &mut self.xwayland.covering {
             if c.window.x11_surface() == Some(x11) {
                 c.loc = geo.loc;
+                c.ws = owner.unwrap_or(c.ws);
+                take_keyboard = covers && !c.takes_keyboard;
+                c.takes_keyboard = covers;
             }
         }
+        self.sync_covering();
         let window = self
             .xwayland
             .unmanaged
@@ -311,7 +326,24 @@ impl Aurora {
         if let Some(window) = window {
             self.xwayland.unmanaged.map_element(window, geo.loc, false);
             self.queue_redraw_all();
+            if take_keyboard {
+                let serial = SERIAL_COUNTER.next_serial();
+                let keyboard = self.keyboard.clone();
+                keyboard.set_focus(self, Some(FocusTarget::X11(x11.clone())), serial);
+            }
         }
+    }
+
+    /// A click on an override-redirect window gives it the keyboard unless it is a menu,
+    /// tooltip or other helper of another window.
+    pub fn x11_takes_click_focus(x11: &X11Surface) -> bool {
+        x11.is_transient_for().is_none()
+            && x11.window_type().is_none_or(|t| {
+                matches!(
+                    t,
+                    WmWindowType::Normal | WmWindowType::Dialog | WmWindowType::Utility
+                )
+            })
     }
 
     pub fn x11_mode_request(&mut self, x11: &X11Surface, mode: FsMode, set: bool) {
