@@ -23,10 +23,14 @@ use smithay::{
 
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 
+use aurora_layout::WinId;
+
 use crate::focus::FocusTarget;
 
 /// Stacking layers, between the Bottom (20) and Top (40) layer-shell layers.
 pub const Z_TILED: u8 = 30;
+pub const Z_FLOATING: u8 = 31;
+pub const Z_FULLSCREEN: u8 = 50;
 
 type Rgba = [f32; 4];
 
@@ -54,13 +58,11 @@ impl Deco {
         }
     }
 
-    #[allow(dead_code)] // the tiling step sets the stacking layer
     pub fn set_z(&self, z: u8) {
         self.z.set(z);
     }
 
     /// Border width in logical pixels; `colors` is `[focused, unfocused]`.
-    #[allow(dead_code)] // the tiling step sets these from the config
     pub fn set_border(&self, width: i32, colors: [Rgba; 2]) {
         self.width.set(width.max(0));
         self.colors.set(colors);
@@ -78,16 +80,26 @@ impl Deco {
 
 #[derive(Clone)]
 pub struct WindowElement {
+    id: WinId,
     window: Window,
     deco: Rc<Deco>,
 }
 
 impl WindowElement {
-    pub fn new(window: Window) -> Self {
+    pub fn new(id: WinId, window: Window) -> Self {
         Self {
+            id,
             window,
             deco: Rc::new(Deco::new()),
         }
+    }
+
+    pub fn id(&self) -> WinId {
+        self.id
+    }
+
+    pub fn deco(&self) -> &Deco {
+        &self.deco
     }
 
     /// What keyboard focus goes to when this window is focused.
@@ -257,14 +269,4 @@ where
         }
         out
     }
-}
-
-/// The window whose toplevel or X11 surface is `surface`.
-pub fn window_for_surface<'a>(
-    space: &'a smithay::desktop::Space<WindowElement>,
-    surface: &smithay::reexports::wayland_server::protocol::wl_surface::WlSurface,
-) -> Option<&'a WindowElement> {
-    space
-        .elements()
-        .find(|w| w.wl_surface().is_some_and(|s| s.as_ref() == surface))
 }

@@ -3,7 +3,7 @@ use std::{ffi::OsString, path::PathBuf, sync::Arc, time::Duration};
 use crate::config::Config;
 use crate::focus::FocusTarget;
 use crate::protocols::Protocols;
-use crate::wm::window::WindowElement;
+use crate::wm::{Wm, window::WindowElement};
 use crate::{backend::Backend, dmabuf::SurfaceDmabufFeedback};
 use smithay::input::keyboard::Keycode;
 
@@ -64,6 +64,7 @@ pub struct Aurora {
     pub loop_signal: LoopSignal,
     pub handle: LoopHandle<'static, Aurora>,
 
+    pub wm: Wm,
     pub space: Space<WindowElement>,
     pub popups: PopupManager,
 
@@ -123,6 +124,7 @@ impl Aurora {
             display_handle: dh,
             loop_signal: event_loop.get_signal(),
             handle: event_loop.handle(),
+            wm: Wm::default(),
             space: Space::default(),
             popups: PopupManager::default(),
             compositor_state,

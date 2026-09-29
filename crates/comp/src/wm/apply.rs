@@ -1,0 +1,457 @@
+//! Window lifecycle and the one place that projects layout results onto the `Space`.
+//! Relayout runs on events (map, close, config, output changes), never per frame.
+use aurora_layout::{Constraints, InsertHint, Kind, Placement, Point, Rect, Size, WinId};
+use smithay::{
+    desktop::layer_map_for_output,
+    output::Output,
+    reexports::{
+        wayland_protocols::xdg::shell::server::xdg_toplevel,
+        wayland_server::protocol::wl_surface::WlSurface,
+    },
+    utils::{Logical, Rectangle},
+    wayland::{
+        compositor::with_states,
+        shell::xdg::{SurfaceCachedState, ToplevelSurface, XdgToplevelSurfaceData},
+    },
+};
+
+use super::{
+    Phase, WinData, layout_params, rules,
+    window::{WindowElement, Z_FLOATING, Z_FULLSCREEN, Z_TILED},
+};
+use crate::Aurora;
+
+fn rect_of(r: Rectangle<i32, Logical>) -> Rect {
+    Rect::new(r.loc.x, r.loc.y, r.size.w, r.size.h)
+}
+
+/// Size hints of a toplevel, 0 meaning unconstrained.
+fn read_constraints(surface: &WlSurface) -> Constraints {
+    with_states(surface, |states| {
+        let mut cached = states.cached_state.get::<SurfaceCachedState>();
+        let current = cached.current();
+        Constraints {
+            min: Size {
+                w: current.min_size.w.max(0),
+                h: current.min_size.h.max(0),
+            },
+            max: Size {
+                w: current.max_size.w.max(0),
+                h: current.max_size.h.max(0),
+            },
+        }
+    })
+}
+
+fn read_strings(surface: &WlSurface) -> (String, String) {
+    with_states(surface, |states| {
+        states
+            .data_map
+            .get::<XdgToplevelSurfaceData>()
+            .and_then(|d| d.lock().ok())
+            .map(|d| {
+                (
+                    d.app_id.clone().unwrap_or_default(),
+                    d.title.clone().unwrap_or_default(),
+                )
+            })
+            .unwrap_or_default()
+    })
+}
+
+fn has_buffer(surface: &WlSurface) -> bool {
+    smithay::backend::renderer::utils::with_renderer_surface_state(surface, |s| {
+        s.buffer().is_some()
+    })
+    .unwrap_or(false)
+}
+
+fn initial_configure_sent(surface: &WlSurface) -> bool {
+    with_states(surface, |states| {
+        states
+            .data_map
+            .get::<XdgToplevelSurfaceData>()
+            .and_then(|d| d.lock().ok())
+            .is_some_and(|d| d.initial_configure_sent)
+    })
+}
+
+/// Sets size and state on the pending configure and sends it when something changed.
+fn configure(toplevel: &ToplevelSurface, size: (i32, i32), tiled: bool, fullscreen: bool) {
+    toplevel.with_pending_state(|s| {
+        s.size = (size.0 > 0 && size.1 > 0).then(|| size.into());
+        for state in [
+            xdg_toplevel::State::TiledLeft,
+            xdg_toplevel::State::TiledRight,
+            xdg_toplevel::State::TiledTop,
+            xdg_toplevel::State::TiledBottom,
+        ] {
+            if tiled {
+                s.states.set(state);
+            } else {
+                s.states.unset(state);
+            }
+        }
+        if fullscreen {
+            s.states.set(xdg_toplevel::State::Fullscreen);
+        } else {
+            s.states.unset(xdg_toplevel::State::Fullscreen);
+        }
+    });
+    toplevel.send_pending_configure();
+}
+
+impl Aurora {
+    /// The output's usable area (bars excluded) and its full area, in global coordinates.
+    fn work_area(&self, output: &Output) -> Option<(Rect, Rect)> {
+        let geo = self.space.output_geometry(output)?;
+        let full = rect_of(geo);
+        let zone = layer_map_for_output(output).non_exclusive_zone();
+        if zone.is_empty() {
+            return Some((full, full));
+        }
+        let work = Rect::new(
+            geo.loc.x + zone.loc.x,
+            geo.loc.y + zone.loc.y,
+            zone.size.w,
+            zone.size.h,
+        );
+        Some((work, full))
+    }
+
+    /// Registers an output with the window manager and lays out what it shows.
+    pub fn wm_output_added(&mut self, output: &Output) {
+        self.wm.output_added(output);
+        self.relayout_all();
+    }
+
+    pub fn relayout_all(&mut self) {
+        let visible: Vec<u32> = self.wm.active_ws.values().copied().collect();
+        for ws in visible {
+            self.relayout_ws(ws);
+        }
+        self.hide_invisible();
+    }
+
+    /// Windows on workspaces no output shows are not in the Space, so they draw nothing and
+    /// get no frame callbacks.
+    fn hide_invisible(&mut self) {
+        let hidden: Vec<WindowElement> = self
+            .wm
+            .windows
+            .values()
+            .filter(|w| !self.wm.ws_output.contains_key(&w.ws))
+            .map(|w| w.element.clone())
+            .collect();
+        for element in hidden {
+            self.space.unmap_elem(&element);
+        }
+    }
+
+    pub fn relayout_ws(&mut self, ws: u32) {
+        let Some(output) = self.wm.output_for_ws(ws) else {
+            return;
+        };
+        let Some((work, full)) = self.work_area(&output) else {
+            return;
+        };
+        let params = layout_params(&self.config);
+        let mut placed = Vec::new();
+        if let Some(workspace) = self.wm.workspaces.get_mut(&ws) {
+            workspace.placements(work, full, &params, &mut placed);
+        }
+        self.apply(&output, ws, &placed);
+    }
+
+    /// Diffs `placed` onto the Space: map or relocate, unmap what left, configure only
+    /// windows whose size or state changed, and refresh the borders.
+    fn apply(&mut self, output: &Output, ws: u32, placed: &[Placement]) {
+        let general = &self.config.general;
+        let colors = [general.border_focused.0, general.border_unfocused.0];
+        let border = general.border_width;
+
+        let mut line = String::new();
+        for p in placed {
+            let Some(win) = self.wm.windows.get_mut(&p.id) else {
+                continue;
+            };
+            let content = p.content;
+            win.target = content;
+            win.current = content;
+            win.floating = p.kind == Kind::Floating;
+            win.fs = p.kind == Kind::Fullscreen;
+            win.ws = ws;
+
+            let deco = win.element.deco();
+            deco.set_z(match p.kind {
+                Kind::Floating => Z_FLOATING,
+                Kind::Fullscreen => Z_FULLSCREEN,
+                _ => Z_TILED,
+            });
+            deco.set_border(border, colors);
+
+            let size = (content.w, content.h);
+            let flags = (p.kind == Kind::Tiled, win.fs);
+            if win.sent_size != Some(size) || win.sent_flags != flags {
+                win.sent_size = Some(size);
+                win.sent_flags = flags;
+                if let Some(toplevel) = win.element.toplevel() {
+                    configure(toplevel, size, flags.0, flags.1);
+                }
+            }
+
+            if win.phase == Phase::Mapped {
+                let at = (content.x, content.y).into();
+                if self.space.element_location(&win.element) != Some(at) {
+                    self.space.map_element(win.element.clone(), at, false);
+                }
+            }
+
+            use std::fmt::Write;
+            let _ = write!(
+                line,
+                " {}:{}:{},{} {}x{}{}{}",
+                p.id.0,
+                win.app_id,
+                p.outer.x,
+                p.outer.y,
+                p.outer.w,
+                p.outer.h,
+                if win.floating { " float" } else { "" },
+                if win.fs { " fs" } else { "" },
+            );
+        }
+
+        let gone: Vec<WindowElement> = self
+            .wm
+            .windows
+            .values()
+            .filter(|w| w.ws == ws && w.phase == Phase::Mapped)
+            .filter(|w| !placed.iter().any(|p| p.id == w.id))
+            .map(|w| w.element.clone())
+            .collect();
+        for element in gone {
+            self.space.unmap_elem(&element);
+        }
+
+        let line = format!(
+            "layout: ws={ws} out={} [{}]",
+            output.name(),
+            line.trim_start()
+        );
+        if self.wm.last_layout.get(&ws) != Some(&line) {
+            tracing::info!("{line}");
+            self.wm.last_layout.insert(ws, line);
+        }
+        self.queue_redraw_output(output);
+    }
+
+    pub fn new_wm_window(&mut self, toplevel: ToplevelSurface) {
+        use smithay::reexports::wayland_server::Resource;
+        let id = self.wm.alloc_id();
+        let surface = toplevel.wl_surface().clone();
+        let element =
+            WindowElement::new(id, smithay::desktop::Window::new_wayland_window(toplevel));
+        self.wm.by_surface.insert(surface.id(), id);
+        self.wm.windows.insert(
+            id,
+            WinData {
+                id,
+                element,
+                ws: 0,
+                floating: false,
+                fs: false,
+                parent: None,
+                phase: Phase::Pending,
+                placed: false,
+                target: Rect::default(),
+                current: Rect::default(),
+                sent_size: None,
+                sent_flags: (false, false),
+                constraints: Constraints::default(),
+                app_id: String::new(),
+            },
+        );
+    }
+
+    /// Handles a toplevel's commit: the initial one runs the rules and places the window,
+    /// the first buffer maps it, later ones track size hints.
+    pub fn toplevel_commit(&mut self, surface: &WlSurface) {
+        let Some(id) = self.wm.id_of(surface) else {
+            return;
+        };
+        let Some((phase, placed)) = self.wm.windows.get(&id).map(|w| (w.phase, w.placed)) else {
+            return;
+        };
+        // A client that destroys its role and commits resets the initial-configure flag, so
+        // the placed check keeps a dying window from being mapped again.
+        match phase {
+            Phase::Mapped => self.refresh_constraints(id, surface),
+            Phase::Pending if !placed && !initial_configure_sent(surface) => {
+                self.map_request(id, surface)
+            }
+            Phase::Pending => {
+                if has_buffer(surface) {
+                    self.window_mapped(id);
+                }
+            }
+        }
+    }
+
+    fn map_request(&mut self, id: WinId, surface: &WlSurface) {
+        let Some(win) = self.wm.windows.get(&id) else {
+            return;
+        };
+        let Some(toplevel) = win.element.toplevel().cloned() else {
+            return;
+        };
+        let (app_id, _title) = read_strings(surface);
+        let constraints = read_constraints(surface);
+        let parent_surface = toplevel.parent();
+        let parent = parent_surface.as_ref().and_then(|p| self.wm.id_of(p));
+        if let Some(win) = self.wm.windows.get_mut(&id) {
+            win.app_id = app_id;
+            win.constraints = constraints;
+            win.parent = parent;
+        }
+        self.place(id, parent_surface.is_some());
+        // Nothing to lay out against (no output yet): the client still needs its configure.
+        if !initial_configure_sent(surface) {
+            toplevel.send_configure();
+        }
+    }
+
+    /// Inserts the window into the layout of the focused output's workspace.
+    fn place(&mut self, id: WinId, has_parent: bool) {
+        let Some(output) = self.wm.active_output.clone() else {
+            return;
+        };
+        let Some(ws) = self.wm.active_ws.get(&output).copied() else {
+            return;
+        };
+        let Some((work, _)) = self.work_area(&output) else {
+            return;
+        };
+        let Some(win) = self.wm.windows.get(&id) else {
+            return;
+        };
+        let (constraints, parent) = (win.constraints, win.parent);
+        let parent_rect = parent
+            .and_then(|p| self.wm.windows.get(&p))
+            .filter(|p| p.ws == ws)
+            .map(|p| p.target);
+        let decision = rules::evaluate(&rules::Attrs {
+            has_parent,
+            constraints,
+        });
+        let params = layout_params(&self.config);
+        let pointer = self.pointer.current_location();
+
+        let workspace = self.wm.workspaces.entry(ws).or_default();
+        if decision.floating {
+            let rect = floating_rect(work, parent_rect, constraints, params.border);
+            workspace.add_floating(id, rect);
+        } else {
+            let after = self
+                .wm
+                .focused
+                .filter(|f| workspace.contains(*f))
+                .or_else(|| workspace.mru().first().copied());
+            let hint = InsertHint {
+                after,
+                side: params.new_window_side,
+                pointer: Some(Point {
+                    x: pointer.x as i32,
+                    y: pointer.y as i32,
+                }),
+            };
+            workspace.add_tiled(id, hint, constraints);
+        }
+        workspace.set_parent(id, parent);
+        if let Some(win) = self.wm.windows.get_mut(&id) {
+            win.ws = ws;
+            win.placed = true;
+        }
+        self.relayout_ws(ws);
+    }
+
+    /// First buffer: show and focus the window.
+    fn window_mapped(&mut self, id: WinId) {
+        let Some(win) = self.wm.windows.get_mut(&id) else {
+            return;
+        };
+        win.phase = Phase::Mapped;
+        if win.placed {
+            let ws = win.ws;
+            self.relayout_ws(ws);
+        } else {
+            let has_parent = win.parent.is_some();
+            self.place(id, has_parent);
+        }
+        self.focus_window(Some(id), true);
+    }
+
+    fn refresh_constraints(&mut self, id: WinId, surface: &WlSurface) {
+        let constraints = read_constraints(surface);
+        let Some(win) = self.wm.windows.get_mut(&id) else {
+            return;
+        };
+        if win.constraints == constraints {
+            return;
+        }
+        win.constraints = constraints;
+        let ws = win.ws;
+        if let Some(workspace) = self.wm.workspaces.get_mut(&ws) {
+            workspace.tiling.set_constraints(id, constraints);
+        }
+        self.relayout_ws(ws);
+    }
+
+    /// The client destroyed its toplevel (or disconnected).
+    pub fn wm_window_destroyed(&mut self, surface: &WlSurface) {
+        use smithay::reexports::wayland_server::Resource;
+        let Some(id) = self.wm.by_surface.remove(&surface.id()) else {
+            return;
+        };
+        let Some(win) = self.wm.windows.remove(&id) else {
+            return;
+        };
+        self.space.unmap_elem(&win.element);
+        if self.wm.hover == Some(id) {
+            self.wm.hover = None;
+        }
+        let was_focused = self.wm.focused == Some(id);
+        let mut next = None;
+        if let Some(workspace) = self.wm.workspaces.get_mut(&win.ws) {
+            next = workspace.focus_after_close(id);
+            workspace.remove(id);
+        }
+        self.relayout_ws(win.ws);
+        if was_focused {
+            self.focus_window(next, true);
+        }
+    }
+}
+
+/// Where a new floating window goes: centred on its parent or on the work area, sized
+/// from its hints (or two thirds of the area). `border` grows the result to an outer rect.
+fn floating_rect(work: Rect, parent: Option<Rect>, c: Constraints, border: i32) -> Rect {
+    let pick = |min: i32, max: i32, area: i32| {
+        let mut v = if min > 0 && min == max {
+            min
+        } else {
+            area * 2 / 3
+        };
+        v = v.max(min);
+        if max > 0 {
+            v = v.min(max);
+        }
+        v.min(area - 2 * border).max(1)
+    };
+    let w = pick(c.min.w, c.max.w, work.w) + 2 * border;
+    let h = pick(c.min.h, c.max.h, work.h) + 2 * border;
+    let anchor = parent.unwrap_or(work).center();
+    let x = (anchor.x - w / 2).clamp(work.x, (work.right() - w).max(work.x));
+    let y = (anchor.y - h / 2).clamp(work.y, (work.bottom() - h).max(work.y));
+    Rect::new(x, y, w, h)
+}
