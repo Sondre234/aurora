@@ -164,6 +164,25 @@ pub struct Constraints {
     pub max: Size,
 }
 
+impl Constraints {
+    /// Client hints are untrusted: negative means none, and huge values would overflow
+    /// the layout sums.
+    pub fn clamped(self) -> Self {
+        const LIMIT: i32 = 65535;
+        let c = |v: i32| v.clamp(0, LIMIT);
+        Self {
+            min: Size {
+                w: c(self.min.w),
+                h: c(self.min.h),
+            },
+            max: Size {
+                w: c(self.max.w),
+                h: c(self.max.h),
+            },
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Gaps {
     /// Half the distance between two tiled windows (each window keeps this margin).

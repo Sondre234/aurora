@@ -385,7 +385,6 @@ mod tests {
         assert!(!ws.set_fullscreen(w(99), Some(FsMode::Maximized)));
     }
 
-
     #[test]
     fn maximized_floating_is_placed() {
         let mut ws = ws3();

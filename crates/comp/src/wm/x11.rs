@@ -31,6 +31,7 @@ fn constraints(x11: &X11Surface) -> Constraints {
         min: size(x11.min_size()),
         max: size(x11.max_size()),
     }
+    .clamped()
 }
 
 /// Everything but a plain top-level window is a helper the user does not want in the tree.

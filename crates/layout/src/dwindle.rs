@@ -213,14 +213,15 @@ impl Dwindle {
 
     fn compute_min(&mut self, n: usize, overhead: i32) -> (i32, i32) {
         let min = match self.nodes[n].body {
-            Body::Leaf { constraints: c, .. } => {
-                (c.min.w.max(0) + overhead, c.min.h.max(0) + overhead)
-            }
+            Body::Leaf { constraints: c, .. } => (
+                c.min.w.saturating_add(overhead),
+                c.min.h.saturating_add(overhead),
+            ),
             Body::Split { axis, a, b, .. } => {
                 let (ma, mb) = (self.compute_min(a, overhead), self.compute_min(b, overhead));
                 match axis {
-                    Axis::Horizontal => (ma.0 + mb.0, ma.1.max(mb.1)),
-                    Axis::Vertical => (ma.0.max(mb.0), ma.1 + mb.1),
+                    Axis::Horizontal => (ma.0.saturating_add(mb.0), ma.1.max(mb.1)),
+                    Axis::Vertical => (ma.0.max(mb.0), ma.1.saturating_add(mb.1)),
                 }
             }
             Body::Free => (0, 0),
@@ -298,7 +299,7 @@ impl Dwindle {
             min: (0, 0),
             body: Body::Leaf {
                 win: id,
-                constraints: c,
+                constraints: c.clamped(),
             },
         });
         self.index.insert(id, leaf);
@@ -325,10 +326,11 @@ impl Dwindle {
 /// minimums cannot both fit, the space is shared in proportion to them.
 fn split_len(total: i32, ratio: f32, min_a: i32, min_b: i32) -> i32 {
     let total = total.max(0);
-    if min_a + min_b > total {
-        return (i64::from(total) * i64::from(min_a) / i64::from(min_a + min_b)) as i32;
+    let sum = i64::from(min_a) + i64::from(min_b);
+    if sum > i64::from(total) {
+        return (i64::from(total) * i64::from(min_a) / sum) as i32;
     }
-    (((total as f32) * ratio).round() as i32).clamp(min_a, total - min_b)
+    (((total as f32) * ratio).round() as i32).clamp(min_a, (total - min_b).max(min_a))
 }
 
 fn split_rect(r: Rect, axis: Axis, ratio: f32, min_a: i32, min_b: i32) -> (Rect, Rect) {
@@ -455,9 +457,9 @@ impl TilingLayout for Dwindle {
             return false;
         };
         if let Body::Leaf { constraints, .. } = &mut self.nodes[i].body
-            && *constraints != c
+            && *constraints != c.clamped()
         {
-            *constraints = c;
+            *constraints = c.clamped();
             self.touch(false);
         }
         true
@@ -775,7 +777,6 @@ mod tests {
         assert_eq!(r(&d, 2), Rect::new(500, 0, 500, 800));
         assert!(!d.move_beside(w(3), w(99), Side::First, None));
     }
-
 
     #[test]
     fn move_beside_forced_axis() {

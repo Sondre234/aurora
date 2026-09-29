@@ -42,6 +42,7 @@ fn read_constraints(surface: &WlSurface) -> Constraints {
                 h: current.max_size.h.max(0),
             },
         }
+        .clamped()
     })
 }
 
