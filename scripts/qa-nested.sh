@@ -561,7 +561,7 @@ sc_robust() {
     local i p
     for i in $(seq 25); do
         wl wtype -M logo -k Left -k Right -k Up -k Down -m logo -M logo -M shift -k Left -k Right -m shift -m logo \
-            -M logo -k w -k f -k j -m logo
+            -M logo -k w -k w -k f -k f -k j -k j -m logo
     done
     if alive; then pass "survives bind spam"; else fail "died during bind spam"; fi
     local pids=()
