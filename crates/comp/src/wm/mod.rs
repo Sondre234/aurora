@@ -103,6 +103,15 @@ impl Wm {
         self.windows.get(&self.id_of(surface)?)
     }
 
+    /// Whether a fullscreen window (not merely maximized) covers what `output` shows.
+    pub fn output_fullscreen(&self, output: &Output) -> bool {
+        self.active_ws
+            .get(output)
+            .and_then(|ws| self.workspaces.get(ws))
+            .and_then(|w| w.fullscreen())
+            .is_some_and(|(_, mode)| mode == FsMode::Fullscreen)
+    }
+
     pub fn output_for_ws(&self, ws: u32) -> Option<Output> {
         self.ws_output.get(&ws).cloned()
     }

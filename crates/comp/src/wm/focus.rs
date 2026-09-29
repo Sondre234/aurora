@@ -4,7 +4,7 @@ use aurora_layout::WinId;
 use smithay::{desktop::space::SpaceElement, utils::SERIAL_COUNTER};
 
 use super::Phase;
-use crate::Aurora;
+use crate::{Aurora, layers::Hit};
 
 impl Aurora {
     /// Focuses `id` (or nothing). `raise` also lifts it above other windows of its layer.
@@ -16,7 +16,15 @@ impl Aurora {
                 .is_some_and(|w| w.phase == Phase::Mapped)
         });
         let prev = self.wm.focused;
-        if prev == id && !raise {
+        // An exclusive layer owns the keyboard: window focus then only updates what the
+        // keyboard returns to.
+        let locked = self.layer_focus.exclusive.is_some();
+        // The keyboard may sit on a layer while `wm.focused` still names the window.
+        let target = id
+            .and_then(|i| self.wm.windows.get(&i))
+            .and_then(|w| w.element.focus_target());
+        let keyboard_there = locked || id.is_none() || self.keyboard.current_focus() == target;
+        if prev == id && !raise && keyboard_there {
             return;
         }
 
@@ -46,7 +54,11 @@ impl Aurora {
                 if raise && self.space.element_location(&element).is_some() {
                     self.space.raise_element(&element, false);
                 }
-                keyboard.set_focus(self, element.focus_target(), serial);
+                if locked {
+                    self.layer_focus.restore = element.focus_target();
+                } else {
+                    keyboard.set_focus(self, element.focus_target(), serial);
+                }
                 let out = self
                     .wm
                     .output_for_ws(ws)
@@ -59,7 +71,11 @@ impl Aurora {
                 self.redraw_ws(ws);
             }
             None => {
-                keyboard.set_focus(self, None, serial);
+                if locked {
+                    self.layer_focus.restore = None;
+                } else {
+                    keyboard.set_focus(self, None, serial);
+                }
                 if prev.is_some() {
                     tracing::info!("focus: none");
                 }
@@ -81,7 +97,10 @@ impl Aurora {
     /// motion, but only acts on a change, so a stationary hover never steals focus back.
     pub fn update_hover(&mut self) {
         let pos = self.pointer.current_location();
-        let hover = self.space.element_under(pos).map(|(w, _)| w.id());
+        let hover = match self.hit_test(pos) {
+            Hit::Window(window, _) => Some(window.id()),
+            _ => None,
+        };
         if hover == self.wm.hover {
             return;
         }
@@ -95,18 +114,24 @@ impl Aurora {
         }
     }
 
-    /// Click-to-focus for the window under the pointer.
+    /// Click-to-focus: the window under the pointer, or a layer that takes the keyboard on
+    /// demand. A click on a bar never focuses the window behind it.
     pub fn focus_under_pointer(&mut self) {
         let pos = self.pointer.current_location();
-        if let Some(id) = self.space.element_under(pos).map(|(w, _)| w.id()) {
-            // Only floating windows change stacking on a click; tiles never overlap.
-            let raise = self
-                .wm
-                .windows
-                .get(&id)
-                .and_then(|w| self.wm.workspaces.get(&w.ws))
-                .is_some_and(|ws| ws.is_floating(id));
-            self.focus_window(Some(id), raise);
+        match self.hit_test(pos) {
+            Hit::Window(window, _) => {
+                let id = window.id();
+                // Only floating windows change stacking on a click; tiles never overlap.
+                let raise = self
+                    .wm
+                    .windows
+                    .get(&id)
+                    .and_then(|w| self.wm.workspaces.get(&w.ws))
+                    .is_some_and(|ws| ws.is_floating(id));
+                self.focus_window(Some(id), raise);
+            }
+            Hit::Layer(hit) => self.focus_layer_on_click(&hit.layer),
+            Hit::Nothing => {}
         }
     }
 }

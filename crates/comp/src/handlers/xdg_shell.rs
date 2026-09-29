@@ -119,6 +119,7 @@ impl Aurora {
             return;
         };
         let Some(window) = self.wm.window_of(&root).map(|w| &w.element) else {
+            self.unconstrain_layer_popup(popup, &root);
             return;
         };
         let Some(window_geo) = self.space.element_geometry(window) else {

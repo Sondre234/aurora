@@ -10,6 +10,7 @@ mod focus;
 mod handlers;
 mod input;
 mod keymap;
+mod layers;
 mod libinput;
 mod log;
 mod protocols;

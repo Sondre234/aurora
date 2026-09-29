@@ -33,11 +33,11 @@ pub struct Repeat {
 }
 
 impl Aurora {
-    /// Shortcuts are off while a client holds a keyboard-shortcuts inhibitor or an
-    /// exclusive layer surface has the keyboard (both arrive with those protocols); binds
-    /// marked `bypass_inhibit` ignore this.
+    /// Shortcuts are off while an exclusive layer surface has the keyboard (and, later, while
+    /// a client holds a keyboard-shortcuts inhibitor); binds marked `bypass_inhibit` ignore
+    /// this. The emergency chords never consult it.
     pub fn binds_allowed(&self) -> bool {
-        true
+        self.layer_focus.exclusive.is_none()
     }
 
     /// The entry point for every key, physical or injected. `time` is the event's own.

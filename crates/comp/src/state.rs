@@ -2,6 +2,7 @@ use std::{ffi::OsString, path::PathBuf, sync::Arc, time::Duration};
 
 use crate::config::Config;
 use crate::focus::FocusTarget;
+use crate::layers::Hit;
 use crate::protocols::Protocols;
 use crate::wm::{Wm, window::WindowElement};
 use crate::{backend::Backend, dmabuf::SurfaceDmabufFeedback};
@@ -41,7 +42,7 @@ use smithay::{
         dmabuf::{DmabufGlobal, DmabufState},
         drm_syncobj::DrmSyncobjState,
         selection::data_device::DataDeviceState,
-        shell::xdg::XdgShellState,
+        shell::{wlr_layer::Layer, xdg::XdgShellState},
         shm::ShmState,
         socket::ListeningSocketSource,
     },
@@ -68,6 +69,7 @@ pub struct Aurora {
     pub handle: LoopHandle<'static, Aurora>,
 
     pub wm: Wm,
+    pub layer_focus: crate::layers::LayerFocus,
     pub space: Space<WindowElement>,
     pub popups: PopupManager,
 
@@ -133,6 +135,7 @@ impl Aurora {
             loop_signal: event_loop.get_signal(),
             handle: event_loop.handle(),
             wm: Wm::default(),
+            layer_focus: Default::default(),
             space: Space::default(),
             popups: PopupManager::default(),
             compositor_state,
@@ -188,19 +191,19 @@ impl Aurora {
         &self,
         pos: Point<f64, Logical>,
     ) -> Option<(FocusTarget, Point<f64, Logical>)> {
-        self.space
-            .element_under(pos)
-            .and_then(|(window, location)| {
-                window
-                    .surface_under(pos - location.to_f64(), WindowSurfaceType::ALL)
-                    .map(|(surface, p)| {
-                        let target = match window.underlying_surface() {
-                            WindowSurface::X11(x11) => FocusTarget::X11(x11.clone()),
-                            WindowSurface::Wayland(_) => FocusTarget::Wl(surface),
-                        };
-                        (target, (p + location).to_f64())
-                    })
-            })
+        match self.hit_test(pos) {
+            Hit::Layer(hit) => Some((FocusTarget::Wl(hit.surface), hit.loc)),
+            Hit::Window(window, location) => window
+                .surface_under(pos - location.to_f64(), WindowSurfaceType::ALL)
+                .map(|(surface, p)| {
+                    let target = match window.underlying_surface() {
+                        WindowSurface::X11(x11) => FocusTarget::X11(x11.clone()),
+                        WindowSurface::Wayland(_) => FocusTarget::Wl(surface),
+                    };
+                    (target, (p + location).to_f64())
+                }),
+            Hit::Nothing => None,
+        }
     }
 
     /// Sends frame callbacks for everything drawn on `output`, plus dmabuf feedback when the
@@ -223,8 +226,18 @@ impl Aurora {
                 }
             }
         }
+        // Layers hidden by a fullscreen window have no primary output worth trusting, so they
+        // fall to the throttle.
+        let top_hidden = crate::scene::top_hidden(output);
         for layer in layer_map_for_output(output).layers() {
-            layer.send_frame(output, time, throttle, surface_primary_scanout_output);
+            let hidden = top_hidden && layer.layer() == Layer::Top;
+            layer.send_frame(output, time, throttle, |s, d| {
+                if hidden {
+                    None
+                } else {
+                    surface_primary_scanout_output(s, d)
+                }
+            });
         }
         if let CursorImageStatus::Surface(surface) = &self.cursor_status {
             send_frames_surface_tree(

@@ -64,6 +64,10 @@ impl CompositorHandler for Aurora {
             }
         };
 
+        if let Some(output) = self.layer_commit(surface) {
+            self.queue_redraw_output(&output);
+            return;
+        }
         if self.wm.id_of(surface).is_some() {
             self.toplevel_commit(surface);
         }

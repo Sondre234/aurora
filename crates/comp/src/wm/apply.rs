@@ -61,7 +61,7 @@ pub(crate) fn read_strings(surface: &WlSurface) -> (String, String) {
     })
 }
 
-fn has_buffer(surface: &WlSurface) -> bool {
+pub(crate) fn has_buffer(surface: &WlSurface) -> bool {
     smithay::backend::renderer::utils::with_renderer_surface_state(surface, |s| {
         s.buffer().is_some()
     })
@@ -285,6 +285,8 @@ impl Aurora {
             self.wm.last_layout.insert(ws, line);
         }
         self.queue_redraw_output(output);
+        // Fullscreen decides whether Top layers show and who may hold the keyboard.
+        self.refresh_layer_focus();
     }
 
     pub fn new_wm_window(&mut self, toplevel: ToplevelSurface) {

@@ -144,11 +144,15 @@ impl Aurora {
             let map = layer_map_for_output(output);
             for layer in map.layers() {
                 let geo = map.layer_geometry(layer);
+                let state = layer.cached_state();
                 tracing::info!(
-                    "dump: layer {} ns={} layer={:?} geo={}",
+                    "dump: layer {} ns={} layer={:?} kbd={:?} excl={:?} exclusive_focus={} geo={}",
                     output.name(),
                     quote(layer.namespace()),
                     layer.layer(),
+                    state.keyboard_interactivity,
+                    state.exclusive_zone,
+                    (self.layer_focus.exclusive.as_ref() == Some(layer)) as u8,
                     geo.map_or("none".into(), |g| format!(
                         "{},{} {}x{}",
                         g.loc.x, g.loc.y, g.size.w, g.size.h
@@ -159,10 +163,13 @@ impl Aurora {
 
         let describe = |target: Option<FocusTarget>| match target {
             None => "none".to_string(),
-            Some(FocusTarget::Wl(s)) => self
-                .wm
-                .id_of(&s)
-                .map_or_else(|| format!("surface:{}", s.id()), |id| id.0.to_string()),
+            Some(FocusTarget::Wl(s)) => match self.wm.id_of(&s) {
+                Some(id) => id.0.to_string(),
+                None => self.layer_of(&s).map_or_else(
+                    || format!("surface:{}", s.id()),
+                    |(_, layer)| format!("layer:{}", layer.namespace()),
+                ),
+            },
             Some(FocusTarget::X11(x)) => format!("x11:{}", x.window_id()),
         };
         let kbd = describe(self.keyboard.current_focus());
