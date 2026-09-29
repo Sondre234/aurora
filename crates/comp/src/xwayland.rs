@@ -23,12 +23,9 @@ use xcursor::{CursorTheme, parser::parse_xcursor};
 
 use crate::state::Aurora;
 
-/// Restarts allowed inside `RESTART_WINDOW` before the server stays down.
+/// Failed starts allowed inside `RESTART_WINDOW` before the server stays down.
 const MAX_RESTARTS: usize = 5;
 const RESTART_WINDOW: Duration = Duration::from_secs(60);
-/// A server that lived at least this long exited because its clients left, not because it
-/// crashed, so its restart does not count against the limit.
-const HEALTHY_UPTIME: Duration = Duration::from_secs(10);
 
 pub struct Covering {
     pub window: Window,
@@ -59,7 +56,9 @@ pub struct XWaylandState {
     /// unmanaged space while that workspace is hidden.
     pub covering: Vec<Covering>,
     restarts: VecDeque<Instant>,
-    started: Option<Instant>,
+    /// The current server's window manager came up. `-terminate` makes a server that served
+    /// its clients exit normally, which is not a crash however short its life.
+    ready: bool,
     down: bool,
 }
 
@@ -84,7 +83,7 @@ impl Aurora {
             Err(err) => return tracing::warn!("xwayland: cannot start: {err}"),
         };
         self.xwayland.display = Some(server.display_number());
-        self.xwayland.started = Some(Instant::now());
+        self.xwayland.ready = false;
         let inserted = self
             .handle
             .insert_source(server, move |event, _, state| match event {
@@ -126,6 +125,8 @@ impl Aurora {
             tracing::warn!("xwayland: cannot set the cursor: {err}");
         }
         self.xwayland.wm = Some(wm);
+        self.xwayland.ready = true;
+        self.xwayland.restarts.clear();
         tracing::info!("xwayland: ready display=:{number}");
     }
 
@@ -152,11 +153,7 @@ impl Aurora {
             return;
         }
         let now = Instant::now();
-        if self
-            .xwayland
-            .started
-            .is_none_or(|s| now.duration_since(s) < HEALTHY_UPTIME)
-        {
+        if !self.xwayland.ready {
             self.xwayland.restarts.push_back(now);
         }
         while self
