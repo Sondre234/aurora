@@ -300,7 +300,10 @@ impl Config {
                 Arc::new(config)
             }
             Err(err) => {
-                tracing::warn!("config: error {err} using defaults");
+                tracing::warn!(
+                    "config: error {} using defaults",
+                    err.lines().next().unwrap_or_default()
+                );
                 let (config, _) = Self::resolve(raw::RawConfig::default());
                 Arc::new(Self {
                     from_file: false,
@@ -345,7 +348,10 @@ impl Aurora {
                 self.reapply_output_config();
                 self.drm_apply_output_config();
             }
-            Err(err) => tracing::warn!("config: error {err} keeping previous"),
+            Err(err) => tracing::warn!(
+                "config: error {} keeping previous",
+                err.lines().next().unwrap_or_default()
+            ),
         }
     }
 }
