@@ -33,7 +33,7 @@ pub struct Repeat {
 }
 
 impl Aurora {
-    /// Shortcuts are off while an exclusive layer surface has the keyboard (and, later, while
+    /// Shortcuts are off while an exclusive layer surface has the keyboard (and while
     /// a client holds a keyboard-shortcuts inhibitor); binds marked `bypass_inhibit` ignore
     /// this. The emergency chords never consult it.
     pub fn binds_allowed(&self) -> bool {

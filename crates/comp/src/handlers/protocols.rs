@@ -184,6 +184,13 @@ impl Aurora {
 
     /// The `revoke-inhibit` action: takes the keyboard back from the focused client.
     pub fn revoke_shortcuts_inhibit(&mut self) {
+        // An exclusive layer surface that took the keyboard is dropped to on-demand too, so a
+        // hung launcher cannot keep every bind off.
+        if let Some(layer) = self.layer_focus.exclusive.clone() {
+            tracing::info!("layer focus: revoked from {}", layer.namespace());
+            self.layer_focus.demoted.push(layer);
+            self.refresh_layer_focus();
+        }
         if let Some(inhibitor) = &self.protocols.active_inhibitor {
             tracing::info!("shortcuts inhibit: revoked");
             inhibitor.inactivate();

@@ -43,7 +43,8 @@ focus_on_activate = false
 #   resize-split <dir> <px>
 #   workspace <N|next|prev> | move-to-workspace <N>
 #   focus-output <dir> | move-to-output <dir>
-#   revoke-inhibit             end the focused client's keyboard-shortcuts inhibitor
+#   revoke-inhibit             end the focused client's keyboard-shortcuts inhibitor and take
+#                              the keyboard back from an exclusive layer surface
 #   reload-config | quit | none
 #   drag-move | drag-resize    mouse binds only
 [keybinds]

@@ -32,6 +32,9 @@ pub struct LayerFocus {
     /// The OnDemand layer that took the keyboard by click; dropped once it dies, unmaps or
     /// stops asking for the keyboard.
     pub on_demand: Option<LayerSurface>,
+    /// Exclusive layers the user took the keyboard away from (`revoke-inhibit`); they are
+    /// ignored until they unmap or die.
+    pub demoted: Vec<LayerSurface>,
 }
 
 pub struct LayerHit {
@@ -224,6 +227,9 @@ impl Aurora {
     /// that can change either: layer commit, unmap, new layer, fullscreen or workspace change.
     pub fn refresh_layer_focus(&mut self) {
         self.sync_top_hidden();
+        self.layer_focus
+            .demoted
+            .retain(|l| l.alive() && crate::wm::apply::has_buffer(l.wl_surface()));
         let want = self.exclusive_candidate();
         if want.is_none() {
             self.release_on_demand();
@@ -309,6 +315,7 @@ impl Aurora {
                 let map = layer_map_for_output(output);
                 let found = map.layers_on(kind).rev().find(|l| {
                     l.alive()
+                        && !self.layer_focus.demoted.contains(l)
                         && interactivity(l) == KeyboardInteractivity::Exclusive
                         && crate::wm::apply::has_buffer(l.wl_surface())
                 });
