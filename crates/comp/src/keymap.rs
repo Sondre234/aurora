@@ -80,8 +80,7 @@ fn keymap_file_path() -> Option<PathBuf> {
     if let Some(path) = std::env::var_os("AURORA_XKB_FILE") {
         return Some(path.into());
     }
-    let home = std::env::var_os("HOME")?;
-    Some(PathBuf::from(home).join(".config/aurora/keymap.xkb"))
+    Some(crate::config::config_dir()?.join("keymap.xkb"))
 }
 
 fn parse_xorg_keyboard(text: &str) -> Option<XorgKeyboard> {

@@ -1,5 +1,6 @@
-use std::{ffi::OsString, sync::Arc, time::Duration};
+use std::{ffi::OsString, path::PathBuf, sync::Arc, time::Duration};
 
+use crate::config::Config;
 use crate::{backend::Backend, dmabuf::SurfaceDmabufFeedback};
 use smithay::input::keyboard::Keycode;
 
@@ -55,6 +56,8 @@ pub struct Aurora {
     pub cursor_status: CursorImageStatus,
     /// Keys whose press was taken by a compositor shortcut; their release is swallowed too.
     pub suppressed_keys: Vec<Keycode>,
+    pub config: Arc<Config>,
+    pub config_path: PathBuf,
     pub socket_name: OsString,
     pub display_handle: DisplayHandle,
     pub loop_signal: LoopSignal,
@@ -88,6 +91,8 @@ impl Aurora {
         event_loop: &mut EventLoop<'static, Self>,
         display: Display<Self>,
         backend: Backend,
+        config: Arc<Config>,
+        config_path: PathBuf,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let dh = display.handle();
 
@@ -114,6 +119,8 @@ impl Aurora {
             clock,
             cursor_status: CursorImageStatus::default_named(),
             suppressed_keys: Vec::new(),
+            config,
+            config_path,
             socket_name,
             display_handle: dh,
             loop_signal: event_loop.get_signal(),

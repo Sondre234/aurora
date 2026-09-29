@@ -4,66 +4,37 @@ use smithay::{
         KeyState, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent, PointerMotionEvent,
     },
     input::{
-        keyboard::{FilterResult, Keycode, ModifiersState, keysyms},
+        keyboard::FilterResult,
         pointer::{AxisFrame, ButtonEvent, MotionEvent, RelativeMotionEvent},
     },
     reexports::wayland_server::protocol::wl_surface::WlSurface,
     utils::{Logical, Point, Rectangle, SERIAL_COUNTER},
 };
 
-use crate::state::Aurora;
+use crate::{
+    config::keybind::Mods,
+    emergency::{self, Emergency},
+    state::Aurora,
+};
 
 /// Compositor-level key actions, decided before clients see the key.
 #[derive(Clone, Copy)]
 enum KeyAction {
-    Quit,
-    VtSwitch(i32),
+    Emergency(Emergency),
     None,
 }
 
-/// evdev KEY_BACKSPACE (14) plus the xkb offset of 8.
-const KEYCODE_BACKSPACE: u32 = 14 + 8;
-
 fn key_action(
-    modifiers: &ModifiersState,
+    modifiers: &smithay::input::keyboard::ModifiersState,
     handle: &smithay::input::keyboard::KeysymHandle<'_>,
 ) -> Option<KeyAction> {
-    // AltGr counts as Alt: with the altgr-intl layout the right Alt is not Mod1.
-    let ctrl_alt = modifiers.ctrl && (modifiers.alt || modifiers.iso_level3_shift);
+    let mods = Mods::from_state(modifiers);
     let raw = handle.raw_syms();
-
-    // Matched on raw syms and keycode so no layout or level can hide it.
-    if ctrl_alt
-        && (handle.raw_code() == Keycode::new(KEYCODE_BACKSPACE)
-            || raw.iter().any(|s| {
-                matches!(
-                    s.raw(),
-                    keysyms::KEY_BackSpace | keysyms::KEY_Terminate_Server
-                )
-            }))
-    {
-        return Some(KeyAction::Quit);
+    let raw = &raw[..];
+    if let Some(action) = emergency::classify(mods, handle.raw_code(), raw, handle.modified_sym()) {
+        return Some(KeyAction::Emergency(action));
     }
-
-    let modified = handle.modified_sym().raw();
-    if (keysyms::KEY_XF86Switch_VT_1..=keysyms::KEY_XF86Switch_VT_12).contains(&modified) {
-        return Some(KeyAction::VtSwitch(
-            (modified - keysyms::KEY_XF86Switch_VT_1 + 1) as i32,
-        ));
-    }
-    if ctrl_alt {
-        let f = raw
-            .iter()
-            .map(|s| s.raw())
-            .find(|s| (keysyms::KEY_F1..=keysyms::KEY_F12).contains(s));
-        if let Some(f) = f {
-            return Some(KeyAction::VtSwitch((f - keysyms::KEY_F1 + 1) as i32));
-        }
-    } else if modifiers.ctrl
-        && raw
-            .iter()
-            .any(|s| (keysyms::KEY_F1..=keysyms::KEY_F12).contains(&s.raw()))
-    {
+    if emergency::near_miss(mods, raw) {
         // Leaves a trace when a VT chord is pressed with the wrong modifiers.
         tracing::info!(
             alt = modifiers.alt,
@@ -166,18 +137,18 @@ impl Aurora {
                 );
 
                 match action {
-                    Some(KeyAction::Quit) => {
+                    Some(KeyAction::Emergency(Emergency::Quit)) => {
                         tracing::warn!("quitting: quit chord");
                         crate::safety::arm_exit_deadline();
                         self.loop_signal.stop();
                     }
-                    Some(KeyAction::VtSwitch(vt)) => {
+                    Some(KeyAction::Emergency(Emergency::VtSwitch(vt))) => {
                         tracing::info!(vt, "VT switch requested");
                         self.backend.change_vt(vt);
                     }
                     Some(KeyAction::None) | None => {}
                 }
-                if matches!(action, Some(KeyAction::Quit | KeyAction::VtSwitch(_))) {
+                if matches!(action, Some(KeyAction::Emergency(_))) {
                     let _ = self.display_handle.flush_clients();
                 }
             }
