@@ -488,6 +488,11 @@ impl Aurora {
             .workspace
             .filter(|w| (1..=self.config.general.workspaces).contains(w))
             .or(by_output)
+            // A dialog belongs with its parent, wherever the user is looking.
+            .or(parent
+                .and_then(|p| self.wm.windows.get(&p))
+                .filter(|p| p.placed)
+                .map(|p| p.ws))
             .unwrap_or(active_ws);
         let output = self.wm.output_for_ws(ws).unwrap_or(active);
         let Some((work, full)) = self.work_area(&output) else {
