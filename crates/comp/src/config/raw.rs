@@ -260,11 +260,17 @@ pub fn outputs(section: Option<&Value>, warnings: &mut Vec<String>) -> Vec<Outpu
         {
             return Err(format!("scale {s} is out of range (0.25..=8)"));
         }
+        let position = get_pair(ctx, t, "position").map_err(e)?;
+        if let Some((x, y)) = position
+            && ![x, y].iter().all(|v| (-100_000..=100_000).contains(v))
+        {
+            return Err("position is out of range (-100000..=100000)".into());
+        }
         Ok(OutputRule {
             name: name.to_string(),
             enabled: get_bool(ctx, t, "enabled").map_err(e)?.unwrap_or(true),
             primary: get_bool(ctx, t, "primary").map_err(e)?.unwrap_or(false),
-            position: get_pair(ctx, t, "position").map_err(e)?,
+            position,
             mode,
             scale,
         })

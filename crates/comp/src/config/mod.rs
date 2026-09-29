@@ -145,7 +145,7 @@ impl ModeSpec {
             }
             None => None,
         };
-        (width > 0 && height > 0).then_some(Self {
+        ((1..=16384).contains(&width) && (1..=16384).contains(&height)).then_some(Self {
             width,
             height,
             refresh_mhz,

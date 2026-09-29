@@ -66,14 +66,14 @@ pub fn resolve_with(
     let mut next_x = outputs
         .iter()
         .zip(&pos)
-        .filter_map(|((_, size), p)| Some(p.as_ref()?.x + size.w))
+        .filter_map(|((_, size), p)| Some(p.as_ref()?.x.saturating_add(size.w)))
         .max()
         .unwrap_or(0);
     let mut rest: Vec<usize> = (0..outputs.len()).filter(|i| pos[*i].is_none()).collect();
     rest.sort_by(|a, b| natural_cmp(&outputs[*a].0, &outputs[*b].0));
     for i in rest {
         pos[i] = Some(Point { x: next_x, y: 0 });
-        next_x += outputs[i].1.w;
+        next_x = next_x.saturating_add(outputs[i].1.w);
     }
 
     let mut rects: Vec<Rect> = outputs
@@ -100,8 +100,8 @@ pub fn resolve_with(
     rects
         .iter_mut()
         .map(|r| Point {
-            x: r.x - min_x,
-            y: r.y - min_y,
+            x: r.x.saturating_sub(min_x),
+            y: r.y.saturating_sub(min_y),
         })
         .collect()
 }
