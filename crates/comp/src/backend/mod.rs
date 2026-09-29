@@ -9,7 +9,7 @@ pub use drm::DrmBackend;
 
 pub enum Backend {
     Winit,
-    Drm(DrmBackend),
+    Drm(Box<DrmBackend>),
 }
 
 impl Backend {

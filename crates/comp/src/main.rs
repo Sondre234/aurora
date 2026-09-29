@@ -34,8 +34,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let (session, notifier) = session::open()?;
             session::insert_notifier(&handle, notifier)?;
             let seat = smithay::backend::session::Session::seat(&session);
+            let primary_gpu = backend::drm::gpu::select_primary(&seat)?;
             let libinput = libinput::new_context(&session, &seat)?;
-            Backend::Drm(DrmBackend::new(session, libinput))
+            Backend::Drm(Box::new(DrmBackend::new(session, libinput, primary_gpu)))
         }
     };
     let mut state = Aurora::new(&mut event_loop, display, backend);
@@ -53,10 +54,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 unreachable!("backend chosen above")
             };
             libinput::insert_source(&handle, drm.input_source())?;
-            log_udev_devices(&state.backend.seat_name());
-            return Err(
-                "the DRM backend is not implemented yet (session, udev and libinput are up)".into(),
-            );
+            backend::drm::init(&handle, &mut state)?;
         }
     }
 
@@ -74,17 +72,5 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn spawn_client(command: &str) {
     if let Err(err) = std::process::Command::new(command).spawn() {
         tracing::warn!(%command, %err, "failed to spawn startup client");
-    }
-}
-
-/// Lists the seat's DRM nodes; GPU selection comes with the DRM device step.
-fn log_udev_devices(seat: &str) {
-    match smithay::backend::udev::UdevBackend::new(seat) {
-        Ok(udev) => {
-            for (id, path) in udev.device_list() {
-                tracing::info!(id, path = %path.display(), "udev drm device");
-            }
-        }
-        Err(err) => tracing::error!(%err, "udev backend failed"),
     }
 }

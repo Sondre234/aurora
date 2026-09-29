@@ -7,7 +7,9 @@ use smithay::{
     desktop::{PopupManager, Space, Window, WindowSurfaceType},
     input::{Seat, SeatState, pointer::CursorImageStatus},
     reexports::{
-        calloop::{EventLoop, Interest, LoopSignal, Mode, PostAction, generic::Generic},
+        calloop::{
+            EventLoop, Interest, LoopHandle, LoopSignal, Mode, PostAction, generic::Generic,
+        },
         wayland_server::{
             Display, DisplayHandle,
             backend::{ClientData, ClientId, DisconnectReason},
@@ -38,6 +40,7 @@ pub struct Aurora {
     pub socket_name: OsString,
     pub display_handle: DisplayHandle,
     pub loop_signal: LoopSignal,
+    pub handle: LoopHandle<'static, Aurora>,
 
     pub space: Space<Window>,
     pub popups: PopupManager,
@@ -54,7 +57,11 @@ pub struct Aurora {
 }
 
 impl Aurora {
-    pub fn new(event_loop: &mut EventLoop<Self>, display: Display<Self>, backend: Backend) -> Self {
+    pub fn new(
+        event_loop: &mut EventLoop<'static, Self>,
+        display: Display<Self>,
+        backend: Backend,
+    ) -> Self {
         let dh = display.handle();
 
         let compositor_state = CompositorState::new::<Self>(&dh);
@@ -80,6 +87,7 @@ impl Aurora {
             socket_name,
             display_handle: dh,
             loop_signal: event_loop.get_signal(),
+            handle: event_loop.handle(),
             space: Space::default(),
             popups: PopupManager::default(),
             compositor_state,
