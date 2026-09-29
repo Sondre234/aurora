@@ -54,6 +54,8 @@ pub struct WinData {
     pub want_mode: Option<FsMode>,
     /// Frame callbacks sent to this window, for the QA dump.
     pub frames_sent: u64,
+    /// An activation request arrived while the window was not focusable; cleared on focus.
+    pub urgent: bool,
     /// Set when a removed output pushed the window onto another one, so the output can take
     /// it back if it returns before the window was moved by hand.
     pub rescued_from: Option<Rescue>,
@@ -80,6 +82,7 @@ impl WinData {
             resize_anchor: None,
             want_mode: None,
             frames_sent: 0,
+            urgent: false,
             rescued_from: None,
         }
     }

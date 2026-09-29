@@ -86,6 +86,8 @@ pub struct General {
     pub workspaces: u32,
     pub mod_key: ModKey,
     pub allow_virtual_keyboard: bool,
+    /// xdg-activation requests focus the window instead of only marking it urgent.
+    pub focus_on_activate: bool,
 }
 
 impl Default for General {
@@ -111,6 +113,7 @@ impl Default for General {
             workspaces: 10,
             mod_key: ModKey::Super,
             allow_virtual_keyboard: true,
+            focus_on_activate: false,
         }
     }
 }

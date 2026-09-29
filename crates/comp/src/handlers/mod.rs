@@ -1,5 +1,6 @@
 mod compositor;
 mod layer_shell;
+mod protocols;
 mod xdg_shell;
 mod xwm;
 
@@ -49,6 +50,7 @@ impl SeatHandler for Aurora {
             .and_then(|s| dh.get_client(s.id()).ok());
         set_data_device_focus(dh, seat, client.clone());
         set_primary_focus(dh, seat, client);
+        self.update_shortcuts_inhibit(focused);
     }
 }
 

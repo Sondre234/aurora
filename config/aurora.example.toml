@@ -26,6 +26,8 @@ workspaces = 10           # numbered 1..N, N in 1..=32
 mod_key = "super"
 # zwp_virtual_keyboard_v1 for tools such as wtype. Its keys go through the bind table.
 allow_virtual_keyboard = true
+# xdg-activation (an app asking to be raised): focus the window, or only mark it urgent.
+focus_on_activate = false
 
 # Binds: "<Mods>+<key>" = "<action>", or a table { action = "..", repeat = false,
 # bypass_inhibit = false }. Modifiers: Mod, Super (Logo, Win), Ctrl, Shift, Alt, AltGr.
@@ -41,6 +43,7 @@ allow_virtual_keyboard = true
 #   resize-split <dir> <px>
 #   workspace <N|next|prev> | move-to-workspace <N>
 #   focus-output <dir> | move-to-output <dir>
+#   revoke-inhibit             end the focused client's keyboard-shortcuts inhibitor
 #   reload-config | quit | none
 #   drag-move | drag-resize    mouse binds only
 [keybinds]
@@ -51,6 +54,7 @@ allow_virtual_keyboard = true
 "Mod+f" = "fullscreen"
 "Mod+j" = "toggle-split"
 "Mod+Shift+r" = "reload-config"
+"Mod+Shift+Escape" = { action = "revoke-inhibit", bypass_inhibit = true }
 
 "Mod+Left" = "focus left"
 "Mod+Right" = "focus right"

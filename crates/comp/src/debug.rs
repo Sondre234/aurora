@@ -123,7 +123,7 @@ impl Aurora {
             let r = win.current;
             let _ = write!(
                 line,
-                "dump: win {} app_id={} title={} kind={kind} ws={} rect={},{} {}x{} float={} fs={} frames_sent={} mapped={}",
+                "dump: win {} app_id={} title={} kind={kind} ws={} rect={},{} {}x{} float={} fs={} frames_sent={} urgent={} mapped={}",
                 win.id.0,
                 quote(&win.app_id),
                 quote(&title),
@@ -135,6 +135,7 @@ impl Aurora {
                 win.floating as u8,
                 win.fs as u8,
                 win.frames_sent,
+                win.urgent as u8,
                 (self.space.element_location(&win.element).is_some()) as u8,
             );
             if let Some(x) = win.element.x11_surface() {

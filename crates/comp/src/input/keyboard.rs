@@ -38,6 +38,11 @@ impl Aurora {
     /// this. The emergency chords never consult it.
     pub fn binds_allowed(&self) -> bool {
         self.layer_focus.exclusive.is_none()
+            && !self
+                .protocols
+                .active_inhibitor
+                .as_ref()
+                .is_some_and(|i| i.is_active())
     }
 
     /// The entry point for every key, physical or injected. `time` is the event's own.
@@ -48,6 +53,7 @@ impl Aurora {
         key_state: KeyState,
         time: InputTime,
     ) {
+        self.notify_activity();
         let serial = SERIAL_COUNTER.next_serial();
         let outcome = self.keyboard.clone().input_from_source::<KeyOutcome, _>(
             source,

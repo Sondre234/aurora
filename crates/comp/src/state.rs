@@ -87,7 +87,6 @@ pub struct Aurora {
     pub dmabuf_global: Option<DmabufGlobal>,
     pub syncobj_state: Option<DrmSyncobjState>,
 
-    #[allow(dead_code)] // held so the wl_seat global stays alive
     pub seat: Seat<Self>,
     pub keyboard: KeyboardHandle<Self>,
     pub pointer: PointerHandle<Self>,
@@ -110,6 +109,7 @@ impl Aurora {
         let clock = Clock::new();
         let protocols = Protocols::new(
             &dh,
+            &event_loop.handle(),
             clock.id() as u32,
             config.general.allow_virtual_keyboard,
         );

@@ -46,12 +46,18 @@ pub fn spawn(cmd: &str, env: &[(&str, &OsStr)]) {
 impl Aurora {
     /// What every child sees: how to reach this compositor and its X server. Set on the
     /// Command only; the compositor's own environment stays as it was.
-    pub fn spawn_env(&self) -> Vec<(&'static str, OsString)> {
-        let mut env = vec![
+    pub fn spawn_env(&mut self) -> Vec<(&'static str, OsString)> {
+        let mut env: Vec<(&'static str, OsString)> = vec![
             ("WAYLAND_DISPLAY", self.socket_name.clone()),
             ("XDG_SESSION_TYPE", "wayland".into()),
             ("XDG_CURRENT_DESKTOP", "Aurora".into()),
         ];
+        // A token for the app to present when it maps, so a launched app takes focus.
+        let activation = &mut self.protocols.activation;
+        activation.retain_tokens(|_, d| d.timestamp.elapsed().as_secs() < 10);
+        let (token, _) = activation.create_external_token(None);
+        env.push(("XDG_ACTIVATION_TOKEN", token.as_str().into()));
+        env.push(("DESKTOP_STARTUP_ID", token.as_str().into()));
         if let Some(display) = self.xwayland.display {
             env.push(("DISPLAY", format!(":{display}").into()));
         }
@@ -59,7 +65,7 @@ impl Aurora {
     }
 
     /// Starts a client that talks to this compositor.
-    pub fn spawn(&self, cmd: &str) {
+    pub fn spawn(&mut self, cmd: &str) {
         let env = self.spawn_env();
         let env: Vec<_> = env.iter().map(|(k, v)| (*k, v.as_os_str())).collect();
         spawn(cmd, &env);

@@ -38,6 +38,9 @@ impl Aurora {
         }
 
         self.wm.focused = id;
+        if let Some(win) = id.and_then(|i| self.wm.windows.get_mut(&i)) {
+            win.urgent = false;
+        }
         let keyboard = self.keyboard.clone();
         let serial = SERIAL_COUNTER.next_serial();
         match id.and_then(|i| self.wm.windows.get(&i)) {

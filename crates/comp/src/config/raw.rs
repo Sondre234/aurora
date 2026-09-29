@@ -133,6 +133,7 @@ const GENERAL_KEYS: &[&str] = &[
     "workspaces",
     "mod_key",
     "allow_virtual_keyboard",
+    "focus_on_activate",
 ];
 
 /// Per-key fallback: a bad value keeps that key's default, the rest of the section applies.
@@ -182,6 +183,9 @@ pub fn general(section: Option<&Value>, warnings: &mut Vec<String>) -> General {
     }
     if let Some(b) = soft(get_bool(ctx, table, "allow_virtual_keyboard"), warnings) {
         g.allow_virtual_keyboard = b;
+    }
+    if let Some(b) = soft(get_bool(ctx, table, "focus_on_activate"), warnings) {
+        g.focus_on_activate = b;
     }
     if let Some(text) = soft(get_str(ctx, table, "mod_key"), warnings) {
         match ModKey::parse(text) {

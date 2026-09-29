@@ -29,6 +29,7 @@ impl Aurora {
             Action::ToggleSplit => self.edit_focused_tiled(|ws, id| ws.tiling.toggle_split(id)),
             Action::ResizeSplit(dir, px) => self.resize_split(dir, px),
             Action::ReloadConfig => self.reload_config(),
+            Action::RevokeInhibit => self.revoke_shortcuts_inhibit(),
             Action::Quit => {
                 tracing::warn!("quitting: quit action");
                 crate::safety::arm_exit_deadline();
