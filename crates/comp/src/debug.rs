@@ -137,7 +137,33 @@ impl Aurora {
                 win.frames_sent,
                 (self.space.element_location(&win.element).is_some()) as u8,
             );
+            if let Some(x) = win.element.x11_surface() {
+                let _ = write!(line, " xid={}", x.window_id());
+            }
             tracing::info!("{line}");
+        }
+
+        // Override-redirect windows are not in Wm; their rect is the position the client chose.
+        for window in self.xwayland.unmanaged.elements() {
+            let Some(x) = window.x11_surface() else {
+                continue;
+            };
+            let r = self
+                .xwayland
+                .unmanaged
+                .element_geometry(window)
+                .unwrap_or_default();
+            tracing::info!(
+                "dump: win x{} app_id={} title={} kind=or ws=0 rect={},{} {}x{} float=0 fs=0 frames_sent=0 mapped=1 xid={}",
+                x.window_id(),
+                quote(&x.class()),
+                quote(&x.title()),
+                r.loc.x,
+                r.loc.y,
+                r.size.w,
+                r.size.h,
+                x.window_id(),
+            );
         }
 
         for output in &outputs {

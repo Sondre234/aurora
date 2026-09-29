@@ -11,6 +11,7 @@ use smithay::{
         protocol::{wl_buffer, wl_surface::WlSurface},
     },
     wayland::{
+        seat::WaylandFocus,
         buffer::BufferHandler,
         compositor::{
             CompositorClientState, CompositorHandler, CompositorState, get_parent,
@@ -62,6 +63,14 @@ impl CompositorHandler for Aurora {
                 window.on_commit();
                 outputs = self.space.outputs_for_element(&window);
                 offscreen = self.space.element_location(&window).is_none();
+            } else if let Some(window) = self
+                .xwayland
+                .unmanaged
+                .elements()
+                .find(|w| w.wl_surface().as_deref() == Some(&root))
+            {
+                window.on_commit();
+                outputs = self.xwayland.unmanaged.outputs_for_element(window);
             }
         };
 

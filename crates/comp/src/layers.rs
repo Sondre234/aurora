@@ -4,7 +4,7 @@
 //! Every output's layer map sits behind a mutex. Guards here are short-lived and never held
 //! across anything that can commit or change focus.
 use smithay::{
-    desktop::{LayerMap, LayerSurface, WindowSurfaceType, layer_map_for_output},
+    desktop::{LayerMap, LayerSurface, Window, WindowSurfaceType, layer_map_for_output},
     output::Output,
     reexports::wayland_server::protocol::wl_surface::WlSurface,
     utils::{IsAlive, Logical, Point, Rectangle, SERIAL_COUNTER},
@@ -41,6 +41,8 @@ pub struct LayerHit {
 pub enum Hit {
     Layer(LayerHit),
     Window(WindowElement, Point<i32, Logical>),
+    /// An override-redirect X11 window (menu, tooltip): it takes the pointer, never focus.
+    Unmanaged(Window, Point<i32, Logical>),
     Nothing,
 }
 
@@ -132,6 +134,10 @@ impl Aurora {
         let probe = |kind| output.as_ref().and_then(|o| self.layer_hit(o, kind, pos));
         probe(Layer::Overlay)
             .or_else(|| if hide_top { None } else { probe(Layer::Top) })
+            .or_else(|| {
+                let (window, at) = self.xwayland.unmanaged.element_under(pos)?;
+                Some(Hit::Unmanaged(window.clone(), at))
+            })
             .or_else(|| {
                 let (window, at) = self.space.element_under(pos)?;
                 Some(Hit::Window(window.clone(), at))

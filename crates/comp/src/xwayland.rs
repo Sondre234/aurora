@@ -32,6 +32,7 @@ const RESTART_WINDOW: Duration = Duration::from_secs(60);
 /// crashed, so its restart does not count against the limit.
 const HEALTHY_UPTIME: Duration = Duration::from_secs(10);
 
+#[derive(Default)]
 pub struct XWaylandState {
     /// The server's event source. Removing it drops the `XWayland`, which disconnects the
     /// server's wayland client and releases the display lock and sockets.
@@ -46,20 +47,6 @@ pub struct XWaylandState {
     restarts: VecDeque<Instant>,
     started: Option<Instant>,
     down: bool,
-}
-
-impl Default for XWaylandState {
-    fn default() -> Self {
-        Self {
-            token: None,
-            display: None,
-            wm: None,
-            unmanaged: Space::default(),
-            restarts: VecDeque::new(),
-            started: None,
-            down: false,
-        }
-    }
 }
 
 impl Aurora {
@@ -117,8 +104,8 @@ impl Aurora {
                 return self.queue_xwayland_restart();
             }
         };
-        if let Some((pixels, size, hotspot)) = cursor_image()
-            && let Err(err) = wm.set_cursor(&pixels, size, hotspot)
+        if let Some(cursor) = cursor_image()
+            && let Err(err) = wm.set_cursor(&cursor.pixels, cursor.size, cursor.hotspot)
         {
             tracing::warn!("xwayland: cannot set the cursor: {err}");
         }
@@ -185,7 +172,13 @@ impl Aurora {
 }
 
 /// The default cursor as the X server wants it: ARGB pixels, size and hotspot.
-fn cursor_image() -> Option<(Vec<u8>, Size<u16, Logical>, Point<u16, Logical>)> {
+struct XCursor {
+    pixels: Vec<u8>,
+    size: Size<u16, Logical>,
+    hotspot: Point<u16, Logical>,
+}
+
+fn cursor_image() -> Option<XCursor> {
     let theme = std::env::var("XCURSOR_THEME").unwrap_or_else(|_| "default".into());
     let target: i32 = std::env::var("XCURSOR_SIZE")
         .ok()
@@ -204,9 +197,9 @@ fn cursor_image() -> Option<(Vec<u8>, Size<u16, Logical>, Point<u16, Logical>)> 
         .iter()
         .find(|i| i.width == nearest.width && i.height == nearest.height)?;
     let dim = |v: u32| u16::try_from(v).ok();
-    Some((
-        image.pixels_rgba.clone(),
-        (dim(image.width)?, dim(image.height)?).into(),
-        (dim(image.xhot)?, dim(image.yhot)?).into(),
-    ))
+    Some(XCursor {
+        pixels: image.pixels_rgba.clone(),
+        size: (dim(image.width)?, dim(image.height)?).into(),
+        hotspot: (dim(image.xhot)?, dim(image.yhot)?).into(),
+    })
 }

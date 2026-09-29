@@ -20,7 +20,7 @@ use smithay::{
             gles::GlesRenderer,
         },
     },
-    desktop::{Space, utils::bbox_from_surface_tree},
+    desktop::{Space, Window, utils::bbox_from_surface_tree},
     input::pointer::{CursorImageAttributes, CursorImageStatus},
     output::Output,
     reexports::{
@@ -248,6 +248,7 @@ impl Aurora {
         let _span = tracing::debug_span!("render_surface", output = %output.name()).entered();
 
         self.space.refresh();
+        self.xwayland.unmanaged.refresh();
         self.popups.cleanup();
 
         let mut result = None;
@@ -256,6 +257,7 @@ impl Aurora {
                 surface,
                 renderer,
                 &self.space,
+                &self.xwayland.unmanaged,
                 self.pointer.current_location(),
                 &mut self.cursor_status,
                 cursors,
@@ -537,6 +539,7 @@ fn render_output(
     surface: &mut super::device::Surface,
     renderer: &mut GlesRenderer,
     space: &Space<WindowElement>,
+    unmanaged: &Space<Window>,
     pointer_location: Point<f64, Logical>,
     cursor_status: &mut CursorImageStatus,
     cursors: &mut CursorCache,
@@ -556,7 +559,7 @@ fn render_output(
         scale,
         output.current_scale().integer_scale(),
     );
-    match output_elements(space, renderer, &output) {
+    match output_elements(space, unmanaged, renderer, &output) {
         Some(scene) => elements.extend(scene),
         None => return Ok(None),
     }
@@ -581,9 +584,9 @@ fn render_output(
     let queued = !result.is_empty;
     let states = result.states;
 
-    update_primary_scanout_output(space, &output, cursor_status, &states);
+    update_primary_scanout_output(space, unmanaged, &output, cursor_status, &states);
     if queued {
-        let feedback = take_presentation_feedback(&output, space, &states);
+        let feedback = take_presentation_feedback(&output, space, unmanaged, &states);
         surface
             .drm_output
             .queue_frame(Some(feedback))

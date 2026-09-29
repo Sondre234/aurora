@@ -12,7 +12,7 @@ use smithay::{
         },
         gles::GlesRenderer,
     },
-    desktop::{Space, space::SpaceElement},
+    desktop::{Space, Window, space::SpaceElement},
     output::Output,
     utils::{Logical, Point, Scale},
     wayland::shell::wlr_layer::Layer,
@@ -68,11 +68,12 @@ fn push_layers(
 }
 
 /// Layers and windows of `output`, front to back: Overlay, Top (not over a fullscreen
-/// window), windows by z-index (unmanaged X11 windows join them later), Bottom, Background.
+/// window), unmanaged X11 windows, windows by z-index, Bottom, Background.
 /// `None` when the output is not mapped in the space. Free function rather than an `Aurora`
 /// method: the DRM render loop holds the backend borrowed while it builds the scene.
 pub fn output_elements(
     space: &Space<WindowElement>,
+    unmanaged: &Space<Window>,
     renderer: &mut GlesRenderer,
     output: &Output,
 ) -> Option<Vec<OutputElement>> {
@@ -83,6 +84,31 @@ pub fn output_elements(
     push_layers(&mut out, renderer, output, Layer::Overlay, scale);
     if !top_hidden(output) {
         push_layers(&mut out, renderer, output, Layer::Top, scale);
+    }
+
+    // Menus and tooltips belong to no workspace: they stay above every window.
+    for window in unmanaged.elements().rev() {
+        let (Some(bbox), Some(loc)) = (
+            unmanaged.element_bbox(window),
+            unmanaged.element_location(window),
+        ) else {
+            continue;
+        };
+        if !geo.overlaps(bbox) {
+            continue;
+        }
+        let at: Point<i32, Logical> = loc - SpaceElement::geometry(window).loc - geo.loc;
+        let elements: Vec<WaylandSurfaceRenderElement<GlesRenderer>> = window.render_elements(
+            renderer,
+            at.to_physical_precise_round(scale),
+            scale,
+            1.0,
+        );
+        out.extend(
+            elements
+                .into_iter()
+                .map(|e| OutputElement::Window(WindowRenderElement::Surface(e))),
+        );
     }
 
     // The space stacks bottom to top; the stable sort keeps that order within a z-index.

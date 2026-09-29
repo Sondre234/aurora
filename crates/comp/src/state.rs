@@ -13,7 +13,7 @@ use smithay::{
         RenderElementStates, default_primary_scanout_output_compare, utils::select_dmabuf_feedback,
     },
     desktop::{
-        PopupManager, Space, WindowSurface, WindowSurfaceType, layer_map_for_output,
+        PopupManager, Space, Window, WindowSurface, WindowSurfaceType, layer_map_for_output,
         utils::{
             OutputPresentationFeedback, send_frames_surface_tree,
             surface_presentation_feedback_flags_from_states, surface_primary_scanout_output,
@@ -198,15 +198,8 @@ impl Aurora {
     ) -> Option<(FocusTarget, Point<f64, Logical>)> {
         match self.hit_test(pos) {
             Hit::Layer(hit) => Some((FocusTarget::Wl(hit.surface), hit.loc)),
-            Hit::Window(window, location) => window
-                .surface_under(pos - location.to_f64(), WindowSurfaceType::ALL)
-                .map(|(surface, p)| {
-                    let target = match window.underlying_surface() {
-                        WindowSurface::X11(x11) => FocusTarget::X11(x11.clone()),
-                        WindowSurface::Wayland(_) => FocusTarget::Wl(surface),
-                    };
-                    (target, (p + location).to_f64())
-                }),
+            Hit::Window(window, location) => window_focus(&window, pos, location),
+            Hit::Unmanaged(window, location) => window_focus(&window, pos, location),
             Hit::Nothing => None,
         }
     }
@@ -230,6 +223,11 @@ impl Aurora {
                 if let Some(win) = self.wm.windows.get_mut(&window.id()) {
                     win.frames_sent += 1;
                 }
+            }
+        }
+        for window in self.xwayland.unmanaged.elements() {
+            if self.xwayland.unmanaged.outputs_for_element(window).contains(output) {
+                window.send_frame(output, time, throttle, surface_primary_scanout_output);
             }
         }
         // Layers hidden by a fullscreen window have no primary output worth trusting, so they
@@ -265,15 +263,35 @@ impl Aurora {
                 window.send_dmabuf_feedback(output, surface_primary_scanout_output, select);
             }
         }
+        for window in self.xwayland.unmanaged.elements() {
+            if self.xwayland.unmanaged.outputs_for_element(window).contains(output) {
+                window.send_dmabuf_feedback(output, surface_primary_scanout_output, select);
+            }
+        }
         for layer in layer_map_for_output(output).layers() {
             layer.send_dmabuf_feedback(output, surface_primary_scanout_output, select);
         }
     }
 }
 
+/// The surface of `window` at `pos` and where it sits, as a seat focus target.
+fn window_focus(
+    window: &Window,
+    pos: Point<f64, Logical>,
+    location: Point<i32, Logical>,
+) -> Option<(FocusTarget, Point<f64, Logical>)> {
+    let (surface, p) = window.surface_under(pos - location.to_f64(), WindowSurfaceType::ALL)?;
+    let target = match window.underlying_surface() {
+        WindowSurface::X11(x11) => FocusTarget::X11(x11.clone()),
+        WindowSurface::Wayland(_) => FocusTarget::Wl(surface),
+    };
+    Some((target, (p + location).to_f64()))
+}
+
 /// Records which output each surface is mostly presented on, from the last frame's element states.
 pub fn update_primary_scanout_output(
     space: &Space<WindowElement>,
+    unmanaged: &Space<Window>,
     output: &Output,
     cursor_status: &CursorImageStatus,
     states: &RenderElementStates,
@@ -291,6 +309,9 @@ pub fn update_primary_scanout_output(
     for window in space.elements() {
         window.with_surfaces(update);
     }
+    for window in unmanaged.elements() {
+        window.with_surfaces(update);
+    }
     for layer in layer_map_for_output(output).layers() {
         layer.with_surfaces(update);
     }
@@ -303,6 +324,7 @@ pub fn update_primary_scanout_output(
 pub fn take_presentation_feedback(
     output: &Output,
     space: &Space<WindowElement>,
+    unmanaged: &Space<Window>,
     states: &RenderElementStates,
 ) -> OutputPresentationFeedback {
     let mut feedback = OutputPresentationFeedback::new(output);
@@ -312,6 +334,11 @@ pub fn take_presentation_feedback(
 
     for window in space.elements() {
         if space.outputs_for_element(window).contains(output) {
+            window.take_presentation_feedback(&mut feedback, surface_primary_scanout_output, flags);
+        }
+    }
+    for window in unmanaged.elements() {
+        if unmanaged.outputs_for_element(window).contains(output) {
             window.take_presentation_feedback(&mut feedback, surface_primary_scanout_output, flags);
         }
     }

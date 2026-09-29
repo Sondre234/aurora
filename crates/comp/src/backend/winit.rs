@@ -3,7 +3,7 @@ use smithay::{
         renderer::{ImportDma, damage::OutputDamageTracker, gles::GlesRenderer},
         winit::{self, WinitEvent, WinitGraphicsBackend},
     },
-    desktop::Space,
+    desktop::{Space, Window},
     output::{Mode, Output, PhysicalProperties, Subpixel},
     reexports::calloop::EventLoop,
     utils::{Rectangle, Transform},
@@ -66,7 +66,13 @@ pub fn init(
             WinitEvent::Input(event) => state.process_input_event(event),
             WinitEvent::Redraw => {
                 let size = backend.window_size();
-                if let Err(err) = draw(&mut backend, &mut damage_tracker, &state.space, &output) {
+                if let Err(err) = draw(
+                    &mut backend,
+                    &mut damage_tracker,
+                    &state.space,
+                    &state.xwayland.unmanaged,
+                    &output,
+                ) {
                     tracing::warn!(%err, "nested frame failed");
                 } else if let Err(err) = backend.submit(Some(&[Rectangle::from_size(size)])) {
                     tracing::warn!(%err, "nested swap failed");
@@ -87,10 +93,11 @@ fn draw(
     backend: &mut WinitGraphicsBackend<GlesRenderer>,
     damage_tracker: &mut OutputDamageTracker,
     space: &Space<WindowElement>,
+    unmanaged: &Space<Window>,
     output: &Output,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (renderer, mut framebuffer) = backend.bind()?;
-    let elements = output_elements(space, renderer, output).ok_or("output is not mapped")?;
+    let elements = output_elements(space, unmanaged, renderer, output).ok_or("output is not mapped")?;
     damage_tracker
         .render_output(renderer, &mut framebuffer, 0, &elements, BACKGROUND)
         .map_err(|err| format!("{err:?}"))?;

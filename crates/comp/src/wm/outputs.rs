@@ -81,6 +81,7 @@ impl Aurora {
     /// others, gives it a workspace and takes back the windows it lost earlier.
     pub fn add_output(&mut self, output: &Output) {
         self.space.map_output(output, (0, 0));
+        self.xwayland.unmanaged.map_output(output, (0, 0));
         self.wm.output_added(output, &self.config);
         let primary = self.output_rule(&output.name()).is_some_and(|r| r.primary);
         if primary && self.wm.focused.is_none() {
@@ -108,6 +109,7 @@ impl Aurora {
         let moved = output.current_location() != at.into()
             || self.space.output_geometry(output).map(|g| g.loc) != Some(at.into());
         self.space.map_output(output, at);
+        self.xwayland.unmanaged.map_output(output, at);
         output.change_current_state(None, None, None, Some(at.into()));
         layer_map_for_output(output).arrange();
         moved
@@ -203,12 +205,20 @@ impl Aurora {
                 win.frames_sent += 1;
             }
         }
+        for window in self.xwayland.unmanaged.elements() {
+            if self.xwayland.unmanaged.outputs_for_element(window).contains(output) {
+                window.send_frame(output, time, Some(Duration::ZERO), |_, _| {
+                    Some(output.clone())
+                });
+            }
+        }
         for layer in layer_map_for_output(output).layers() {
             layer.send_frame(output, time, Some(Duration::ZERO), |_, _| {
                 Some(output.clone())
             });
         }
         self.space.refresh();
+        self.xwayland.unmanaged.refresh();
         self.popups.cleanup();
         let _ = self.display_handle.flush_clients();
     }
@@ -281,6 +291,7 @@ impl Aurora {
         }
         self.wm.output_removed(output);
         self.space.unmap_output(output);
+        self.xwayland.unmanaged.unmap_output(output);
         // The focused window may have moved with the rescue.
         if let Some(ws) = self
             .wm
