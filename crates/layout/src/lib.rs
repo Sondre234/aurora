@@ -7,7 +7,7 @@ mod tiling;
 mod workspace;
 
 pub use dwindle::Dwindle;
-pub use geom::{drop_side, edges_for_point, neighbor};
+pub use geom::{drop_side, edges_for_point, neighbor, resize_rect};
 pub use tiling::{AxisCtl, InsertHint, ResizeHandle, TilingLayout};
 pub use workspace::Workspace;
 

@@ -1,6 +1,6 @@
 //! Geometry helpers for focus movement and pointer-driven edits.
 
-use crate::{Dir, Edges, Point, Rect, Side, WinId};
+use crate::{Dir, Edges, Point, Rect, Side, Size, WinId};
 
 /// The window to focus when moving from `from` in `dir`: strictly beyond the source's
 /// edge and overlapping it on the other axis. Nearest wins, then the larger overlap,
@@ -48,6 +48,46 @@ pub fn drop_side(r: Rect, p: Point) -> Side {
     let c = r.center();
     let first = if r.h > r.w { p.y < c.y } else { p.x < c.x };
     if first { Side::First } else { Side::Second }
+}
+
+/// The rectangle after dragging `edges` of `start` by the total pointer movement `(dx, dy)`.
+/// Edges not being dragged stay put, also when a size limit stops the drag. `min` and `max`
+/// are outer sizes; 0 means unbounded (max) and at least one pixel (min).
+pub fn resize_rect(start: Rect, edges: Edges, dx: i32, dy: i32, min: Size, max: Size) -> Rect {
+    let axis = |pos: i32, len: i32, lo: bool, hi: bool, d: i32, min: i32, max: i32| {
+        let want = if hi {
+            len + d
+        } else if lo {
+            len - d
+        } else {
+            len
+        };
+        let min = min.max(1);
+        let mut l = want.max(min);
+        if max > 0 {
+            l = l.min(max.max(min));
+        }
+        (if lo && !hi { pos + len - l } else { pos }, l)
+    };
+    let (x, w) = axis(
+        start.x,
+        start.w,
+        edges.contains(Edges::LEFT),
+        edges.contains(Edges::RIGHT),
+        dx,
+        min.w,
+        max.w,
+    );
+    let (y, h) = axis(
+        start.y,
+        start.h,
+        edges.contains(Edges::TOP),
+        edges.contains(Edges::BOTTOM),
+        dy,
+        min.h,
+        max.h,
+    );
+    Rect { x, y, w, h }
 }
 
 #[cfg(test)]
@@ -114,5 +154,21 @@ mod tests {
             drop_side(Rect::new(0, 0, 100, 200), Point { x: 20, y: 190 }),
             Side::Second
         );
+    }
+
+    #[test]
+    fn resize_keeps_the_opposite_edge() {
+        let r = Rect::new(100, 100, 200, 200);
+        let none = Size::default();
+        let min = Size { w: 50, h: 50 };
+        // Dragging the left edge right shrinks from the left; the right edge stays.
+        let a = resize_rect(r, Edges::LEFT | Edges::BOTTOM, 40, 30, none, none);
+        assert_eq!(a, Rect::new(140, 100, 160, 230));
+        // Past the minimum the right edge still does not move.
+        let b = resize_rect(r, Edges::LEFT | Edges::TOP, 500, 500, min, none);
+        assert_eq!((b.right(), b.bottom(), b.w, b.h), (300, 300, 50, 50));
+        // The maximum stops growth, again anchored on the far edge.
+        let c = resize_rect(r, Edges::LEFT, -500, 0, none, Size { w: 250, h: 0 });
+        assert_eq!((c.right(), c.w), (300, 250));
     }
 }
