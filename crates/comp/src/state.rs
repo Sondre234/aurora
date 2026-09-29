@@ -73,6 +73,7 @@ pub struct Aurora {
     pub headless: std::collections::HashMap<String, crate::backend::headless::HeadlessOutput>,
     pub layer_focus: crate::layers::LayerFocus,
     pub space: Space<WindowElement>,
+    pub xwayland: crate::xwayland::XWaylandState,
     pub popups: PopupManager,
 
     pub compositor_state: CompositorState,
@@ -140,6 +141,7 @@ impl Aurora {
             headless: Default::default(),
             layer_focus: Default::default(),
             space: Space::default(),
+            xwayland: Default::default(),
             popups: PopupManager::default(),
             compositor_state,
             xdg_shell_state,

@@ -1,6 +1,6 @@
 //! Window modes: floating, fullscreen and maximized. The layout owns the state; these only
 //! flip it and relayout, so a window returns to its tile slot when the mode is cleared.
-use aurora_layout::{FsMode, InsertHint, Point};
+use aurora_layout::{FsMode, InsertHint, Point, WinId};
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 
 use super::{apply::floating_rect, layout_params};
@@ -73,6 +73,10 @@ impl Aurora {
         let Some(id) = self.wm.id_of(surface) else {
             return;
         };
+        self.request_mode_id(id, mode, set);
+    }
+
+    pub fn request_mode_id(&mut self, id: WinId, mode: FsMode, set: bool) {
         let Some(win) = self.wm.windows.get_mut(&id) else {
             return;
         };

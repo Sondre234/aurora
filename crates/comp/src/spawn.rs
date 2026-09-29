@@ -1,5 +1,5 @@
 use std::{
-    ffi::OsStr,
+    ffi::{OsStr, OsString},
     os::unix::process::CommandExt,
     process::{Command, Stdio},
 };
@@ -44,8 +44,24 @@ pub fn spawn(cmd: &str, env: &[(&str, &OsStr)]) {
 }
 
 impl Aurora {
+    /// What every child sees: how to reach this compositor and its X server. Set on the
+    /// Command only; the compositor's own environment stays as it was.
+    pub fn spawn_env(&self) -> Vec<(&'static str, OsString)> {
+        let mut env = vec![
+            ("WAYLAND_DISPLAY", self.socket_name.clone()),
+            ("XDG_SESSION_TYPE", "wayland".into()),
+            ("XDG_CURRENT_DESKTOP", "Aurora".into()),
+        ];
+        if let Some(display) = self.xwayland.display {
+            env.push(("DISPLAY", format!(":{display}").into()));
+        }
+        env
+    }
+
     /// Starts a client that talks to this compositor.
     pub fn spawn(&self, cmd: &str) {
-        spawn(cmd, &[("WAYLAND_DISPLAY", &self.socket_name)]);
+        let env = self.spawn_env();
+        let env: Vec<_> = env.iter().map(|(k, v)| (*k, v.as_os_str())).collect();
+        spawn(cmd, &env);
     }
 }

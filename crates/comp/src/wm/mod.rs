@@ -18,6 +18,7 @@ pub mod modes;
 pub mod outputs;
 pub mod rules;
 pub mod window;
+pub mod x11;
 pub mod workspaces;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -58,6 +59,32 @@ pub struct WinData {
     pub rescued_from: Option<Rescue>,
 }
 
+impl WinData {
+    pub fn new(id: WinId, element: WindowElement) -> Self {
+        Self {
+            id,
+            element,
+            ws: 0,
+            floating: false,
+            fs: false,
+            parent: None,
+            phase: Phase::Pending,
+            placed: false,
+            target: Rect::default(),
+            current: Rect::default(),
+            sent_size: None,
+            sent_flags: (false, false, false),
+            constraints: Constraints::default(),
+            app_id: String::new(),
+            float_rect: None,
+            resize_anchor: None,
+            want_mode: None,
+            frames_sent: 0,
+            rescued_from: None,
+        }
+    }
+}
+
 /// Where a rescued window came from and where it was put.
 #[derive(Clone)]
 pub struct Rescue {
@@ -77,6 +104,8 @@ pub struct Anchor {
 pub struct Wm {
     pub windows: HashMap<WinId, WinData>,
     pub by_surface: HashMap<ObjectId, WinId>,
+    /// Managed X11 windows by their X window id; override-redirect ones are not in Wm.
+    pub by_x11: HashMap<u32, WinId>,
     /// Created on first use; an empty workspace is just a default value.
     pub workspaces: HashMap<u32, layout::Workspace>,
     pub outputs: Vec<Output>,

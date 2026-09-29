@@ -1,7 +1,7 @@
 mod compositor;
 mod layer_shell;
 mod xdg_shell;
-mod xwayland;
+mod xwm;
 
 use crate::{Aurora, focus::FocusTarget};
 
@@ -19,7 +19,11 @@ use smithay::utils::Serial;
 use smithay::wayland::output::OutputHandler;
 use smithay::wayland::pointer_constraints::PointerConstraintsHandler;
 use smithay::wayland::seat::WaylandFocus;
-use smithay::wayland::selection::SelectionHandler;
+use smithay::wayland::selection::primary_selection::{
+    PrimarySelectionHandler, PrimarySelectionState, set_primary_focus,
+};
+use smithay::wayland::selection::{SelectionHandler, SelectionSource, SelectionTarget};
+use std::os::fd::OwnedFd;
 use smithay::wayland::selection::data_device::{
     DataDeviceHandler, DataDeviceState, WaylandDndGrabHandler, set_data_device_focus,
 };
@@ -43,7 +47,8 @@ impl SeatHandler for Aurora {
         let client = focused
             .and_then(|f| f.wl_surface())
             .and_then(|s| dh.get_client(s.id()).ok());
-        set_data_device_focus(dh, seat, client);
+        set_data_device_focus(dh, seat, client.clone());
+        set_primary_focus(dh, seat, client);
     }
 }
 
@@ -59,6 +64,42 @@ impl PointerConstraintsHandler for Aurora {}
 
 impl SelectionHandler for Aurora {
     type SelectionUserData = ();
+
+    /// A Wayland client took a selection: X clients see it through the bridge.
+    fn new_selection(
+        &mut self,
+        ty: SelectionTarget,
+        source: Option<SelectionSource>,
+        _seat: Seat<Self>,
+    ) {
+        if let Some(xwm) = self.xwayland.wm.as_mut()
+            && let Err(err) = xwm.new_selection(ty, source.map(|s| s.mime_types()))
+        {
+            tracing::warn!("xwayland: cannot set the {ty:?} selection: {err}");
+        }
+    }
+
+    /// An X client reads a Wayland selection.
+    fn send_selection(
+        &mut self,
+        ty: SelectionTarget,
+        mime_type: String,
+        fd: OwnedFd,
+        _seat: Seat<Self>,
+        _user_data: &(),
+    ) {
+        if let Some(xwm) = self.xwayland.wm.as_mut()
+            && let Err(err) = xwm.send_selection(ty, mime_type, fd)
+        {
+            tracing::warn!("xwayland: cannot send the {ty:?} selection: {err}");
+        }
+    }
+}
+
+impl PrimarySelectionHandler for Aurora {
+    fn primary_selection_state(&mut self) -> &mut PrimarySelectionState {
+        &mut self.protocols.primary_selection
+    }
 }
 
 impl DataDeviceHandler for Aurora {

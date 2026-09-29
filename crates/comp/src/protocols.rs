@@ -3,8 +3,9 @@ use smithay::{
     reexports::wayland_server::DisplayHandle,
     wayland::{
         fractional_scale::FractionalScaleManagerState, output::OutputManagerState,
-        presentation::PresentationState, shell::wlr_layer::WlrLayerShellState,
-        viewporter::ViewporterState,
+        presentation::PresentationState,
+        selection::primary_selection::PrimarySelectionState, shell::wlr_layer::WlrLayerShellState,
+        viewporter::ViewporterState, xwayland_shell::XWaylandShellState,
     },
 };
 
@@ -16,6 +17,8 @@ pub struct Protocols {
     _fractional_scale: FractionalScaleManagerState,
     _viewporter: ViewporterState,
     pub layer_shell: WlrLayerShellState,
+    pub primary_selection: PrimarySelectionState,
+    pub xwayland_shell: XWaylandShellState,
     pub virtual_keyboard: VirtualKeyboardGlobal,
 }
 
@@ -27,6 +30,8 @@ impl Protocols {
             _fractional_scale: FractionalScaleManagerState::new::<Aurora>(dh),
             _viewporter: ViewporterState::new::<Aurora>(dh),
             layer_shell: WlrLayerShellState::new::<Aurora>(dh),
+            primary_selection: PrimarySelectionState::new::<Aurora>(dh),
+            xwayland_shell: XWaylandShellState::new::<Aurora>(dh),
             virtual_keyboard: VirtualKeyboardGlobal::new(dh, allow_virtual_keyboard),
         }
     }

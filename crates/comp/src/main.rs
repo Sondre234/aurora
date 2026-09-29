@@ -23,6 +23,7 @@ mod state;
 mod syncobj;
 mod virtual_input;
 mod wm;
+mod xwayland;
 
 use smithay::reexports::{calloop::EventLoop, wayland_server::Display};
 
@@ -88,16 +89,21 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     tracing::info!(socket = ?state.socket_name, "aurora listening");
 
+    state.start_xwayland();
     state.spawn(&cli.command);
     // exec-once: once per process, never re-run by a reload.
     for cmd in state.config.autostart.clone() {
         state.spawn(&cmd);
     }
 
-    event_loop.run(None, &mut state, |state| {
+    let result = event_loop.run(None, &mut state, |state| {
         // Input and request handlers only queue events; nothing else flushes them.
         let _ = state.display_handle.flush_clients();
-    })?;
+    });
+    // Every exit path: the window manager must go before the state drops, and the server
+    // with it, so no Xwayland outlives the compositor.
+    state.shutdown_xwayland();
+    result?;
     safety::arm_exit_deadline();
     tracing::info!("aurora exiting");
     Ok(())

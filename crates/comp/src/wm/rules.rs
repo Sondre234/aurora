@@ -9,6 +9,8 @@ pub struct Attrs<'a> {
     pub constraints: Constraints,
     pub app_id: &'a str,
     pub title: &'a str,
+    /// X11 window: `app_id` holds its WM_CLASS class, which only `class` rules match.
+    pub x11: bool,
 }
 
 pub struct Decision {
@@ -46,14 +48,15 @@ pub fn evaluate(attrs: &Attrs, rules: &[WindowRule]) -> Decision {
     decision
 }
 
-/// Every given matcher must match. `class` is X11 only, so a rule naming one never matches
-/// a Wayland window here.
+/// Every given matcher must match. `class` is X11 only and `app_id` Wayland only.
 fn matches(rule: &WindowRule, attrs: &Attrs) -> bool {
-    rule.class.is_none()
+    rule.class
+        .as_ref()
+        .is_none_or(|g| attrs.x11 && g.is_match(attrs.app_id))
         && rule
             .app_id
             .as_ref()
-            .is_none_or(|g| g.is_match(attrs.app_id))
+            .is_none_or(|g| !attrs.x11 && g.is_match(attrs.app_id))
         && rule.title.as_ref().is_none_or(|g| g.is_match(attrs.title))
 }
 
@@ -83,6 +86,7 @@ mod tests {
             constraints,
             app_id: "pavucontrol",
             title: "",
+            x11: false,
         };
         let fixed = Constraints {
             min: Size { w: 300, h: 200 },
@@ -100,5 +104,18 @@ mod tests {
         let d = evaluate(&attrs(Constraints::default()), &[float, tile]);
         assert!(!d.floating && d.fullscreen);
         assert_eq!(d.size, Some((640, 480)));
+
+        // Class rules see X11 windows only; app_id rules Wayland ones only.
+        let mut by_class = rule("unused");
+        by_class.app_id = None;
+        by_class.class = Some(Glob::new("steam_app_*"));
+        by_class.workspace = Some(5);
+        let x11 = Attrs {
+            x11: true,
+            app_id: "steam_app_7",
+            ..attrs(Constraints::default())
+        };
+        assert_eq!(evaluate(&x11, &[by_class.clone()]).workspace, Some(5));
+        assert_eq!(evaluate(&attrs(Constraints::default()), &[by_class]).workspace, None);
     }
 }

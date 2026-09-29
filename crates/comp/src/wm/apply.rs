@@ -23,7 +23,7 @@ use super::{
 };
 use crate::Aurora;
 
-fn rect_of(r: Rectangle<i32, Logical>) -> Rect {
+pub(super) fn rect_of(r: Rectangle<i32, Logical>) -> Rect {
     Rect::new(r.loc.x, r.loc.y, r.size.w, r.size.h)
 }
 
@@ -233,6 +233,22 @@ impl Aurora {
                 win.sent_size = Some(size);
                 win.sent_flags = flags;
                 configure(toplevel, size, flags);
+            } else if let Some(x11) = win.element.x11_surface() {
+                // X11 has no acks: position and size go out at once, and the client's
+                // position is part of the truth (menus open relative to it).
+                let geo = Rectangle::new((content.x, content.y).into(), (content.w, content.h).into());
+                if win.sent_flags != flags {
+                    win.sent_flags = flags;
+                    if let Err(err) = x11.set_fullscreen(flags.1).and(x11.set_maximized(flags.2)) {
+                        tracing::debug!("x11: cannot set the window state: {err}");
+                    }
+                }
+                if x11.last_configure() != geo {
+                    win.sent_size = Some(size);
+                    if let Err(err) = x11.configure(geo) {
+                        tracing::debug!("x11: cannot configure the window: {err}");
+                    }
+                }
             }
 
             if win.phase == Phase::Mapped {
@@ -294,30 +310,7 @@ impl Aurora {
         let element =
             WindowElement::new(id, smithay::desktop::Window::new_wayland_window(toplevel));
         self.wm.by_surface.insert(surface.id(), id);
-        self.wm.windows.insert(
-            id,
-            WinData {
-                id,
-                element,
-                ws: 0,
-                floating: false,
-                fs: false,
-                parent: None,
-                phase: Phase::Pending,
-                placed: false,
-                target: Rect::default(),
-                current: Rect::default(),
-                sent_size: None,
-                sent_flags: (false, false, false),
-                float_rect: None,
-                resize_anchor: None,
-                want_mode: None,
-                constraints: Constraints::default(),
-                app_id: String::new(),
-                frames_sent: 0,
-                rescued_from: None,
-            },
-        );
+        self.wm.windows.insert(id, WinData::new(id, element));
     }
 
     /// Handles a toplevel's commit: the initial one runs the rules and places the window,
@@ -326,19 +319,33 @@ impl Aurora {
         let Some(id) = self.wm.id_of(surface) else {
             return;
         };
-        let Some((phase, placed)) = self.wm.windows.get(&id).map(|w| (w.phase, w.placed)) else {
+        let Some((phase, placed, x11)) = self
+            .wm
+            .windows
+            .get(&id)
+            .map(|w| (w.phase, w.placed, w.element.x11_surface().is_some()))
+        else {
             return;
         };
         // A client that destroys its role and commits resets the initial-configure flag, so
         // the placed check keeps a dying window from being mapped again.
         match phase {
             Phase::Mapped => {
-                self.refresh_constraints(id, surface);
+                // X11 hints arrive as property changes, not through the surface.
+                if !x11 {
+                    self.refresh_constraints(id, surface);
+                }
                 // A drag waits for the client's ack and size, which arrive with this commit.
                 if self.wm.drag.is_some()
                     && let Some(ws) = self.wm.windows.get(&id).map(|w| w.ws)
                 {
                     self.relayout_ws(ws);
+                }
+            }
+            // An X11 window is in the layout from its map request; the first buffer shows it.
+            Phase::Pending if x11 => {
+                if has_buffer(surface) {
+                    self.window_mapped(id);
                 }
             }
             Phase::Pending if !placed && !initial_configure_sent(surface) => {
@@ -376,7 +383,7 @@ impl Aurora {
     }
 
     /// Inserts the window into the layout of the focused output's workspace.
-    fn place(&mut self, id: WinId, has_parent: bool, title: &str) {
+    pub(super) fn place(&mut self, id: WinId, has_parent: bool, title: &str) {
         let Some(active) = self.wm.active_output.clone() else {
             return;
         };
@@ -393,6 +400,7 @@ impl Aurora {
                 constraints,
                 app_id: &win.app_id,
                 title,
+                x11: win.element.x11_surface().is_some(),
             },
             &self.config.window_rules,
         );
@@ -494,7 +502,10 @@ impl Aurora {
     }
 
     fn refresh_constraints(&mut self, id: WinId, surface: &WlSurface) {
-        let constraints = read_constraints(surface);
+        self.set_constraints(id, read_constraints(surface));
+    }
+
+    pub(super) fn set_constraints(&mut self, id: WinId, constraints: Constraints) {
         let Some(win) = self.wm.windows.get_mut(&id) else {
             return;
         };
@@ -512,9 +523,15 @@ impl Aurora {
     /// The client destroyed its toplevel (or disconnected).
     pub fn wm_window_destroyed(&mut self, surface: &WlSurface) {
         use smithay::reexports::wayland_server::Resource;
-        let Some(id) = self.wm.by_surface.remove(&surface.id()) else {
-            return;
-        };
+        if let Some(id) = self.wm.by_surface.get(&surface.id()).copied() {
+            self.wm_remove_window(id);
+        }
+    }
+
+    /// Forgets a window whatever its kind: xdg toplevel destroyed, X11 window unmapped.
+    pub(super) fn wm_remove_window(&mut self, id: WinId) {
+        self.wm.by_surface.retain(|_, v| *v != id);
+        self.wm.by_x11.retain(|_, v| *v != id);
         let Some(win) = self.wm.windows.remove(&id) else {
             return;
         };
