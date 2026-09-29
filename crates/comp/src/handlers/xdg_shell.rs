@@ -114,13 +114,21 @@ impl Aurora {
             return;
         };
 
-        let Some(output) = self.space.outputs().next() else {
-            return;
-        };
-        let Some(output_geo) = self.space.output_geometry(output) else {
-            return;
-        };
         let window_geo = self.space.element_geometry(window).unwrap();
+
+        // Output with the largest overlap with the window; first output if none overlaps.
+        let overlap = |g: smithay::utils::Rectangle<i32, smithay::utils::Logical>| {
+            g.intersection(window_geo)
+                .map_or(0, |r| i64::from(r.size.w) * i64::from(r.size.h))
+        };
+        let Some(output_geo) = self
+            .space
+            .outputs()
+            .filter_map(|o| self.space.output_geometry(o))
+            .max_by_key(|g| overlap(*g))
+        else {
+            return;
+        };
 
         // The target geometry for the positioner should be relative to its parent's geometry, so
         // we will compute that here.
