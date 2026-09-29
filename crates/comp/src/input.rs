@@ -170,6 +170,7 @@ impl Aurora {
                     },
                 );
                 pointer.frame(self);
+                self.queue_redraw_all();
             }
             InputEvent::PointerMotionAbsolute { event, .. } => {
                 let output = self.space.outputs().next().unwrap();
@@ -194,6 +195,7 @@ impl Aurora {
                     },
                 );
                 pointer.frame(self);
+                self.queue_redraw_all();
             }
             InputEvent::PointerButton { event, .. } => {
                 let pointer = self.seat.get_pointer().unwrap();
@@ -212,6 +214,7 @@ impl Aurora {
                         .map(|(w, l)| (w.clone(), l))
                     {
                         self.space.raise_element(&window, true);
+                        self.queue_redraw_all();
                         keyboard.set_focus(
                             self,
                             Some(window.toplevel().unwrap().wl_surface().clone()),

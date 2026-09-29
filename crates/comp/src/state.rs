@@ -1,11 +1,20 @@
-use std::{ffi::OsString, sync::Arc};
+use std::{ffi::OsString, sync::Arc, time::Duration};
 
 use crate::backend::Backend;
 use smithay::input::keyboard::Keycode;
 
 use smithay::{
-    desktop::{PopupManager, Space, Window, WindowSurfaceType},
+    backend::renderer::element::{RenderElementStates, default_primary_scanout_output_compare},
+    desktop::{
+        PopupManager, Space, Window, WindowSurfaceType, layer_map_for_output,
+        utils::{
+            OutputPresentationFeedback, send_frames_surface_tree,
+            surface_presentation_feedback_flags_from_states, surface_primary_scanout_output,
+            update_surface_primary_scanout_output, with_surfaces_surface_tree,
+        },
+    },
     input::{Seat, SeatState, pointer::CursorImageStatus},
+    output::Output,
     reexports::{
         calloop::{
             EventLoop, Interest, LoopHandle, LoopSignal, Mode, PostAction, generic::Generic,
@@ -20,6 +29,7 @@ use smithay::{
     wayland::{
         compositor::{CompositorClientState, CompositorState},
         output::OutputManagerState,
+        presentation::PresentationState,
         selection::data_device::DataDeviceState,
         shell::xdg::XdgShellState,
         shm::ShmState,
@@ -50,6 +60,8 @@ pub struct Aurora {
     pub shm_state: ShmState,
     #[allow(dead_code)] // held so the xdg-output globals stay alive
     pub output_manager_state: OutputManagerState,
+    #[allow(dead_code)] // held so the wp_presentation global stays alive
+    pub presentation_state: PresentationState,
     pub seat_state: SeatState<Aurora>,
     pub data_device_state: DataDeviceState,
 
@@ -69,6 +81,8 @@ impl Aurora {
         let shm_state = ShmState::new::<Self>(&dh, vec![]);
         let output_manager_state = OutputManagerState::new_with_xdg_output::<Self>(&dh);
         let data_device_state = DataDeviceState::new::<Self>(&dh);
+        let clock = Clock::new();
+        let presentation_state = PresentationState::new::<Self>(&dh, clock.id() as u32);
 
         let mut seat_state = SeatState::new();
         let mut seat: Seat<Self> = seat_state.new_wl_seat(&dh, backend.seat_name());
@@ -81,7 +95,7 @@ impl Aurora {
 
         Self {
             backend,
-            clock: Clock::new(),
+            clock,
             cursor_status: CursorImageStatus::default_named(),
             suppressed_keys: Vec::new(),
             socket_name,
@@ -94,6 +108,7 @@ impl Aurora {
             xdg_shell_state,
             shm_state,
             output_manager_state,
+            presentation_state,
             seat_state,
             data_device_state,
             seat,
@@ -143,6 +158,81 @@ impl Aurora {
                     .map(|(surface, p)| (surface, (p + location).to_f64()))
             })
     }
+
+    /// Sends frame callbacks for everything drawn on `output`. Surfaces whose primary
+    /// scanout output is elsewhere are throttled to one callback a second.
+    /// Dmabuf feedback per surface joins this with the dmabuf step.
+    pub fn post_repaint(&mut self, output: &Output, time: Duration) {
+        let throttle = Some(Duration::from_secs(1));
+
+        for window in self.space.elements() {
+            if self.space.outputs_for_element(window).contains(output) {
+                window.send_frame(output, time, throttle, surface_primary_scanout_output);
+            }
+        }
+        for layer in layer_map_for_output(output).layers() {
+            layer.send_frame(output, time, throttle, surface_primary_scanout_output);
+        }
+        if let CursorImageStatus::Surface(surface) = &self.cursor_status {
+            send_frames_surface_tree(
+                surface,
+                output,
+                time,
+                throttle,
+                surface_primary_scanout_output,
+            );
+        }
+    }
+}
+
+/// Records which output each surface is mostly presented on, from the last frame's element states.
+pub fn update_primary_scanout_output(
+    space: &Space<Window>,
+    output: &Output,
+    cursor_status: &CursorImageStatus,
+    states: &RenderElementStates,
+) {
+    let update = |surface: &WlSurface, data: &smithay::wayland::compositor::SurfaceData| {
+        update_surface_primary_scanout_output(
+            surface,
+            output,
+            data,
+            None,
+            states,
+            default_primary_scanout_output_compare,
+        );
+    };
+    for window in space.elements() {
+        window.with_surfaces(update);
+    }
+    for layer in layer_map_for_output(output).layers() {
+        layer.with_surfaces(update);
+    }
+    if let CursorImageStatus::Surface(surface) = cursor_status {
+        with_surfaces_surface_tree(surface, update);
+    }
+}
+
+/// Collects the presentation feedback requested by everything visible on `output`.
+pub fn take_presentation_feedback(
+    output: &Output,
+    space: &Space<Window>,
+    states: &RenderElementStates,
+) -> OutputPresentationFeedback {
+    let mut feedback = OutputPresentationFeedback::new(output);
+    let flags = |surface: &WlSurface, _: &_| {
+        surface_presentation_feedback_flags_from_states(surface, None, states)
+    };
+
+    for window in space.elements() {
+        if space.outputs_for_element(window).contains(output) {
+            window.take_presentation_feedback(&mut feedback, surface_primary_scanout_output, flags);
+        }
+    }
+    for layer in layer_map_for_output(output).layers() {
+        layer.take_presentation_feedback(&mut feedback, surface_primary_scanout_output, flags);
+    }
+    feedback
 }
 
 #[derive(Default)]

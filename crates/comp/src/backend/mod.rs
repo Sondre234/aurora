@@ -7,6 +7,9 @@ use smithay::{
 
 pub use drm::DrmBackend;
 
+/// Clear color behind all windows, shared by both backends.
+pub const BACKGROUND: [f32; 4] = [0.06, 0.06, 0.09, 1.0];
+
 pub enum Backend {
     Winit,
     Drm(Box<DrmBackend>),

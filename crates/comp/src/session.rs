@@ -79,5 +79,7 @@ impl Aurora {
             keyboard.led_update(led_state.into());
         }
         // DRM activation and re-render arrive with the DRM device in a later step.
+        // Must stay after the DRM device is re-activated once that is wired.
+        self.resume_rendering();
     }
 }

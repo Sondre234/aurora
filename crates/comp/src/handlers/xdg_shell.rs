@@ -45,6 +45,14 @@ impl XdgShellHandler for Aurora {
         surface.send_repositioned(token);
     }
 
+    fn toplevel_destroyed(&mut self, _surface: ToplevelSurface) {
+        self.queue_redraw_all();
+    }
+
+    fn popup_destroyed(&mut self, _surface: PopupSurface) {
+        self.queue_redraw_all();
+    }
+
     // Interactive move/resize arrive with the tiling layout.
 
     fn grab(&mut self, _surface: PopupSurface, _seat: wl_seat::WlSeat, _serial: Serial) {

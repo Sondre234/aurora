@@ -1,5 +1,7 @@
+mod cursor;
 mod device;
 pub mod gpu;
+mod render;
 
 use std::collections::HashMap;
 
@@ -24,6 +26,7 @@ use crate::state::Aurora;
 pub struct DrmBackend {
     pub devices: HashMap<DrmNode, device::Device>,
     pub renderer: Option<GlesRenderer>,
+    pub cursors: cursor::CursorCache,
     pub primary_gpu: DrmNode,
     pub libinput: Libinput,
     /// Keyboards seen by libinput, kept to push LED state to them.
@@ -39,6 +42,7 @@ impl DrmBackend {
         Self {
             devices: HashMap::new(),
             renderer: None,
+            cursors: cursor::CursorCache::from_env(),
             primary_gpu,
             libinput,
             keyboards: Vec::new(),

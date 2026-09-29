@@ -13,9 +13,7 @@ use smithay::{
     utils::{Rectangle, Transform},
 };
 
-use crate::state::Aurora;
-
-const BACKGROUND: [f32; 4] = [0.06, 0.06, 0.09, 1.0];
+use crate::{backend::BACKGROUND, state::Aurora};
 
 /// Nested backend: renders into a window on the host compositor.
 pub fn init(

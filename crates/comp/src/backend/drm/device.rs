@@ -8,14 +8,12 @@ use smithay::{
             gbm::{GbmAllocator, GbmBufferFlags, GbmDevice},
         },
         drm::{
-            DrmDevice, DrmDeviceFd, DrmEvent, DrmNode,
+            DrmDevice, DrmDeviceFd, DrmNode,
             exporter::gbm::GbmFramebufferExporter,
             output::{DrmOutput, DrmOutputManager, DrmOutputRenderElements},
         },
         egl::{EGLContext, EGLDevice, EGLDisplay, context::ContextPriority},
-        renderer::{
-            ImportMemWl, element::surface::WaylandSurfaceRenderElement, gles::GlesRenderer,
-        },
+        renderer::{ImportMemWl, gles::GlesRenderer},
         session::Session,
     },
     desktop::utils::OutputPresentationFeedback,
@@ -36,6 +34,7 @@ use smithay_drm_extras::{
     drm_scanner::{DrmScanEvent, DrmScanner},
 };
 
+use super::render::{OutputElement, RenderState, vblank_handler};
 use crate::{backend::Backend, state::Aurora};
 
 pub type Allocator = GbmAllocator<DrmDeviceFd>;
@@ -44,7 +43,7 @@ pub type Feedback = Option<OutputPresentationFeedback>;
 pub type OutputManager = DrmOutputManager<Allocator, Exporter, Feedback, DrmDeviceFd>;
 pub type ConnectorOutput = DrmOutput<Allocator, Exporter, Feedback, DrmDeviceFd>;
 /// Element type the DRM compositor is instantiated with; the render loop uses the same.
-pub type Element = WaylandSurfaceRenderElement<GlesRenderer>;
+pub type Element = OutputElement;
 
 // Not Argb2101010-only: some drivers expose just one channel order, so both are offered.
 const FORMATS: &[Fourcc] = &[
@@ -65,9 +64,9 @@ pub struct UdevOutputId {
 
 /// A live connector. Field order matters: the DRM output goes before its global goes away.
 pub struct Surface {
-    #[allow(dead_code)] // driven by the render loop
     pub drm_output: ConnectorOutput,
     pub output: Output,
+    pub render: RenderState,
     global: Option<GlobalId>,
     dh: DisplayHandle,
 }
@@ -172,11 +171,7 @@ impl Aurora {
 
         let registration_token = self
             .handle
-            .insert_source(notifier, move |event, _, _state: &mut Aurora| match event {
-                // Frame pacing arrives with the render loop.
-                DrmEvent::VBlank(crtc) => tracing::trace!(?crtc, "vblank"),
-                DrmEvent::Error(err) => tracing::error!(%err, "drm event error"),
-            })
+            .insert_source(notifier, vblank_handler(node))
             .map_err(|err| format!("failed to register the drm source: {err}"))?;
 
         let Backend::Drm(drm) = &mut self.backend else {
@@ -382,12 +377,16 @@ impl Aurora {
             connector = %name, ?crtc, size = ?wl_mode.size, refresh_mhz = wl_mode.refresh,
             position = ?position, nvidia = is_nvidia, "output initialized"
         );
+        // The first frame is queued on the loop, after this setup has finished.
+        let mut render = RenderState::default();
+        render.damage(&self.handle, node, crtc);
         device.surfaces.insert(
             crtc,
             Surface {
                 drm_output,
                 output,
                 global: Some(global),
+                render,
                 dh: self.display_handle.clone(),
             },
         );
@@ -408,7 +407,9 @@ impl Aurora {
             return;
         };
         tracing::info!(connector = %name, ?crtc, "connector disconnected");
-        if let Some(surface) = device.surfaces.remove(&crtc) {
+        if let Some(mut surface) = device.surfaces.remove(&crtc) {
+            // Pending repaints and vblank timers must not outlive the output.
+            surface.render.cancel(&self.handle);
             self.space.unmap_output(&surface.output);
             self.space.refresh();
             // Dropping the surface releases the crtc and removes the wl_output global.
