@@ -41,15 +41,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         BackendKind::Drm => {
             // First source in the loop, and the first thing that touches the machine.
             let (session, notifier) = session::open()?;
-            session::insert_notifier(&handle, notifier)?;
+            session::insert_notifier(&handle, notifier).map_err(arm)?;
             let seat = smithay::backend::session::Session::seat(&session);
-            let primary_gpu = backend::drm::gpu::select_primary(&seat)?;
-            let libinput = libinput::new_context(&session, &seat)?;
+            let primary_gpu = backend::drm::gpu::select_primary(&seat).map_err(arm)?;
+            let libinput = libinput::new_context(&session, &seat).map_err(arm)?;
             Backend::Drm(Box::new(DrmBackend::new(session, libinput, primary_gpu)))
         }
     };
-    let mut state = Aurora::new(&mut event_loop, display, backend)?;
+    let mut state = Aurora::new(&mut event_loop, display, backend).map_err(arm)?;
     state.apply_keymap();
+    // Declared after `state`, so it drops first and bounds the teardown on every exit path.
+    let _deadline = ExitDeadline;
 
     safety::insert_signals(&handle);
     if let Some(timeout) = cli.timeout {
@@ -100,4 +102,20 @@ fn spawn_client(command: &str) {
     if let Err(err) = cmd.spawn() {
         tracing::warn!(%command, %err, "failed to spawn startup client");
     }
+}
+
+/// Arms the hard-exit deadline when dropped, including on early `?` returns.
+struct ExitDeadline;
+
+impl Drop for ExitDeadline {
+    fn drop(&mut self) {
+        safety::arm_exit_deadline();
+    }
+}
+
+/// For `map_err` on startup steps that run before the `ExitDeadline` guard exists: their
+/// locals (session, devices) drop before any guard could.
+fn arm<E>(err: E) -> E {
+    safety::arm_exit_deadline();
+    err
 }
