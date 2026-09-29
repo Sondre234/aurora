@@ -11,13 +11,13 @@ use smithay::{
         protocol::{wl_buffer, wl_surface::WlSurface},
     },
     wayland::{
-        seat::WaylandFocus,
         buffer::BufferHandler,
         compositor::{
             CompositorClientState, CompositorHandler, CompositorState, get_parent,
             is_sync_subsurface, with_states,
         },
         fractional_scale::{FractionalScaleHandler, with_fractional_scale},
+        seat::WaylandFocus,
         shm::{ShmHandler, ShmState},
     },
     xwayland::XWaylandClientData,

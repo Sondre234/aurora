@@ -7,16 +7,14 @@ use std::{
     collections::VecDeque,
     fs,
     os::unix::net::UnixStream,
+    path::Path,
     process::Stdio,
     time::{Duration, Instant},
 };
 
 use smithay::{
     desktop::{Space, Window},
-    reexports::{
-        calloop::RegistrationToken,
-        wayland_server::Client,
-    },
+    reexports::{calloop::RegistrationToken, wayland_server::Client},
     utils::{Logical, Point, Size},
     wayland::compositor::CompositorHandler,
     xwayland::{X11Wm, XWayland, XWaylandEvent},
@@ -57,7 +55,7 @@ impl Aurora {
         }
         let spawned = XWayland::spawn(
             &self.display_handle,
-            self.xwayland.display,
+            self.xwayland.display.or_else(free_display),
             std::iter::empty::<(String, String)>(),
             std::iter::empty::<String>(),
             true,
@@ -92,26 +90,24 @@ impl Aurora {
     fn xwayland_ready(&mut self, socket: UnixStream, number: u32, client: Client) {
         // X11 clients are not scaled: their coordinates are the global logical ones.
         self.client_compositor_state(&client).set_client_scale(1.0);
-        let mut wm = match X11Wm::start_wm(
-            self.handle.clone(),
-            &self.display_handle,
-            socket,
-            client,
-        ) {
-            Ok(wm) => wm,
-            Err(err) => {
-                tracing::warn!("xwayland: window manager failed to start: {err}");
-                return self.queue_xwayland_restart();
-            }
-        };
-        if let Some(cursor) = cursor_image()
-            && let Err(err) = wm.set_cursor(&cursor.pixels, cursor.size, cursor.hotspot)
-        {
-            tracing::warn!("xwayland: cannot set the cursor: {err}");
-        }
+        let mut wm =
+            match X11Wm::start_wm(self.handle.clone(), &self.display_handle, socket, client) {
+                Ok(wm) => wm,
+                Err(err) => {
+                    tracing::warn!("xwayland: window manager failed to start: {err}");
+                    return self.queue_xwayland_restart();
+                }
+            };
+        // Smithay drops every X event carrying the sequence number of this request, and events
+        // only carry a newer one once the manager sends another request. So the cursor, which
+        // takes several, must come after it or the manager would ignore its clients forever.
         let primary = self.primary_output();
         if let Err(err) = wm.set_randr_primary_output(primary.as_ref()) {
             tracing::debug!("xwayland: cannot set the primary output: {err}");
+        }
+        let cursor = cursor_image().unwrap_or_else(fallback_cursor);
+        if let Err(err) = wm.set_cursor(&cursor.pixels, cursor.size, cursor.hotspot) {
+            tracing::warn!("xwayland: cannot set the cursor: {err}");
         }
         self.xwayland.wm = Some(wm);
         tracing::info!("xwayland: ready display=:{number}");
@@ -120,7 +116,8 @@ impl Aurora {
     /// The server is gone (or never came up). Teardown waits for an idle callback so it never
     /// runs inside one of the window manager's own event callbacks.
     pub fn queue_xwayland_restart(&mut self) {
-        self.handle.insert_idle(|state| state.xwayland_teardown(true));
+        self.handle
+            .insert_idle(|state| state.xwayland_teardown(true));
     }
 
     /// Drops everything tied to the server. `restart` starts a new one unless it keeps
@@ -176,6 +173,24 @@ struct XCursor {
     pixels: Vec<u8>,
     size: Size<u16, Logical>,
     hotspot: Point<u16, Logical>,
+}
+
+/// The first display number nobody has a lock or socket for. Smithay would probe from :0
+/// and trip over other sessions' leftovers; choosing here leaves their files alone.
+fn free_display() -> Option<u32> {
+    (0..33).find(|n| {
+        !Path::new(&format!("/tmp/.X{n}-lock")).exists()
+            && !Path::new(&format!("/tmp/.X11-unix/X{n}")).exists()
+    })
+}
+
+/// A white square, for when no cursor theme is installed.
+fn fallback_cursor() -> XCursor {
+    XCursor {
+        pixels: vec![255; 8 * 8 * 4],
+        size: (8, 8).into(),
+        hotspot: (0, 0).into(),
+    }
 }
 
 fn cursor_image() -> Option<XCursor> {

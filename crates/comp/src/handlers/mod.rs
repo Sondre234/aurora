@@ -19,14 +19,14 @@ use smithay::utils::Serial;
 use smithay::wayland::output::OutputHandler;
 use smithay::wayland::pointer_constraints::PointerConstraintsHandler;
 use smithay::wayland::seat::WaylandFocus;
+use smithay::wayland::selection::data_device::{
+    DataDeviceHandler, DataDeviceState, WaylandDndGrabHandler, set_data_device_focus,
+};
 use smithay::wayland::selection::primary_selection::{
     PrimarySelectionHandler, PrimarySelectionState, set_primary_focus,
 };
 use smithay::wayland::selection::{SelectionHandler, SelectionSource, SelectionTarget};
 use std::os::fd::OwnedFd;
-use smithay::wayland::selection::data_device::{
-    DataDeviceHandler, DataDeviceState, WaylandDndGrabHandler, set_data_device_focus,
-};
 
 impl SeatHandler for Aurora {
     type KeyboardFocus = FocusTarget;

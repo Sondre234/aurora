@@ -116,6 +116,9 @@ mod tests {
             ..attrs(Constraints::default())
         };
         assert_eq!(evaluate(&x11, &[by_class.clone()]).workspace, Some(5));
-        assert_eq!(evaluate(&attrs(Constraints::default()), &[by_class]).workspace, None);
+        assert_eq!(
+            evaluate(&attrs(Constraints::default()), &[by_class]).workspace,
+            None
+        );
     }
 }

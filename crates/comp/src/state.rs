@@ -226,7 +226,12 @@ impl Aurora {
             }
         }
         for window in self.xwayland.unmanaged.elements() {
-            if self.xwayland.unmanaged.outputs_for_element(window).contains(output) {
+            if self
+                .xwayland
+                .unmanaged
+                .outputs_for_element(window)
+                .contains(output)
+            {
                 window.send_frame(output, time, throttle, surface_primary_scanout_output);
             }
         }
@@ -264,7 +269,12 @@ impl Aurora {
             }
         }
         for window in self.xwayland.unmanaged.elements() {
-            if self.xwayland.unmanaged.outputs_for_element(window).contains(output) {
+            if self
+                .xwayland
+                .unmanaged
+                .outputs_for_element(window)
+                .contains(output)
+            {
                 window.send_dmabuf_feedback(output, surface_primary_scanout_output, select);
             }
         }

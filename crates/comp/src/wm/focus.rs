@@ -53,7 +53,8 @@ impl Aurora {
                 element.send_pending_configure();
                 if raise && self.space.element_location(&element).is_some() {
                     self.space.raise_element(&element, false);
-                    if let (Some(x11), Some(xwm)) = (element.x11_surface(), self.xwayland.wm.as_mut())
+                    if let (Some(x11), Some(xwm)) =
+                        (element.x11_surface(), self.xwayland.wm.as_mut())
                         && let Err(err) = xwm.raise_window(x11)
                     {
                         tracing::debug!("x11: cannot raise the window: {err}");

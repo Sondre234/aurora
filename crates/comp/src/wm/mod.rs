@@ -18,8 +18,8 @@ pub mod modes;
 pub mod outputs;
 pub mod rules;
 pub mod window;
-pub mod x11;
 pub mod workspaces;
+pub mod x11;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Phase {

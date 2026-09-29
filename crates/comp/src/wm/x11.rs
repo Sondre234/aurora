@@ -12,7 +12,12 @@ use smithay::{
     },
 };
 
-use super::{WinData, apply::{has_buffer, rect_of}, grabs::DragKind, window::WindowElement};
+use super::{
+    Phase, WinData,
+    apply::{has_buffer, rect_of},
+    grabs::DragKind,
+    window::WindowElement,
+};
 use crate::{Aurora, focus::FocusTarget};
 
 fn constraints(x11: &X11Surface) -> Constraints {
@@ -30,9 +35,7 @@ fn constraints(x11: &X11Surface) -> Constraints {
 
 /// Everything but a plain top-level window is a helper the user does not want in the tree.
 fn floats_by_type(x11: &X11Surface) -> bool {
-    x11.window_type()
-        .is_some_and(|t| t != WmWindowType::Normal)
-        || x11.is_modal()
+    x11.window_type().is_some_and(|t| t != WmWindowType::Normal) || x11.is_modal()
 }
 
 fn edges(edge: ResizeEdge) -> Edges {
@@ -55,6 +58,12 @@ impl Aurora {
 
     /// A managed window wants to be shown: register it and place it in the layout.
     pub fn x11_map_request(&mut self, x11: X11Surface) {
+        tracing::info!(
+            "x11: map request xid={} class={:?} title={:?}",
+            x11.window_id(),
+            x11.class(),
+            x11.title()
+        );
         if let Err(err) = x11.set_mapped(true) {
             return tracing::warn!("x11: cannot map the window: {err}");
         }
@@ -243,11 +252,12 @@ impl Aurora {
         let Some(id) = self.x11_id(x11) else {
             return;
         };
+        // A window still waiting for its first buffer gets focus when it maps.
         let visible = self
             .wm
             .windows
             .get(&id)
-            .is_some_and(|w| self.wm.ws_output.contains_key(&w.ws));
+            .is_some_and(|w| w.phase == Phase::Mapped && self.wm.ws_output.contains_key(&w.ws));
         if visible {
             self.focus_window(Some(id), true);
         }

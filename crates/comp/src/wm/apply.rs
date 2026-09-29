@@ -236,7 +236,8 @@ impl Aurora {
             } else if let Some(x11) = win.element.x11_surface() {
                 // X11 has no acks: position and size go out at once, and the client's
                 // position is part of the truth (menus open relative to it).
-                let geo = Rectangle::new((content.x, content.y).into(), (content.w, content.h).into());
+                let geo =
+                    Rectangle::new((content.x, content.y).into(), (content.w, content.h).into());
                 if win.sent_flags != flags {
                     win.sent_flags = flags;
                     if let Err(err) = x11.set_fullscreen(flags.1).and(x11.set_maximized(flags.2)) {

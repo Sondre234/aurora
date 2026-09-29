@@ -52,7 +52,9 @@ impl XwmHandler for Aurora {
             .expect("xwm_state called without a running X11 window manager")
     }
 
-    fn new_window(&mut self, _xwm: XwmId, _window: X11Surface) {}
+    fn new_window(&mut self, _xwm: XwmId, window: X11Surface) {
+        tracing::debug!("x11: new window xid={}", window.window_id());
+    }
     fn new_override_redirect_window(&mut self, _xwm: XwmId, _window: X11Surface) {}
 
     fn map_window_request(&mut self, _xwm: XwmId, window: X11Surface) {
@@ -161,10 +163,8 @@ impl XwmHandler for Aurora {
                 request_data_device_client_selection(&self.seat, mime_type, fd)
                     .map_err(|err| format!("{err:?}"))
             }
-            SelectionTarget::Primary => {
-                request_primary_client_selection(&self.seat, mime_type, fd)
-                    .map_err(|err| format!("{err:?}"))
-            }
+            SelectionTarget::Primary => request_primary_client_selection(&self.seat, mime_type, fd)
+                .map_err(|err| format!("{err:?}")),
         };
         if let Err(err) = result {
             tracing::warn!("xwayland: cannot read the wayland {selection:?} selection: {err}");

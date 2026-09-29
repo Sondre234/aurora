@@ -3,9 +3,9 @@ use smithay::{
     reexports::wayland_server::DisplayHandle,
     wayland::{
         fractional_scale::FractionalScaleManagerState, output::OutputManagerState,
-        presentation::PresentationState,
-        selection::primary_selection::PrimarySelectionState, shell::wlr_layer::WlrLayerShellState,
-        viewporter::ViewporterState, xwayland_shell::XWaylandShellState,
+        presentation::PresentationState, selection::primary_selection::PrimarySelectionState,
+        shell::wlr_layer::WlrLayerShellState, viewporter::ViewporterState,
+        xwayland_shell::XWaylandShellState,
     },
 };
 

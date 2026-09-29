@@ -206,7 +206,12 @@ impl Aurora {
             }
         }
         for window in self.xwayland.unmanaged.elements() {
-            if self.xwayland.unmanaged.outputs_for_element(window).contains(output) {
+            if self
+                .xwayland
+                .unmanaged
+                .outputs_for_element(window)
+                .contains(output)
+            {
                 window.send_frame(output, time, Some(Duration::ZERO), |_, _| {
                     Some(output.clone())
                 });

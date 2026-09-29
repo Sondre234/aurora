@@ -97,7 +97,8 @@ fn draw(
     output: &Output,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (renderer, mut framebuffer) = backend.bind()?;
-    let elements = output_elements(space, unmanaged, renderer, output).ok_or("output is not mapped")?;
+    let elements =
+        output_elements(space, unmanaged, renderer, output).ok_or("output is not mapped")?;
     damage_tracker
         .render_output(renderer, &mut framebuffer, 0, &elements, BACKGROUND)
         .map_err(|err| format!("{err:?}"))?;

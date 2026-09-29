@@ -98,12 +98,8 @@ pub fn output_elements(
             continue;
         }
         let at: Point<i32, Logical> = loc - SpaceElement::geometry(window).loc - geo.loc;
-        let elements: Vec<WaylandSurfaceRenderElement<GlesRenderer>> = window.render_elements(
-            renderer,
-            at.to_physical_precise_round(scale),
-            scale,
-            1.0,
-        );
+        let elements: Vec<WaylandSurfaceRenderElement<GlesRenderer>> =
+            window.render_elements(renderer, at.to_physical_precise_round(scale), scale, 1.0);
         out.extend(
             elements
                 .into_iter()
