@@ -75,6 +75,11 @@ pub struct Aurora {
     pub space: Space<WindowElement>,
     pub xwayland: crate::xwayland::XWaylandState,
     pub popups: PopupManager,
+    /// The live xdg_popup grab with its root surface, kept so compositor focus changes can end it.
+    pub popup_grab: Option<(
+        smithay::desktop::PopupGrab<Aurora>,
+        smithay::reexports::wayland_server::protocol::wl_surface::WlSurface,
+    )>,
 
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShellState,
@@ -145,6 +150,7 @@ impl Aurora {
             space: Space::default(),
             xwayland: Default::default(),
             popups: PopupManager::default(),
+            popup_grab: None,
             compositor_state,
             xdg_shell_state,
             shm_state,

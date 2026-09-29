@@ -81,6 +81,7 @@ impl Aurora {
                 if locked {
                     self.layer_focus.restore = element.focus_target();
                 } else {
+                    self.end_popup_grab_for(element.focus_target().as_ref());
                     keyboard.set_focus(self, element.focus_target(), serial);
                 }
                 let out = self
@@ -98,6 +99,7 @@ impl Aurora {
                 if locked {
                     self.layer_focus.restore = None;
                 } else {
+                    self.end_popup_grab_for(None);
                     keyboard.set_focus(self, None, serial);
                 }
                 if prev.is_some() {

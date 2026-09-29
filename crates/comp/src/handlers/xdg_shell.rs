@@ -130,9 +130,9 @@ impl XdgShellHandler for Aurora {
         {
             return surface.send_popup_done();
         }
-        let Ok(mut grab) = self
-            .popups
-            .grab_popup(FocusTarget::Wl(root), kind, &seat, serial)
+        let Ok(mut grab) =
+            self.popups
+                .grab_popup(FocusTarget::Wl(root.clone()), kind, &seat, serial)
         else {
             return surface.send_popup_done();
         };
@@ -154,6 +154,7 @@ impl XdgShellHandler for Aurora {
         keyboard.set_focus(self, grab.current_grab(), serial);
         keyboard.set_grab(self, PopupKeyboardGrab::new(&grab), serial);
         pointer.set_grab(self, PopupPointerGrab::new(&grab), serial, Focus::Keep);
+        self.popup_grab = Some((grab, root));
     }
 }
 
@@ -212,5 +213,27 @@ impl Aurora {
         popup.with_pending_state(|state| {
             state.geometry = state.positioner.get_unconstrained_geometry(target);
         });
+    }
+}
+
+impl Aurora {
+    /// Ends the active popup grab unless `target` is the surface it belongs to. A popup
+    /// grab swallows every focus change but its own, so a compositor-driven change (a
+    /// workspace switch, a closed window) would otherwise leave keys going to the popup.
+    pub fn end_popup_grab_for(&mut self, target: Option<&FocusTarget>) {
+        let Some((grab, root)) = self.popup_grab.as_mut() else {
+            return;
+        };
+        if grab.has_ended() {
+            self.popup_grab = None;
+            return;
+        }
+        let keeps = target
+            .and_then(|t| t.wl_surface())
+            .is_some_and(|s| *s == *root);
+        if !keeps {
+            grab.ungrab(PopupUngrabStrategy::All);
+            self.popup_grab = None;
+        }
     }
 }

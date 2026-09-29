@@ -294,6 +294,7 @@ impl Aurora {
 
     fn set_keyboard_focus(&mut self, target: Option<FocusTarget>) {
         let keyboard = self.keyboard.clone();
+        self.end_popup_grab_for(target.as_ref());
         keyboard.set_focus(self, target, SERIAL_COUNTER.next_serial());
     }
 
