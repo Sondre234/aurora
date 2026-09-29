@@ -339,6 +339,11 @@ impl Aurora {
             Phase::Mapped => {
                 // X11 hints arrive as property changes, not through the surface.
                 if !x11 {
+                    // A null buffer unmaps a mapped toplevel.
+                    if !has_buffer(surface) {
+                        self.unmap_window(id);
+                        return;
+                    }
                     self.refresh_constraints(id, surface);
                 }
                 // A drag waits for the client's ack and size, which arrive with this commit.
@@ -359,9 +364,63 @@ impl Aurora {
             }
             Phase::Pending => {
                 if has_buffer(surface) {
+                    if !placed {
+                        // Mapping again after an unmap: the metadata may have changed.
+                        self.read_metadata(id, surface);
+                    }
                     self.window_mapped(id);
                 }
             }
+        }
+    }
+
+    /// The window's null-buffer unmap: it leaves the layout and the Space but stays a known
+    /// toplevel, and maps as a fresh window when a buffer arrives again.
+    fn unmap_window(&mut self, id: WinId) {
+        let Some(win) = self.wm.windows.get_mut(&id) else {
+            return;
+        };
+        let ws = win.ws;
+        win.phase = Phase::Pending;
+        win.placed = false;
+        win.sent_size = None;
+        win.sent_flags = (false, false, false);
+        win.resize_anchor = None;
+        let element = win.element.clone();
+        self.space.unmap_elem(&element);
+        if self.wm.hover == Some(id) {
+            self.wm.hover = None;
+        }
+        let was_focused = self.wm.focused == Some(id);
+        let mut next = None;
+        if let Some(workspace) = self.wm.workspaces.get_mut(&ws) {
+            next = workspace.focus_after_close(id);
+            workspace.remove(id);
+        }
+        self.relayout_ws(ws);
+        if was_focused {
+            self.focus_window(next, true);
+        }
+        // The configure state restarts with the unmap: the client waits for a new one.
+        if let Some(toplevel) = element.toplevel() {
+            toplevel.send_configure();
+        }
+    }
+
+    fn read_metadata(&mut self, id: WinId, surface: &WlSurface) {
+        let (app_id, _) = read_strings(surface);
+        let constraints = read_constraints(surface);
+        let parent = self
+            .wm
+            .windows
+            .get(&id)
+            .and_then(|w| w.element.toplevel())
+            .and_then(|t| t.parent())
+            .and_then(|p| self.wm.id_of(&p));
+        if let Some(win) = self.wm.windows.get_mut(&id) {
+            win.app_id = app_id;
+            win.constraints = constraints;
+            win.parent = parent;
         }
     }
 
