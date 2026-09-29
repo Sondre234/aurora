@@ -14,6 +14,9 @@ pub struct Attrs<'a> {
 pub struct Decision {
     pub floating: bool,
     pub workspace: Option<u32>,
+    /// Content size for a floating window.
+    pub size: Option<(i32, i32)>,
+    pub fullscreen: bool,
 }
 
 pub fn evaluate(attrs: &Attrs, rules: &[WindowRule]) -> Decision {
@@ -23,6 +26,8 @@ pub fn evaluate(attrs: &Attrs, rules: &[WindowRule]) -> Decision {
     let mut decision = Decision {
         floating: attrs.has_parent || fixed,
         workspace: None,
+        size: None,
+        fullscreen: false,
     };
     for rule in rules.iter().filter(|r| matches(r, attrs)) {
         if let Some(floating) = rule.floating {
@@ -30,6 +35,12 @@ pub fn evaluate(attrs: &Attrs, rules: &[WindowRule]) -> Decision {
         }
         if rule.workspace.is_some() {
             decision.workspace = rule.workspace;
+        }
+        if rule.size.is_some() {
+            decision.size = rule.size;
+        }
+        if let Some(fullscreen) = rule.fullscreen {
+            decision.fullscreen = fullscreen;
         }
     }
     decision
@@ -44,4 +55,50 @@ fn matches(rule: &WindowRule, attrs: &Attrs) -> bool {
             .as_ref()
             .is_none_or(|g| g.is_match(attrs.app_id))
         && rule.title.as_ref().is_none_or(|g| g.is_match(attrs.title))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Glob;
+    use aurora_layout::Size;
+
+    fn rule(app_id: &str) -> WindowRule {
+        WindowRule {
+            app_id: Some(Glob::new(app_id)),
+            title: None,
+            class: None,
+            floating: None,
+            workspace: None,
+            output: None,
+            size: None,
+            fullscreen: None,
+        }
+    }
+
+    #[test]
+    fn heuristics_then_rules_in_order() {
+        let attrs = |constraints| Attrs {
+            has_parent: false,
+            constraints,
+            app_id: "pavucontrol",
+            title: "",
+        };
+        let fixed = Constraints {
+            min: Size { w: 300, h: 200 },
+            max: Size { w: 300, h: 200 },
+        };
+        assert!(evaluate(&attrs(fixed), &[]).floating);
+        assert!(!evaluate(&attrs(Constraints::default()), &[]).floating);
+
+        let mut float = rule("pavu*");
+        float.floating = Some(true);
+        float.size = Some((640, 480));
+        let mut tile = rule("pavucontrol");
+        tile.floating = Some(false);
+        tile.fullscreen = Some(true);
+        let d = evaluate(&attrs(Constraints::default()), &[float, tile]);
+        assert!(!d.floating && d.fullscreen);
+        assert_eq!(d.size, Some((640, 480)));
+    }
 }
