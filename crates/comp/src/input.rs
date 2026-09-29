@@ -28,7 +28,8 @@ fn key_action(
     modifiers: &ModifiersState,
     handle: &smithay::input::keyboard::KeysymHandle<'_>,
 ) -> Option<KeyAction> {
-    let ctrl_alt = modifiers.ctrl && modifiers.alt;
+    // AltGr counts as Alt: with the altgr-intl layout the right Alt is not Mod1.
+    let ctrl_alt = modifiers.ctrl && (modifiers.alt || modifiers.iso_level3_shift);
     let raw = handle.raw_syms();
 
     // Matched on raw syms and keycode so no layout or level can hide it.
@@ -58,6 +59,18 @@ fn key_action(
         if let Some(f) = f {
             return Some(KeyAction::VtSwitch((f - keysyms::KEY_F1 + 1) as i32));
         }
+    } else if modifiers.ctrl
+        && raw
+            .iter()
+            .any(|s| (keysyms::KEY_F1..=keysyms::KEY_F12).contains(&s.raw()))
+    {
+        // Leaves a trace when a VT chord is pressed with the wrong modifiers.
+        tracing::info!(
+            alt = modifiers.alt,
+            altgr = modifiers.iso_level3_shift,
+            logo = modifiers.logo,
+            "Ctrl+F-key pressed without Alt, not a VT switch"
+        );
     }
     None
 }
