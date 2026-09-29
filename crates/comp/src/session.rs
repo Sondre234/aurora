@@ -83,6 +83,7 @@ impl Aurora {
             // Without input neither the quit chord nor VT switching can be received, so
             // release the session rather than show a screen nobody can leave.
             tracing::error!(?err, "failed to resume libinput, stopping");
+            crate::safety::arm_exit_deadline();
             self.loop_signal.stop();
             return;
         }

@@ -74,6 +74,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     spawn_client(&cli.command);
 
     event_loop.run(None, &mut state, |_| {})?;
+    safety::arm_exit_deadline();
     tracing::info!("aurora exiting");
     Ok(())
 }

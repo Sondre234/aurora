@@ -20,6 +20,7 @@ pub fn insert_timeout(handle: &LoopHandle<'static, Aurora>, dur: Duration) {
     }
     let result = handle.insert_source(Timer::from_duration(dur), |_, _, state| {
         tracing::warn!("quitting: --timeout elapsed");
+        arm_exit_deadline();
         state.loop_signal.stop();
         TimeoutAction::Drop
     });
@@ -36,6 +37,7 @@ pub fn insert_signals(handle: &LoopHandle<'static, Aurora>) {
     };
     let result = handle.insert_source(signals, |event, _, state| {
         tracing::warn!(signal = ?event.signal(), "quitting: signal received");
+        arm_exit_deadline();
         state.loop_signal.stop();
     });
     if let Err(err) = result {
@@ -70,5 +72,29 @@ pub fn spawn_watchdog(timeout: Duration) {
         });
     if let Err(err) = spawned {
         tracing::error!(%err, "failed to start the watchdog thread");
+    }
+}
+
+/// Bound on teardown once shutdown has begun: dropping the DRM outputs, renderer and seat
+/// calls into the driver while master is still held, and that can hang.
+const EXIT_DEADLINE: Duration = Duration::from_secs(3);
+
+/// Hard-exits the process after a few seconds, whatever teardown is doing. Idempotent, and
+/// a plain thread so it works from the panic hook and does not depend on the event loop.
+/// Exiting closes the seat and DRM fds, so the kernel drops master and the VT comes back.
+pub fn arm_exit_deadline() {
+    static ARMED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if ARMED.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
+    let spawned = std::thread::Builder::new()
+        .name("exit-deadline".into())
+        .spawn(|| {
+            std::thread::sleep(EXIT_DEADLINE);
+            // Safety: _exit skips destructors on purpose; nothing here can block.
+            unsafe { libc::_exit(1) }
+        });
+    if let Err(err) = spawned {
+        tracing::error!(%err, "failed to start the exit deadline thread");
     }
 }

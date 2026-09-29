@@ -375,6 +375,7 @@ impl Aurora {
                     }
                     SwapBuffersError::ContextLost(err) => {
                         tracing::error!(%err, "rendering lost, stopping");
+                        crate::safety::arm_exit_deadline();
                         self.loop_signal.stop();
                     }
                 }
@@ -515,6 +516,7 @@ impl Aurora {
                     ),
                     SwapBuffersError::ContextLost(err) => {
                         tracing::error!(%err, "rendering lost, stopping");
+                        crate::safety::arm_exit_deadline();
                         self.loop_signal.stop();
                         false
                     }

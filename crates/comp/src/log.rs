@@ -114,6 +114,7 @@ pub fn init() {
 pub fn install_panic_hook() {
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
+        crate::safety::arm_exit_deadline();
         let backtrace = std::backtrace::Backtrace::force_capture();
         tracing::error!("aurora panicked: {info}\n{backtrace}");
         previous(info);

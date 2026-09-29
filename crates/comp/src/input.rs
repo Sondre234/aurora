@@ -155,6 +155,7 @@ impl Aurora {
                 match action {
                     Some(KeyAction::Quit) => {
                         tracing::warn!("quitting: quit chord");
+                        crate::safety::arm_exit_deadline();
                         self.loop_signal.stop();
                     }
                     Some(KeyAction::VtSwitch(vt)) => {
