@@ -11,17 +11,17 @@ use smithay::{
             AsRenderElements, Wrap, memory::MemoryRenderBufferRenderElement, render_elements,
             surface::WaylandSurfaceRenderElement,
         },
-        gles::GlesRenderer,
+        gles::{GlesRenderer, element::PixelShaderElement},
     },
     desktop::{Space, Window, space::SpaceElement},
     output::Output,
-    utils::{Logical, Point, Scale},
+    utils::{Logical, Point, Rectangle, Scale, Size},
     wayland::shell::wlr_layer::Layer,
 };
 
 use crate::{
     config::Decoration,
-    effects::{self, Programs},
+    effects::{self, Programs, shadow},
     layers::layers_front_to_back,
     wm::window::{WindowElement, WindowRenderElement},
 };
@@ -34,8 +34,9 @@ render_elements! {
     pub OutputElement<=GlesRenderer>;
     Cursor=MemoryRenderBufferRenderElement<GlesRenderer>,
     CursorSurface=WaylandSurfaceRenderElement<GlesRenderer>,
-    Window=WindowRenderElement<GlesRenderer>,
+    Window=WindowRenderElement,
     Layer=Wrap<WaylandSurfaceRenderElement<GlesRenderer>>,
+    Shadow=PixelShaderElement,
 }
 
 /// Per-frame inputs of the effects, built once per render and passed down to the builder.
@@ -110,7 +111,7 @@ pub fn output_elements(
     unmanaged: &Space<Window>,
     renderer: &mut GlesRenderer,
     output: &Output,
-    _fx: &SceneFx,
+    fx: &SceneFx,
 ) -> Option<Vec<OutputElement>> {
     let geo = space.output_geometry(output)?;
     let scale = Scale::from(output.current_scale().fractional_scale());
@@ -143,6 +144,10 @@ pub fn output_elements(
     }
 
     // The space stacks bottom to top; the stable sort keeps that order within a z-index.
+    let fx_on = fx.enabled_on(output).then_some(fx);
+    let shadow_grow = fx_on
+        .filter(|f| f.decoration.shadow)
+        .map_or(0, |f| shadow::shadow_reach(f.decoration.shadow_radius));
     let mut windows: Vec<&WindowElement> = space.elements().rev().collect();
     windows.sort_by_key(|w| Reverse(SpaceElement::z_index(*w)));
     for window in windows {
@@ -150,19 +155,26 @@ pub fn output_elements(
         else {
             continue;
         };
-        if !geo.overlaps(bbox) {
+        let reach = Rectangle::new(
+            bbox.loc - Point::from((shadow_grow, shadow_grow)),
+            bbox.size + Size::from((2 * shadow_grow, 2 * shadow_grow)),
+        );
+        if !geo.overlaps(reach) {
             continue;
         }
         let at: Point<i32, Logical> = loc - SpaceElement::geometry(window).loc - geo.loc;
         // Hooks, in front-to-back order for this window: (1) the window's own elements below
         // (the corner program and `current - target` offset/scale apply there), (2) its
         // shadow, (3) blur of what is behind it. Streams push their variants here.
-        out.extend(window.render_elements::<OutputElement>(
-            renderer,
-            at.to_physical_precise_round(scale),
-            scale,
-            1.0,
-        ));
+        out.extend(
+            window
+                .render_elements_fx(renderer, at, scale, fx_on)
+                .into_iter()
+                .map(OutputElement::Window),
+        );
+        if let Some(shadow) = fx_on.and_then(|fx| window.shadow_element(at, fx)) {
+            out.push(OutputElement::Shadow(shadow));
+        }
     }
 
     push_layers(&mut out, renderer, output, Layer::Bottom, scale);
