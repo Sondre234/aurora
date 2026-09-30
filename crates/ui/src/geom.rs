@@ -81,7 +81,12 @@ impl Rect {
         }
         let x = self.x.min(o.x);
         let y = self.y.min(o.y);
-        Rect::new(x, y, self.right().max(o.right()) - x, self.bottom().max(o.bottom()) - y)
+        Rect::new(
+            x,
+            y,
+            self.right().max(o.right()) - x,
+            self.bottom().max(o.bottom()) - y,
+        )
     }
 
     pub fn inset(&self, i: Insets) -> Rect {
@@ -114,11 +119,21 @@ pub struct Insets {
 
 impl Insets {
     pub const fn all(v: f32) -> Self {
-        Self { left: v, top: v, right: v, bottom: v }
+        Self {
+            left: v,
+            top: v,
+            right: v,
+            bottom: v,
+        }
     }
 
     pub const fn xy(x: f32, y: f32) -> Self {
-        Self { left: x, top: y, right: x, bottom: y }
+        Self {
+            left: x,
+            top: y,
+            right: x,
+            bottom: y,
+        }
     }
 
     pub fn horizontal(&self) -> f32 {
@@ -159,19 +174,32 @@ impl Color {
             return None;
         }
         let byte = |i: usize| u8::from_str_radix(&s[i..i + 2], 16).ok();
-        Some(Self { r: byte(0)?, g: byte(2)?, b: byte(4)?, a: if s.len() == 8 { byte(6)? } else { 255 } })
+        Some(Self {
+            r: byte(0)?,
+            g: byte(2)?,
+            b: byte(4)?,
+            a: if s.len() == 8 { byte(6)? } else { 255 },
+        })
     }
 
     /// Same color with alpha multiplied by `f` (0..=1).
     pub fn fade(self, f: f32) -> Self {
-        Self { a: (self.a as f32 * f.clamp(0.0, 1.0)).round() as u8, ..self }
+        Self {
+            a: (self.a as f32 * f.clamp(0.0, 1.0)).round() as u8,
+            ..self
+        }
     }
 
     /// Linear mix towards `o` by `t` (0..=1), per straight channel.
     pub fn mix(self, o: Color, t: f32) -> Self {
         let t = t.clamp(0.0, 1.0);
         let m = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * t).round() as u8;
-        Self { r: m(self.r, o.r), g: m(self.g, o.g), b: m(self.b, o.b), a: m(self.a, o.a) }
+        Self {
+            r: m(self.r, o.r),
+            g: m(self.g, o.g),
+            b: m(self.b, o.b),
+            a: m(self.a, o.a),
+        }
     }
 }
 

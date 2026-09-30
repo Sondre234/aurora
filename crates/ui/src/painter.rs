@@ -34,7 +34,12 @@ impl Image {
                 *c = ((*c as u32 * a + 127) / 255) as u8;
             }
         }
-        Some(Self { id: NEXT_IMAGE_ID.fetch_add(1, Ordering::Relaxed), w, h, rgba: Arc::new(rgba) })
+        Some(Self {
+            id: NEXT_IMAGE_ID.fetch_add(1, Ordering::Relaxed),
+            w,
+            h,
+            rgba: Arc::new(rgba),
+        })
     }
 
     pub fn width(&self) -> u32 {

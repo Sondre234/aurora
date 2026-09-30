@@ -63,12 +63,20 @@ pub struct KeyEvent {
 
 impl KeyEvent {
     pub fn new(key: Key) -> Self {
-        Self { key, text: None, mods: Mods::default() }
+        Self {
+            key,
+            text: None,
+            mods: Mods::default(),
+        }
     }
 
     /// A typed character without modifiers.
     pub fn typed(c: char) -> Self {
-        Self { key: Key::Char(c), text: Some(c.to_string()), mods: Mods::default() }
+        Self {
+            key: Key::Char(c),
+            text: Some(c.to_string()),
+            mods: Mods::default(),
+        }
     }
 
     pub fn with_mods(mut self, mods: Mods) -> Self {
@@ -85,7 +93,11 @@ pub enum Input {
     PointerDown(Point, Button),
     PointerUp(Point, Button),
     /// Scroll in logical pixels; positive `dy` scrolls content down (towards later items).
-    Scroll { pos: Point, dx: f32, dy: f32 },
+    Scroll {
+        pos: Point,
+        dx: f32,
+        dy: f32,
+    },
     Key(KeyEvent),
 }
 

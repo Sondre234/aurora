@@ -29,9 +29,17 @@ fn shaping_is_cached_and_scale_is_part_of_the_key() {
 #[test]
 fn shaped_cache_respects_byte_budget() {
     let Some(t) = sys() else { return };
-    t.set_budgets(TextBudgets { shaped: 4096, glyphs: 1 << 20 });
+    t.set_budgets(TextBudgets {
+        shaped: 4096,
+        glyphs: 1 << 20,
+    });
     for i in 0..200 {
-        t.shape(&format!("some label number {i}"), &TextStyle::default(), 1.0, None);
+        t.shape(
+            &format!("some label number {i}"),
+            &TextStyle::default(),
+            1.0,
+            None,
+        );
     }
     let s = t.stats().shaped;
     assert!(s.bytes <= 4096, "bytes {}", s.bytes);
@@ -41,8 +49,16 @@ fn shaped_cache_respects_byte_budget() {
 #[test]
 fn glyph_cache_respects_byte_budget() {
     let Some(t) = sys() else { return };
-    t.set_budgets(TextBudgets { shaped: 1 << 20, glyphs: 2048 });
-    let s = t.shape("The quick brown fox jumps over the lazy dog", &TextStyle::sized(24.0), 1.0, None);
+    t.set_budgets(TextBudgets {
+        shaped: 1 << 20,
+        glyphs: 2048,
+    });
+    let s = t.shape(
+        "The quick brown fox jumps over the lazy dog",
+        &TextStyle::sized(24.0),
+        1.0,
+        None,
+    );
     for g in &s.glyphs {
         t.glyph(g.key);
     }
@@ -81,6 +97,9 @@ fn cursor_mapping_round_trips() {
     assert_eq!(s.hit(-5.0), 0);
     assert_eq!(s.hit(1000.0), text.len());
     let empty = t.shape("", &TextStyle::default(), 1.0, None);
-    assert_eq!((empty.width(), empty.cursor_x(0), empty.hit(3.0)), (0.0, 0.0, 0));
+    assert_eq!(
+        (empty.width(), empty.cursor_x(0), empty.hit(3.0)),
+        (0.0, 0.0, 0)
+    );
     assert!(empty.height() > 0.0);
 }

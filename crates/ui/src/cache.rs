@@ -28,7 +28,11 @@ impl CacheStats {
     /// Hit rate in 0..=1 (0 when nothing was looked up yet).
     pub fn hit_rate(&self) -> f64 {
         let total = self.hits + self.misses;
-        if total == 0 { 0.0 } else { self.hits as f64 / total as f64 }
+        if total == 0 {
+            0.0
+        } else {
+            self.hits as f64 / total as f64
+        }
     }
 }
 
@@ -60,7 +64,10 @@ impl<K: Hash + Eq + Clone, V: Clone> LruCache<K, V> {
             tick: 0,
             map: HashMap::new(),
             order: BTreeMap::new(),
-            stats: CacheStats { budget, ..Default::default() },
+            stats: CacheStats {
+                budget,
+                ..Default::default()
+            },
             dirty: false,
             last_report: Instant::now(),
         }
@@ -100,7 +107,14 @@ impl<K: Hash + Eq + Clone, V: Clone> LruCache<K, V> {
         }
         self.tick += 1;
         self.order.insert(self.tick, k.clone());
-        self.map.insert(k, Entry { value: v, bytes, tick: self.tick });
+        self.map.insert(
+            k,
+            Entry {
+                value: v,
+                bytes,
+                tick: self.tick,
+            },
+        );
         self.bytes += bytes;
         self.evict();
         self.dirty = true;
@@ -142,12 +156,19 @@ impl<K: Hash + Eq + Clone, V: Clone> LruCache<K, V> {
     }
 
     pub fn stats(&self) -> CacheStats {
-        CacheStats { entries: self.map.len(), bytes: self.bytes, budget: self.budget, ..self.stats }
+        CacheStats {
+            entries: self.map.len(),
+            bytes: self.bytes,
+            budget: self.budget,
+            ..self.stats
+        }
     }
 
     fn evict(&mut self) {
         while self.bytes > self.budget {
-            let Some((_, k)) = self.order.pop_first() else { break };
+            let Some((_, k)) = self.order.pop_first() else {
+                break;
+            };
             if let Some(e) = self.map.remove(&k) {
                 self.bytes -= e.bytes;
                 self.stats.evictions += 1;

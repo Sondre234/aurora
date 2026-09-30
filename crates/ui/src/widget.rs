@@ -137,7 +137,11 @@ pub struct ListItem {
 
 impl ListItem {
     pub fn new(title: impl Into<String>) -> Self {
-        Self { title: title.into(), subtitle: None, tag: 0 }
+        Self {
+            title: title.into(),
+            subtitle: None,
+            tag: 0,
+        }
     }
 
     pub fn subtitle(mut self, s: impl Into<String>) -> Self {
@@ -334,11 +338,25 @@ impl Node {
     }
 
     pub fn row(children: Vec<Node>) -> Self {
-        Self::new(Kind::Row, Style { align: Align::Center, ..Style::default() }, children)
+        Self::new(
+            Kind::Row,
+            Style {
+                align: Align::Center,
+                ..Style::default()
+            },
+            children,
+        )
     }
 
     pub fn column(children: Vec<Node>) -> Self {
-        Self::new(Kind::Column, Style { align: Align::Stretch, ..Style::default() }, children)
+        Self::new(
+            Kind::Column,
+            Style {
+                align: Align::Stretch,
+                ..Style::default()
+            },
+            children,
+        )
     }
 
     pub fn stack(children: Vec<Node>) -> Self {
@@ -351,12 +369,25 @@ impl Node {
     }
 
     pub fn label(text: impl Into<String>, style: TextStyle, color: Color) -> Self {
-        let l = Label { text: text.into(), style, color, align: TextAlign::Left };
+        let l = Label {
+            text: text.into(),
+            style,
+            color,
+            align: TextAlign::Left,
+        };
         Self::new(Kind::Label(l), Style::default(), Vec::new())
     }
 
     pub fn icon(image: Option<Image>, size: Size) -> Self {
-        Self::new(Kind::Icon(Icon { image, size, tint: None }), Style::default(), Vec::new())
+        Self::new(
+            Kind::Icon(Icon {
+                image,
+                size,
+                tint: None,
+            }),
+            Style::default(),
+            Vec::new(),
+        )
     }
 
     pub fn list(list: List) -> Self {
@@ -364,7 +395,11 @@ impl Node {
     }
 
     pub fn input(input: TextInput) -> Self {
-        let s = Style { padding: Insets::xy(8.0, 6.0), clip: true, ..Style::default() };
+        let s = Style {
+            padding: Insets::xy(8.0, 6.0),
+            clip: true,
+            ..Style::default()
+        };
         Self::new(Kind::Input(Box::new(input)), s, Vec::new())
     }
 
@@ -457,7 +492,11 @@ impl Node {
     }
 
     pub fn shadow(mut self, blur: f32, offset: Point, color: Color) -> Self {
-        self.style.shadow = Some(Shadow { blur, offset, color });
+        self.style.shadow = Some(Shadow {
+            blur,
+            offset,
+            color,
+        });
         self
     }
 
@@ -524,7 +563,9 @@ impl Node {
     }
 
     pub(crate) fn is_focusable(&self) -> bool {
-        self.style.visible && matches!(self.kind, Kind::Input(_) | Kind::List(_)) && self.id != Id::NONE
+        self.style.visible
+            && matches!(self.kind, Kind::Input(_) | Kind::List(_))
+            && self.id != Id::NONE
     }
 
     /// Rect to repaint when this node changes: its box plus any shadow.
@@ -554,12 +595,18 @@ impl Node {
             Kind::Spacer => Size::default(),
             Kind::Icon(i) => i.size,
             Kind::Label(l) => {
-                let max = matches!(l.style.wrap, TextWrap::Word { .. }).then_some(inner_w).flatten();
+                let max = matches!(l.style.wrap, TextWrap::Word { .. })
+                    .then_some(inner_w)
+                    .flatten();
                 let s = cx.text.shape(&l.text, &l.style, cx.scale, max);
                 Size::new(s.width(), s.height())
             }
             Kind::List(l) => {
-                let rows = if l.max_rows > 0 { l.items.len().min(l.max_rows) } else { l.items.len() };
+                let rows = if l.max_rows > 0 {
+                    l.items.len().min(l.max_rows)
+                } else {
+                    l.items.len()
+                };
                 Size::new(0.0, rows as f32 * l.row_height)
             }
             Kind::Input(i) => {
@@ -579,7 +626,12 @@ impl Node {
             }
             Kind::Column => {
                 let hs = self.sizes(cx, false, inner_w, None);
-                let w = self.children.iter().filter(|c| c.style.visible).map(|c| c.measure(cx, inner_w).w).fold(0.0, f32::max);
+                let w = self
+                    .children
+                    .iter()
+                    .filter(|c| c.style.visible)
+                    .map(|c| c.measure(cx, inner_w).w)
+                    .fold(0.0, f32::max);
                 Size::new(w, hs.iter().sum::<f32>() + self.total_gap())
             }
             Kind::Stack => {
@@ -613,7 +665,13 @@ impl Node {
 
     /// Main-axis sizes of the children (0 for hidden ones). Fixed and auto children take
     /// their natural size; `Fill` children split what is left of `main_avail`.
-    fn sizes(&self, cx: &Cx, horizontal: bool, cross_avail: Option<f32>, main_avail: Option<f32>) -> Vec<f32> {
+    fn sizes(
+        &self,
+        cx: &Cx,
+        horizontal: bool,
+        cross_avail: Option<f32>,
+        main_avail: Option<f32>,
+    ) -> Vec<f32> {
         let mut out = Vec::with_capacity(self.children.len());
         let mut fixed = self.total_gap();
         let mut weight = 0.0;
@@ -622,8 +680,16 @@ impl Node {
                 out.push(0.0);
                 continue;
             }
-            let dim = if horizontal { c.style.width } else { c.style.height };
-            let m = if horizontal { c.measure(cx, None).w } else { c.measure(cx, cross_avail).h };
+            let dim = if horizontal {
+                c.style.width
+            } else {
+                c.style.height
+            };
+            let m = if horizontal {
+                c.measure(cx, None).w
+            } else {
+                c.measure(cx, cross_avail).h
+            };
             match (dim, main_avail) {
                 (Dim::Fill(w), Some(_)) => {
                     weight += w.max(0.0);
@@ -636,7 +702,11 @@ impl Node {
             }
         }
         if let Some(avail) = main_avail {
-            let share = if weight > 0.0 { (avail - fixed).max(0.0) / weight } else { 0.0 };
+            let share = if weight > 0.0 {
+                (avail - fixed).max(0.0) / weight
+            } else {
+                0.0
+            };
             for s in out.iter_mut().filter(|s| **s < 0.0) {
                 *s = (-*s - 1.0) * share;
             }
@@ -746,7 +816,9 @@ impl Node {
 
     /// Keep the caret inside the visible part of a text input.
     fn fix_input_scroll(&mut self, cx: &Cx, inner: Rect) {
-        let Kind::Input(i) = &mut self.kind else { return };
+        let Kind::Input(i) = &mut self.kind else {
+            return;
+        };
         let shaped = cx.text.shape(&i.display(), &i.style, cx.scale, None);
         let caret = shaped.cursor_x(i.display_index(i.cursor));
         let room = (inner.w - 2.0).max(0.0);
@@ -757,7 +829,11 @@ impl Node {
         if caret < s {
             s = caret;
         }
-        i.scroll_x = if shaped.width() <= room { 0.0 } else { s.max(0.0) };
+        i.scroll_x = if shaped.width() <= room {
+            0.0
+        } else {
+            s.max(0.0)
+        };
     }
 
     // Painting.
@@ -810,7 +886,13 @@ impl Node {
         if s.clip {
             p.restore();
         }
-        let border = if self.focused { s.focus_border.map(|c| (s.border.map_or(1.5, |b| b.0), c)).or(s.border) } else { s.border };
+        let border = if self.focused {
+            s.focus_border
+                .map(|c| (s.border.map_or(1.5, |b| b.0), c))
+                .or(s.border)
+        } else {
+            s.border
+        };
         if let Some((w, c)) = border {
             p.stroke_rounded_rect(r, s.radius, w, c);
         }
@@ -841,7 +923,12 @@ impl Node {
         let first = (l.scroll / l.row_height) as usize;
         let last = (((l.scroll + r.h) / l.row_height).ceil() as usize).min(l.items.len());
         for i in first..last {
-            let row = Rect::new(r.x, r.y + i as f32 * l.row_height - l.scroll, r.w, l.row_height);
+            let row = Rect::new(
+                r.x,
+                r.y + i as f32 * l.row_height - l.scroll,
+                r.w,
+                l.row_height,
+            );
             let selected = l.selected == Some(i);
             if selected {
                 p.fill_rounded_rect(row, l.row_radius, l.selected_bg);
@@ -859,15 +946,34 @@ impl Node {
             if let Some(sub) = &item.subtitle {
                 let shaped = cx.text.shape(sub, &l.subtitle_text, cx.scale, None);
                 let w = shaped.width().min((right - x) * 0.5);
-                let shaped = if shaped.width() > w { cx.text.shape(sub, &l.subtitle_text, cx.scale, Some(w)) } else { shaped };
-                p.draw_text(&shaped, Point::new(right - shaped.width(), row.y + (row.h - shaped.height()) / 2.0), l.subtitle_fg);
+                let shaped = if shaped.width() > w {
+                    cx.text.shape(sub, &l.subtitle_text, cx.scale, Some(w))
+                } else {
+                    shaped
+                };
+                p.draw_text(
+                    &shaped,
+                    Point::new(
+                        right - shaped.width(),
+                        row.y + (row.h - shaped.height()) / 2.0,
+                    ),
+                    l.subtitle_fg,
+                );
                 right -= shaped.width() + l.row_padding;
             }
             let natural = cx.text.shape(&item.title, &l.text, cx.scale, None);
             let avail = (right - x).max(0.0);
-            let shaped = if natural.width() > avail { cx.text.shape(&item.title, &l.text, cx.scale, Some(avail)) } else { natural };
+            let shaped = if natural.width() > avail {
+                cx.text.shape(&item.title, &l.text, cx.scale, Some(avail))
+            } else {
+                natural
+            };
             let fg = if selected { l.selected_fg } else { l.fg };
-            p.draw_text(&shaped, Point::new(x, row.y + (row.h - shaped.height()) / 2.0), fg);
+            p.draw_text(
+                &shaped,
+                Point::new(x, row.y + (row.h - shaped.height()) / 2.0),
+                fg,
+            );
         }
         p.restore();
     }
@@ -879,7 +985,11 @@ impl Node {
         if i.text.is_empty() {
             if !i.placeholder.is_empty() {
                 let s = cx.text.shape(&i.placeholder, &i.style, cx.scale, None);
-                p.draw_text(&s, Point::new(inner.x, inner.y + (inner.h - s.height()) / 2.0), i.placeholder_color);
+                p.draw_text(
+                    &s,
+                    Point::new(inner.x, inner.y + (inner.h - s.height()) / 2.0),
+                    i.placeholder_color,
+                );
             }
             let line = cx.text.shape("", &i.style, cx.scale, None);
             if self.focused {
@@ -893,8 +1003,14 @@ impl Node {
         let x0 = inner.x - i.scroll_x;
         if let Some(a) = i.anchor.filter(|a| *a != i.cursor) {
             let (lo, hi) = (a.min(i.cursor), a.max(i.cursor));
-            let (xa, xb) = (shaped.cursor_x(i.display_index(lo)), shaped.cursor_x(i.display_index(hi)));
-            p.fill_rect(Rect::new(x0 + xa, y, xb - xa, shaped.height()), i.selection_color);
+            let (xa, xb) = (
+                shaped.cursor_x(i.display_index(lo)),
+                shaped.cursor_x(i.display_index(hi)),
+            );
+            p.fill_rect(
+                Rect::new(x0 + xa, y, xb - xa, shaped.height()),
+                i.selection_color,
+            );
         }
         p.draw_text(&shaped, Point::new(x0, y), i.color);
         if self.focused {
@@ -913,12 +1029,20 @@ impl Node {
 impl TextInput {
     /// The text as displayed (bullets for passwords).
     pub(crate) fn display(&self) -> String {
-        if self.password { "\u{2022}".repeat(self.text.chars().count()) } else { self.text.clone() }
+        if self.password {
+            "\u{2022}".repeat(self.text.chars().count())
+        } else {
+            self.text.clone()
+        }
     }
 
     /// Map a byte index in `text` to the matching index in [`TextInput::display`].
     pub(crate) fn display_index(&self, idx: usize) -> usize {
-        if self.password { self.text[..idx.min(self.text.len())].chars().count() * '\u{2022}'.len_utf8() } else { idx }
+        if self.password {
+            self.text[..idx.min(self.text.len())].chars().count() * '\u{2022}'.len_utf8()
+        } else {
+            idx
+        }
     }
 
     /// Byte index in `text` for a byte index in the displayed string.
@@ -927,6 +1051,9 @@ impl TextInput {
             return disp;
         }
         let n = disp / '\u{2022}'.len_utf8();
-        self.text.char_indices().nth(n).map_or(self.text.len(), |(i, _)| i)
+        self.text
+            .char_indices()
+            .nth(n)
+            .map_or(self.text.len(), |(i, _)| i)
     }
 }

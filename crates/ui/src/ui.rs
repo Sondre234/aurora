@@ -92,6 +92,16 @@ impl Ui {
 
     // Tree access.
 
+    /// Natural size of the whole tree for an offered width (`None` = unconstrained);
+    /// use it to size an auto-height layer surface such as a toast.
+    pub fn natural_size(&self, avail_w: Option<f32>) -> Size {
+        let cx = Cx {
+            text: &self.text,
+            scale: self.scale,
+        };
+        self.root.measure(&cx, avail_w)
+    }
+
     pub fn node(&self, id: Id) -> Option<&Node> {
         find(&self.root, id)
     }
@@ -110,7 +120,9 @@ impl Ui {
     /// Mutate one node. Its old area is damaged now and its new area after relayout.
     /// Returns false when no node has that id.
     pub fn edit(&mut self, id: Id, f: impl FnOnce(&mut Node)) -> bool {
-        let Some(n) = find_mut(&mut self.root, id) else { return false };
+        let Some(n) = find_mut(&mut self.root, id) else {
+            return false;
+        };
         self.damage.add(n.damage_rect(n.rect));
         f(n);
         n.dirty = true;
@@ -179,7 +191,9 @@ impl Ui {
     /// new selection; with no selection yet, the first move lands on the first or last row.
     pub fn list_move(&mut self, id: Id, delta: i32) -> Option<usize> {
         let cur = self.list_selected(id);
-        let Kind::List(l) = &self.node(id)?.kind else { return None };
+        let Kind::List(l) = &self.node(id)?.kind else {
+            return None;
+        };
         let count = l.items.len();
         if count == 0 {
             return None;
@@ -216,8 +230,12 @@ impl Ui {
             return;
         }
         self.layout_dirty = false;
-        let cx = Cx { text: &self.text, scale: self.scale };
-        self.root.layout(&cx, Rect::new(0.0, 0.0, self.size.w, self.size.h));
+        let cx = Cx {
+            text: &self.text,
+            scale: self.scale,
+        };
+        self.root
+            .layout(&cx, Rect::new(0.0, 0.0, self.size.w, self.size.h));
         collect_damage(&mut self.root, &mut self.damage);
     }
 
@@ -225,7 +243,8 @@ impl Ui {
     /// scale change or [`Ui::invalidate_all`]). Call [`Ui::layout`] first.
     pub fn take_damage(&mut self) -> Vec<Rect> {
         if std::mem::take(&mut self.full_damage) {
-            self.damage.set_full(Rect::new(0.0, 0.0, self.size.w, self.size.h));
+            self.damage
+                .set_full(Rect::new(0.0, 0.0, self.size.w, self.size.h));
         }
         self.damage.take()
     }
@@ -233,7 +252,10 @@ impl Ui {
     /// Repaint `regions` (logical pixels): each is cleared to transparent and the tree is
     /// drawn into it.
     pub fn paint(&self, p: &mut dyn Painter, regions: &[Rect]) {
-        let cx = Cx { text: &self.text, scale: self.scale };
+        let cx = Cx {
+            text: &self.text,
+            scale: self.scale,
+        };
         for r in regions {
             p.save();
             p.clip_rect(*r);
@@ -377,7 +399,10 @@ impl Ui {
             }
         });
         if let Some(index) = selected {
-            out.push(UiEvent::Selected { list: target, index });
+            out.push(UiEvent::Selected {
+                list: target,
+                index,
+            });
         }
     }
 
@@ -608,7 +633,12 @@ fn prev_word(s: &str, mut i: usize) -> usize {
     while i > 0 && s[..i].chars().next_back().is_some_and(char::is_whitespace) {
         i = prev_char(s, i);
     }
-    while i > 0 && s[..i].chars().next_back().is_some_and(|c| !c.is_whitespace()) {
+    while i > 0
+        && s[..i]
+            .chars()
+            .next_back()
+            .is_some_and(|c| !c.is_whitespace())
+    {
         i = prev_char(s, i);
     }
     i
@@ -625,7 +655,9 @@ fn next_word(s: &str, mut i: usize) -> usize {
 }
 
 fn selection(i: &TextInput) -> Option<(usize, usize)> {
-    i.anchor.filter(|a| *a != i.cursor).map(|a| (a.min(i.cursor), a.max(i.cursor)))
+    i.anchor
+        .filter(|a| *a != i.cursor)
+        .map(|a| (a.min(i.cursor), a.max(i.cursor)))
 }
 
 fn delete_selection(i: &mut TextInput) -> bool {
@@ -655,21 +687,33 @@ fn edit_input(i: &mut TextInput, k: &KeyEvent) -> Outcome {
     match k.key {
         Key::Enter => Outcome::Submit,
         Key::Left => {
-            if !m.shift && let Some((a, _)) = selection(i) {
+            if !m.shift
+                && let Some((a, _)) = selection(i)
+            {
                 i.anchor = None;
                 i.cursor = a;
                 return Outcome::Moved;
             }
-            let to = if m.ctrl { prev_word(&i.text, i.cursor) } else { prev_char(&i.text, i.cursor) };
+            let to = if m.ctrl {
+                prev_word(&i.text, i.cursor)
+            } else {
+                prev_char(&i.text, i.cursor)
+            };
             move_to(i, to)
         }
         Key::Right => {
-            if !m.shift && let Some((_, b)) = selection(i) {
+            if !m.shift
+                && let Some((_, b)) = selection(i)
+            {
                 i.anchor = None;
                 i.cursor = b;
                 return Outcome::Moved;
             }
-            let to = if m.ctrl { next_word(&i.text, i.cursor) } else { next_char(&i.text, i.cursor) };
+            let to = if m.ctrl {
+                next_word(&i.text, i.cursor)
+            } else {
+                next_char(&i.text, i.cursor)
+            };
             move_to(i, to)
         }
         Key::Home => move_to(i, 0),
@@ -681,7 +725,11 @@ fn edit_input(i: &mut TextInput, k: &KeyEvent) -> Outcome {
             if i.cursor == 0 {
                 return Outcome::Moved;
             }
-            let from = if m.ctrl { prev_word(&i.text, i.cursor) } else { prev_char(&i.text, i.cursor) };
+            let from = if m.ctrl {
+                prev_word(&i.text, i.cursor)
+            } else {
+                prev_char(&i.text, i.cursor)
+            };
             i.text.replace_range(from..i.cursor, "");
             i.cursor = from;
             Outcome::Changed
@@ -693,7 +741,11 @@ fn edit_input(i: &mut TextInput, k: &KeyEvent) -> Outcome {
             if i.cursor >= i.text.len() {
                 return Outcome::Moved;
             }
-            let to = if m.ctrl { next_word(&i.text, i.cursor) } else { next_char(&i.text, i.cursor) };
+            let to = if m.ctrl {
+                next_word(&i.text, i.cursor)
+            } else {
+                next_char(&i.text, i.cursor)
+            };
             i.text.replace_range(i.cursor..to, "");
             Outcome::Changed
         }
@@ -724,7 +776,13 @@ fn edit_input(i: &mut TextInput, k: &KeyEvent) -> Outcome {
             _ => Outcome::Ignored,
         },
         _ => match &k.text {
-            Some(t) if !m.ctrl && !m.alt && !m.logo && !t.is_empty() && t.chars().all(|c| !c.is_control()) => {
+            Some(t)
+                if !m.ctrl
+                    && !m.alt
+                    && !m.logo
+                    && !t.is_empty()
+                    && t.chars().all(|c| !c.is_control()) =>
+            {
                 delete_selection(i);
                 i.text.insert_str(i.cursor, t);
                 i.cursor += t.len();

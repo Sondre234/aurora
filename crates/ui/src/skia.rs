@@ -18,8 +18,8 @@
 use std::rc::Rc;
 
 use tiny_skia::{
-    BlendMode, FillRule, FilterQuality, IntSize, Mask, Paint, Path, PathBuilder, Pixmap, PixmapMut, PixmapPaint, Rect as SkRect,
-    Stroke, Transform,
+    BlendMode, FillRule, FilterQuality, IntSize, Mask, Paint, Path, PathBuilder, Pixmap, PixmapMut,
+    PixmapPaint, Rect as SkRect, Stroke, Transform,
 };
 
 use crate::cache::{CacheStats, LruCache};
@@ -36,7 +36,10 @@ pub struct PaintBudgets {
 
 impl Default for PaintBudgets {
     fn default() -> Self {
-        Self { images: 32 << 20, shadows: 16 << 20 }
+        Self {
+            images: 32 << 20,
+            shadows: 16 << 20,
+        }
     }
 }
 
@@ -70,7 +73,11 @@ impl PaintCaches {
     }
 
     pub fn with_budgets(text: TextSystem, b: PaintBudgets) -> Self {
-        Self { text, images: LruCache::new("images", b.images), shadows: LruCache::new("shadows", b.shadows) }
+        Self {
+            text,
+            images: LruCache::new("images", b.images),
+            shadows: LruCache::new("shadows", b.shadows),
+        }
     }
 
     pub fn text(&self) -> &TextSystem {
@@ -100,7 +107,11 @@ impl PixelBuffer {
     /// Fully transparent buffer. Dimensions are clamped to at least 1.
     pub fn new(w: u32, h: u32) -> Self {
         let (w, h) = (w.max(1), h.max(1));
-        Self { w, h, data: vec![0; w as usize * h as usize * 4] }
+        Self {
+            w,
+            h,
+            data: vec![0; w as usize * h as usize * 4],
+        }
     }
 
     pub fn width(&self) -> u32 {
@@ -119,7 +130,12 @@ impl PixelBuffer {
     /// Premultiplied pixel as `[a, r, g, b]`. Panics when out of bounds.
     pub fn argb(&self, x: u32, y: u32) -> [u8; 4] {
         let i = (y as usize * self.w as usize + x as usize) * 4;
-        [self.data[i + 3], self.data[i + 2], self.data[i + 1], self.data[i]]
+        [
+            self.data[i + 3],
+            self.data[i + 2],
+            self.data[i + 1],
+            self.data[i],
+        ]
     }
 
     /// Un-premultiplied pixel color. Panics when out of bounds.
@@ -134,7 +150,8 @@ impl PixelBuffer {
 
     /// A painter over the whole buffer at the given scale.
     pub fn painter<'a>(&'a mut self, scale: f32, caches: &'a mut PaintCaches) -> SkiaPainter<'a> {
-        SkiaPainter::new(&mut self.data, self.w, self.h, scale, caches).expect("buffer sized by construction")
+        SkiaPainter::new(&mut self.data, self.w, self.h, scale, caches)
+            .expect("buffer sized by construction")
     }
 }
 
@@ -158,20 +175,34 @@ pub struct SkiaPainter<'a> {
 
 impl<'a> SkiaPainter<'a> {
     /// Paint into `data`, which must hold exactly `w * h * 4` bytes of ARGB8888.
-    pub fn new(data: &'a mut [u8], w: u32, h: u32, scale: f32, caches: &'a mut PaintCaches) -> Option<Self> {
+    pub fn new(
+        data: &'a mut [u8],
+        w: u32,
+        h: u32,
+        scale: f32,
+        caches: &'a mut PaintCaches,
+    ) -> Option<Self> {
         let pix = PixmapMut::from_bytes(data, w, h)?;
         Some(Self {
             pix,
             caches,
             scale: scale.max(0.25),
-            st: State { tx: 0.0, ty: 0.0, clip: [0, 0, w as i32, h as i32], mask: None },
+            st: State {
+                tx: 0.0,
+                ty: 0.0,
+                clip: [0, 0, w as i32, h as i32],
+                mask: None,
+            },
             stack: Vec::new(),
         })
     }
 
     /// Logical size of the target.
     pub fn logical_size(&self) -> Size {
-        Size::new(self.pix.width() as f32 / self.scale, self.pix.height() as f32 / self.scale)
+        Size::new(
+            self.pix.width() as f32 / self.scale,
+            self.pix.height() as f32 / self.scale,
+        )
     }
 
     fn snap(&self, r: Rect) -> [i32; 4] {
@@ -201,7 +232,12 @@ impl<'a> SkiaPainter<'a> {
         if self.st.mask.is_none() {
             let mut m = Mask::new(w as u32, h as u32)?;
             let rect = SkRect::from_ltrb(c[0] as f32, c[1] as f32, c[2] as f32, c[3] as f32)?;
-            m.fill_path(&PathBuilder::from_rect(rect), FillRule::Winding, false, Transform::identity());
+            m.fill_path(
+                &PathBuilder::from_rect(rect),
+                FillRule::Winding,
+                false,
+                Transform::identity(),
+            );
             self.st.mask = Some(Rc::new(m));
         }
         self.st.mask.clone()
@@ -248,7 +284,14 @@ impl<'a> SkiaPainter<'a> {
             return;
         }
         let mask = self.mask_for(b);
-        self.pix.draw_pixmap(x, y, pm.as_ref(), &PixmapPaint::default(), Transform::identity(), mask.as_deref());
+        self.pix.draw_pixmap(
+            x,
+            y,
+            pm.as_ref(),
+            &PixmapPaint::default(),
+            Transform::identity(),
+            mask.as_deref(),
+        );
     }
 }
 
@@ -275,7 +318,12 @@ impl Painter for SkiaPainter<'_> {
     fn clip_rect(&mut self, r: Rect) {
         let b = self.snap(r);
         let c = &mut self.st.clip;
-        *c = [c[0].max(b[0]), c[1].max(b[1]), c[2].min(b[2]), c[3].min(b[3])];
+        *c = [
+            c[0].max(b[0]),
+            c[1].max(b[1]),
+            c[2].min(b[2]),
+            c[3].min(b[3]),
+        ];
         if c[2] < c[0] {
             c[2] = c[0];
         }
@@ -291,10 +339,14 @@ impl Painter for SkiaPainter<'_> {
             return;
         }
         let mask = self.mask_for(b);
-        let Some(rect) = SkRect::from_ltrb(b[0] as f32, b[1] as f32, b[2] as f32, b[3] as f32) else { return };
+        let Some(rect) = SkRect::from_ltrb(b[0] as f32, b[1] as f32, b[2] as f32, b[3] as f32)
+        else {
+            return;
+        };
         let mut p = Self::paint(Color::TRANSPARENT, BlendMode::Source);
         p.anti_alias = false;
-        self.pix.fill_rect(rect, &p, Transform::identity(), mask.as_deref());
+        self.pix
+            .fill_rect(rect, &p, Transform::identity(), mask.as_deref());
     }
 
     fn fill_rounded_rect(&mut self, r: Rect, radius: f32, color: Color) {
@@ -308,13 +360,23 @@ impl Painter for SkiaPainter<'_> {
         let mask = self.mask_for(b);
         let rad = radius * self.scale;
         if rad < 0.5 {
-            let Some(rect) = SkRect::from_ltrb(b[0] as f32, b[1] as f32, b[2] as f32, b[3] as f32) else { return };
+            let Some(rect) = SkRect::from_ltrb(b[0] as f32, b[1] as f32, b[2] as f32, b[3] as f32)
+            else {
+                return;
+            };
             let mut p = Self::paint(color, BlendMode::SourceOver);
             p.anti_alias = false;
-            self.pix.fill_rect(rect, &p, Transform::identity(), mask.as_deref());
+            self.pix
+                .fill_rect(rect, &p, Transform::identity(), mask.as_deref());
         } else if let Some(path) = Self::rrect_path(b, rad, 0.0) {
             let p = Self::paint(color, BlendMode::SourceOver);
-            self.pix.fill_path(&path, &p, FillRule::Winding, Transform::identity(), mask.as_deref());
+            self.pix.fill_path(
+                &path,
+                &p,
+                FillRule::Winding,
+                Transform::identity(),
+                mask.as_deref(),
+            );
         }
     }
 
@@ -328,10 +390,17 @@ impl Painter for SkiaPainter<'_> {
         }
         let mask = self.mask_for(b);
         let w = (width * self.scale).max(1.0).round();
-        let Some(path) = Self::rrect_path(b, (radius * self.scale - w * 0.5).max(0.0), w * 0.5) else { return };
+        let Some(path) = Self::rrect_path(b, (radius * self.scale - w * 0.5).max(0.0), w * 0.5)
+        else {
+            return;
+        };
         let p = Self::paint(color, BlendMode::SourceOver);
-        let stroke = Stroke { width: w, ..Stroke::default() };
-        self.pix.stroke_path(&path, &p, &stroke, Transform::identity(), mask.as_deref());
+        let stroke = Stroke {
+            width: w,
+            ..Stroke::default()
+        };
+        self.pix
+            .stroke_path(&path, &p, &stroke, Transform::identity(), mask.as_deref());
     }
 
     fn shadow(&mut self, r: Rect, radius: f32, blur: f32, offset: Point, color: Color) {
@@ -344,7 +413,13 @@ impl Painter for SkiaPainter<'_> {
             return;
         }
         let blur_px = ((blur * self.scale).round() as u32).max(1);
-        let key = ShadowKey { w, h, radius: (radius * self.scale).round() as u32, blur: blur_px, color };
+        let key = ShadowKey {
+            w,
+            h,
+            radius: (radius * self.scale).round() as u32,
+            blur: blur_px,
+            color,
+        };
         let pm = match self.caches.shadows.get(&key) {
             Some(p) => p,
             None => {
@@ -382,7 +457,8 @@ impl Painter for SkiaPainter<'_> {
                 continue;
             }
             for y in y0..y1 {
-                let srow = ((y - gy) as usize * gi.w as usize + (x0 - gx) as usize) * if gi.color { 4 } else { 1 };
+                let srow = ((y - gy) as usize * gi.w as usize + (x0 - gx) as usize)
+                    * if gi.color { 4 } else { 1 };
                 let mut si = srow;
                 let mut di = (y as usize * pw as usize + x0 as usize) * 4;
                 for _ in x0..x1 {
@@ -400,7 +476,8 @@ impl Painter for SkiaPainter<'_> {
                         let inv = 255 - cov;
                         for (k, s) in src.iter().enumerate() {
                             let d = data[di + k] as u32;
-                            data[di + k] = ((*s as u32 * cov + 127) / 255 + (d * inv + 127) / 255).min(255) as u8;
+                            data[di + k] = ((*s as u32 * cov + 127) / 255 + (d * inv + 127) / 255)
+                                .min(255) as u8;
                         }
                         let d = data[di + 3] as u32;
                         data[di + 3] = (cov + (d * inv + 127) / 255).min(255) as u8;
@@ -417,11 +494,18 @@ impl Painter for SkiaPainter<'_> {
         if w == 0 || h == 0 || !self.visible(b) {
             return;
         }
-        let key = ImageKey { id: img.id, w, h, tint };
+        let key = ImageKey {
+            id: img.id,
+            w,
+            h,
+            tint,
+        };
         let pm = match self.caches.images.get(&key) {
             Some(p) => p,
             None => {
-                let Some(pm) = scale_image(img, w, h, tint) else { return };
+                let Some(pm) = scale_image(img, w, h, tint) else {
+                    return;
+                };
                 let pm = Rc::new(pm);
                 let bytes = pm.data().len();
                 self.caches.images.insert(key, pm.clone(), bytes);
@@ -436,7 +520,10 @@ impl Painter for SkiaPainter<'_> {
 fn scale_image(img: &Image, w: u32, h: u32, tint: Option<Color>) -> Option<Pixmap> {
     let src = Pixmap::from_vec(img.rgba.to_vec(), IntSize::from_wh(img.w, img.h)?)?;
     let mut dst = Pixmap::new(w, h)?;
-    let paint = PixmapPaint { quality: FilterQuality::Bilinear, ..PixmapPaint::default() };
+    let paint = PixmapPaint {
+        quality: FilterQuality::Bilinear,
+        ..PixmapPaint::default()
+    };
     let tf = Transform::from_scale(w as f32 / img.w as f32, h as f32 / img.h as f32);
     dst.draw_pixmap(0, 0, src.as_ref(), &paint, tf, None);
     for px in dst.data_mut().as_chunks_mut::<4>().0 {
@@ -459,11 +546,21 @@ fn build_shadow(k: &ShadowKey) -> Option<Pixmap> {
     let b = k.blur;
     let (w, h) = (k.w + 2 * b, k.h + 2 * b);
     let mut shape = Pixmap::new(w, h)?;
-    let path = SkiaPainter::rrect_path([b as i32, b as i32, (b + k.w) as i32, (b + k.h) as i32], k.radius as f32, 0.0)?;
+    let path = SkiaPainter::rrect_path(
+        [b as i32, b as i32, (b + k.w) as i32, (b + k.h) as i32],
+        k.radius as f32,
+        0.0,
+    )?;
     let mut p = Paint::default();
     p.set_color_rgba8(0, 0, 0, 255);
     shape.fill_path(&path, &p, FillRule::Winding, Transform::identity(), None);
-    let mut alpha: Vec<u8> = shape.data().as_chunks::<4>().0.iter().map(|px| px[3]).collect();
+    let mut alpha: Vec<u8> = shape
+        .data()
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|px| px[3])
+        .collect();
     let r = (b / 2).max(1) as usize;
     for _ in 0..3 {
         box_blur(&mut alpha, w as usize, h as usize, r);
@@ -525,7 +622,10 @@ mod tests {
         {
             let mut p = buf.painter(1.0, &mut c);
             p.fill_rect(Rect::new(0.0, 0.0, 10.0, 10.0), Color::rgb(255, 0, 0));
-            p.fill_rect(Rect::new(10.0, 0.0, 10.0, 10.0), Color::rgba(0, 0, 255, 128));
+            p.fill_rect(
+                Rect::new(10.0, 0.0, 10.0, 10.0),
+                Color::rgba(0, 0, 255, 128),
+            );
         }
         assert_eq!(buf.argb(5, 5), [255, 255, 0, 0]);
         assert_eq!(buf.pixel(5, 5), Color::rgb(255, 0, 0));
@@ -574,7 +674,8 @@ mod tests {
     fn fractional_scale_snaps_edges() {
         let mut c = caches();
         let mut buf = PixelBuffer::new(30, 30);
-        buf.painter(1.5, &mut c).fill_rect(Rect::new(2.0, 2.0, 10.0, 10.0), Color::WHITE);
+        buf.painter(1.5, &mut c)
+            .fill_rect(Rect::new(2.0, 2.0, 10.0, 10.0), Color::WHITE);
         // 2*1.5=3 .. 12*1.5=18: crisp, no partial coverage at the edge.
         assert_eq!(buf.pixel(3, 3), Color::WHITE);
         assert_eq!(buf.pixel(17, 17), Color::WHITE);
@@ -586,7 +687,12 @@ mod tests {
     fn stroke_stays_inside() {
         let mut c = caches();
         let mut buf = PixelBuffer::new(20, 20);
-        buf.painter(1.0, &mut c).stroke_rounded_rect(Rect::new(2.0, 2.0, 16.0, 16.0), 0.0, 2.0, Color::WHITE);
+        buf.painter(1.0, &mut c).stroke_rounded_rect(
+            Rect::new(2.0, 2.0, 16.0, 16.0),
+            0.0,
+            2.0,
+            Color::WHITE,
+        );
         assert_eq!(buf.pixel(2, 10), Color::WHITE);
         assert_eq!(buf.pixel(3, 10), Color::WHITE);
         assert_eq!(buf.pixel(1, 10).a, 0);
@@ -601,7 +707,11 @@ mod tests {
         {
             let mut p = buf.painter(1.0, &mut c);
             p.draw_image(&img, Rect::new(0.0, 0.0, 8.0, 8.0), None);
-            p.draw_image(&img, Rect::new(10.0, 0.0, 8.0, 8.0), Some(Color::rgb(0, 255, 0)));
+            p.draw_image(
+                &img,
+                Rect::new(10.0, 0.0, 8.0, 8.0),
+                Some(Color::rgb(0, 255, 0)),
+            );
         }
         assert_eq!(buf.pixel(4, 4), Color::WHITE);
         assert_eq!(buf.pixel(14, 4), Color::rgb(0, 255, 0));
@@ -609,7 +719,8 @@ mod tests {
         let (images, _) = c.stats();
         assert_eq!(images.entries, 2);
         // Second draw of the same image at the same size hits the cache.
-        buf.painter(1.0, &mut c).draw_image(&img, Rect::new(0.0, 0.0, 8.0, 8.0), None);
+        buf.painter(1.0, &mut c)
+            .draw_image(&img, Rect::new(0.0, 0.0, 8.0, 8.0), None);
         assert_eq!(c.stats().0.hits, 1);
     }
 
@@ -618,14 +729,23 @@ mod tests {
         let mut c = caches();
         let mut buf = PixelBuffer::new(60, 60);
         let draw = |buf: &mut PixelBuffer, c: &mut PaintCaches| {
-            buf.painter(1.0, c).shadow(Rect::new(20.0, 20.0, 20.0, 20.0), 4.0, 10.0, Point::new(0.0, 0.0), Color::BLACK);
+            buf.painter(1.0, c).shadow(
+                Rect::new(20.0, 20.0, 20.0, 20.0),
+                4.0,
+                10.0,
+                Point::new(0.0, 0.0),
+                Color::BLACK,
+            );
         };
         draw(&mut buf, &mut c);
         let center = buf.pixel(30, 30).a;
         let near = buf.pixel(18, 30).a;
         let far = buf.pixel(12, 30).a;
         assert!(center > 200, "center {center}");
-        assert!(near < center && far < near && far > 0 || far == 0, "{center} {near} {far}");
+        assert!(
+            near < center && far < near && far > 0 || far == 0,
+            "{center} {near} {far}"
+        );
         draw(&mut buf, &mut c);
         assert_eq!(c.stats().1.hits, 1);
     }
@@ -640,8 +760,12 @@ mod tests {
         let shaped = ts.shape("Hello", &crate::text::TextStyle::sized(20.0), 1.0, None);
         assert!(shaped.width() > 20.0 && shaped.height() >= 20.0);
         let mut buf = PixelBuffer::new(120, 40);
-        buf.painter(1.0, &mut c).draw_text(&shaped, Point::new(4.0, 4.0), Color::WHITE);
-        let lit = (0..40).flat_map(|y| (0..120).map(move |x| (x, y))).filter(|&(x, y)| buf.pixel(x, y).a > 0).count();
+        buf.painter(1.0, &mut c)
+            .draw_text(&shaped, Point::new(4.0, 4.0), Color::WHITE);
+        let lit = (0..40)
+            .flat_map(|y| (0..120).map(move |x| (x, y)))
+            .filter(|&(x, y)| buf.pixel(x, y).a > 0)
+            .count();
         assert!(lit > 50, "lit {lit}");
         // Nothing outside the run's box (plus a pixel of overhang).
         assert_eq!(buf.pixel(119, 39).a, 0);

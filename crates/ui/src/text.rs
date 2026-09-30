@@ -23,8 +23,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use cosmic_text::{
-    Attrs, Buffer, CacheKey, Ellipsize, EllipsizeHeightLimit, Family, FontSystem, Metrics, Shaping, Style, SwashCache,
-    SwashContent, Weight, Wrap,
+    Attrs, Buffer, CacheKey, Ellipsize, EllipsizeHeightLimit, Family, FontSystem, Metrics, Shaping,
+    Style, SwashCache, SwashContent, Weight, Wrap,
 };
 
 use crate::cache::{CacheStats, LruCache};
@@ -64,13 +64,23 @@ pub struct TextStyle {
 
 impl Default for TextStyle {
     fn default() -> Self {
-        Self { size: 14.0, weight: 400, italic: false, family: FontFamily::SansSerif, line_height: 1.3, wrap: TextWrap::Ellipsis }
+        Self {
+            size: 14.0,
+            weight: 400,
+            italic: false,
+            family: FontFamily::SansSerif,
+            line_height: 1.3,
+            wrap: TextWrap::Ellipsis,
+        }
     }
 }
 
 impl TextStyle {
     pub fn sized(size: f32) -> Self {
-        Self { size, ..Self::default() }
+        Self {
+            size,
+            ..Self::default()
+        }
     }
 
     pub fn bold(mut self) -> Self {
@@ -98,7 +108,10 @@ pub struct TextBudgets {
 
 impl Default for TextBudgets {
     fn default() -> Self {
-        Self { shaped: 16 << 20, glyphs: 48 << 20 }
+        Self {
+            shaped: 16 << 20,
+            glyphs: 48 << 20,
+        }
     }
 }
 
@@ -182,7 +195,11 @@ impl ShapedText {
                 return (c.x + c.w * f) / self.scale;
             }
         }
-        if idx >= self.text_len { self.end_x / self.scale } else { 0.0 }
+        if idx >= self.text_len {
+            self.end_x / self.scale
+        } else {
+            0.0
+        }
     }
 
     /// Byte index of the caret position nearest to logical x (first line).
@@ -268,13 +285,22 @@ impl TextSystem {
 
     pub fn stats(&self) -> TextCacheStats {
         let i = self.0.borrow();
-        TextCacheStats { shaped: i.shaped.stats(), glyphs: i.glyphs.stats() }
+        TextCacheStats {
+            shaped: i.shaped.stats(),
+            glyphs: i.glyphs.stats(),
+        }
     }
 
     /// Shape `text` for a surface of the given `scale`. `max_width` is in logical pixels:
     /// with [`TextWrap::Ellipsis`] the run is cut to it, with [`TextWrap::Word`] it wraps
     /// at it. `None` means unconstrained. Results are cached.
-    pub fn shape(&self, text: &str, style: &TextStyle, scale: f32, max_width: Option<f32>) -> Arc<ShapedText> {
+    pub fn shape(
+        &self,
+        text: &str,
+        style: &TextStyle,
+        scale: f32,
+        max_width: Option<f32>,
+    ) -> Arc<ShapedText> {
         let scale = scale.max(0.25);
         let px = (style.size * scale).max(1.0);
         let key = ShapeKey {
@@ -291,7 +317,14 @@ impl TextSystem {
         if let Some(hit) = i.shaped.get(&key) {
             return hit;
         }
-        let shaped = Arc::new(shape_uncached(&mut i.fonts, text, style, px, scale, key.max_w));
+        let shaped = Arc::new(shape_uncached(
+            &mut i.fonts,
+            text,
+            style,
+            px,
+            scale,
+            key.max_w,
+        ));
         let bytes = shaped.bytes() + key.text.len();
         i.shaped.insert(key, shaped.clone(), bytes);
         shaped
@@ -303,7 +336,12 @@ impl TextSystem {
         if let Some(g) = i.glyphs.get(&key) {
             return g;
         }
-        let Inner { fonts, swash, glyphs, .. } = &mut *i;
+        let Inner {
+            fonts,
+            swash,
+            glyphs,
+            ..
+        } = &mut *i;
         let img = match swash.get_image_uncached(fonts, key) {
             Some(im) if im.placement.width > 0 && im.placement.height > 0 => GlyphImage {
                 left: im.placement.left,
@@ -314,7 +352,14 @@ impl TextSystem {
                 // Subpixel masks are not requested; treat any non-color content as 8-bit.
                 data: im.data,
             },
-            _ => GlyphImage { left: 0, top: 0, w: 0, h: 0, color: false, data: Vec::new() },
+            _ => GlyphImage {
+                left: 0,
+                top: 0,
+                w: 0,
+                h: 0,
+                color: false,
+                data: Vec::new(),
+            },
         };
         let bytes = std::mem::size_of::<GlyphImage>() + img.data.len();
         let img = Arc::new(img);
@@ -323,18 +368,28 @@ impl TextSystem {
     }
 }
 
-fn shape_uncached(fonts: &mut FontSystem, text: &str, style: &TextStyle, px: f32, scale: f32, max_w: u32) -> ShapedText {
+fn shape_uncached(
+    fonts: &mut FontSystem,
+    text: &str,
+    style: &TextStyle,
+    px: f32,
+    scale: f32,
+    max_w: u32,
+) -> ShapedText {
     let family = match &style.family {
         FontFamily::SansSerif => Family::SansSerif,
         FontFamily::Serif => Family::Serif,
         FontFamily::Monospace => Family::Monospace,
         FontFamily::Named(n) => Family::Name(n),
     };
-    let attrs = Attrs::new().family(family).weight(Weight(style.weight)).style(if style.italic {
-        Style::Italic
-    } else {
-        Style::Normal
-    });
+    let attrs = Attrs::new()
+        .family(family)
+        .weight(Weight(style.weight))
+        .style(if style.italic {
+            Style::Italic
+        } else {
+            Style::Normal
+        });
     let line_h = (px * style.line_height).ceil();
     let mut buf = Buffer::new(fonts, Metrics::new(px, line_h));
     let width = (max_w > 0).then_some(max_w as f32);
@@ -348,7 +403,9 @@ fn shape_uncached(fonts: &mut FontSystem, text: &str, style: &TextStyle, px: f32
         TextWrap::Word { max_lines } => {
             buf.set_wrap(Wrap::WordOrGlyph);
             if max_lines > 0 && width.is_some() {
-                buf.set_ellipsize(Ellipsize::End(EllipsizeHeightLimit::Lines(max_lines as usize)));
+                buf.set_ellipsize(Ellipsize::End(EllipsizeHeightLimit::Lines(
+                    max_lines as usize,
+                )));
             }
         }
     }
@@ -365,9 +422,18 @@ fn shape_uncached(fonts: &mut FontSystem, text: &str, style: &TextStyle, px: f32
         baseline.get_or_insert(run.line_y);
         for g in run.glyphs {
             let p = g.physical((0.0, run.line_y), 1.0);
-            glyphs.push(PlacedGlyph { key: p.cache_key, x: p.x, y: p.y });
+            glyphs.push(PlacedGlyph {
+                key: p.cache_key,
+                x: p.x,
+                y: p.y,
+            });
             if first {
-                clusters.push(Cluster { start: g.start, end: g.end, x: g.x, w: g.w });
+                clusters.push(Cluster {
+                    start: g.start,
+                    end: g.end,
+                    x: g.x,
+                    w: g.w,
+                });
             }
         }
         first = false;
