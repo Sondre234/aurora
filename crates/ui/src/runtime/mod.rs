@@ -246,6 +246,10 @@ struct Surf {
     size: (u32, u32),
     configured: bool,
     hidden: bool,
+    /// A buffer is attached: the compositor has the surface mapped.
+    mapped: bool,
+    /// `show` committed and the surface waits for the compositor's configure to map.
+    show_pending: bool,
     frame_pending: bool,
     frac: Option<WpFractionalScaleV1>,
     viewport: Option<WpViewport>,
@@ -482,7 +486,11 @@ impl<A: App> State<A> {
         );
         s.size = size;
         s.configured = true;
-        s.hidden = false;
+        // A configure never maps a surface that was hidden on purpose; only `show` does.
+        if s.show_pending {
+            s.show_pending = false;
+            s.hidden = false;
+        }
         let logical = Size::new(size.0 as f32, size.1 as f32);
         s.ui.set_size(logical);
         s.ui.set_scale(s.scale());
@@ -627,6 +635,8 @@ impl<A: App> Runtime<A> {
             size: (0, 0),
             configured: false,
             hidden: false,
+            mapped: false,
+            show_pending: false,
             frame_pending: false,
             frac,
             viewport,
@@ -665,20 +675,30 @@ impl<A: App> Runtime<A> {
     }
 
     /// Unmap a layer surface but keep its `Ui`, buffers and caches warm.
+    ///
+    /// A surface with a buffer is unmapped by attaching null; the compositor then starts a
+    /// new configure cycle. One that never mapped is already invisible and its configure
+    /// still stands (the compositor sends none for a commit without a buffer), so it is only
+    /// flagged hidden.
     pub fn hide(&mut self, id: SurfaceId) {
         if let Some(s) = self.surf_mut(id)
             && matches!(s.role, Role::Layer(_))
             && !s.hidden
         {
-            s.wl.attach(None, 0, 0);
-            s.wl.commit();
+            if s.mapped {
+                s.wl.attach(None, 0, 0);
+                s.wl.commit();
+                s.mapped = false;
+                s.configured = false;
+            }
             s.hidden = true;
-            s.configured = false;
+            s.show_pending = false;
             s.frame_pending = false;
         }
     }
 
-    /// Map a hidden layer surface again (it is painted after the compositor configures it).
+    /// Map a hidden layer surface again: straight away when its configure still stands,
+    /// else after the compositor configures it.
     pub fn show(&mut self, id: SurfaceId) {
         if let Some(s) = self.surf_mut(id)
             && s.hidden
@@ -689,8 +709,12 @@ impl<A: App> Runtime<A> {
             if let Some(p) = &mut s.pool {
                 p.owed = full_owed(p.size());
             }
+            if s.configured {
+                s.hidden = false;
+            } else {
+                s.show_pending = true;
+            }
             s.wl.commit();
-            // `hidden` clears when the configure arrives.
         }
     }
 
@@ -747,6 +771,8 @@ impl<A: App> Runtime<A> {
             size: (0, 0),
             configured: false,
             hidden: false,
+            mapped: false,
+            show_pending: false,
             frame_pending: false,
             frac,
             viewport,
@@ -857,6 +883,7 @@ impl<A: App> Runtime<A> {
             _ => s.wl.set_buffer_scale(s.int_scale.max(1)),
         }
         s.wl.attach(Some(pool.buffer(slot)), 0, 0);
+        s.mapped = true;
         for r in &frame {
             s.wl.damage_buffer(r.x as i32, r.y as i32, r.w as i32, r.h as i32);
         }
