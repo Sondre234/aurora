@@ -26,13 +26,14 @@ file manager never takes down the session.
 | Crate | Job |
 |---|---|
 | `comp` | Compositor: DRM/KMS, GBM, EGL, tiling, animation, blur/shadow shaders |
-| `ipc` | Typed protocol shared by every service |
-| `ui` | Shared GPU UI toolkit (wgpu + cosmic-text) |
+| `ipc` | Typed protocol shared by every service (length-prefixed postcard over a unix socket) |
+| `ctl` | `auroractl`: debug and scripting client for the IPC |
+| `ui` | Shared UI toolkit: `Painter` trait, tiny-skia + cosmic-text into wl_shm (a wgpu backend can follow) |
 | `theme` | Palette, fonts, motion curves, pushed live to services |
-| `shell` | Bar, workspace overview, quick settings |
-| `launcher` | App launcher with local-LLM hook |
-| `notifd` | `org.freedesktop.Notifications` |
-| `lock` | `ext-session-lock` screen locker |
+| `shell` | `aurora-shell`: bar (workspaces, focused title, clock) |
+| `launcher` | `aurora-launcher`: app launcher daemon, toggled with `aurora-launcher toggle` |
+| `notifd` | `aurora-notifd`: `org.freedesktop.Notifications` |
+| `lock` | `aurora-lock`: `ext-session-lock` screen locker |
 | `settingsd` | Config daemon + GUI |
 | `term` | GPU terminal |
 | `files` | File manager |
@@ -45,7 +46,8 @@ Crates are added as their milestone is reached.
 - [x] **M1** Real session: DRM backend on the 4090, libinput, launch from a TTY
 - [x] **M2** Usable: tiling, workspaces, XWayland, layer-shell, config, multi-monitor. Verified on hardware
 - [x] **M3** The look: animation engine, rounded corners, shadows, blur, live overview, X11 scaling. Verified on hardware
-- [ ] **M4+** Services: `ipc`, shell, launcher, notifd, lock, then `term` and `files`
+- [ ] **M4** Services: `ipc`, `theme`, shell bar, launcher, notifd, lock. Plan in [docs/m4-plan.md](docs/m4-plan.md), hardware checklist there
+- [ ] **M5** `term` and `files`
 
 ## Using it (M2)
 
@@ -80,8 +82,8 @@ Default binds (`Mod` is Super):
 Emergency chords are hardcoded and cannot be rebound or removed: Ctrl+Alt+BackSpace or
 Ctrl+AltGr+BackSpace quits, Ctrl+Alt+F1..F12 or Ctrl+AltGr+F1..F12 switches VT.
 
-Known limits: there is no ext-workspace or foreign-toplevel protocol yet, so a bar's
-workspace widget waits for the M4 IPC. X11 apps are unscaled by default, so they look
+Known limits: there is no ext-workspace protocol (M4 services read workspaces over the
+IPC instead; ext-foreign-toplevel-list is served). X11 apps are unscaled by default, so they look
 blurry on a scaled output; set `[xwayland] scale` to that output's scale (read when
 XWayland starts, see the example config) for sharp native-resolution X11 windows (not yet
 verified on hardware). wlr-screencopy is not offered (ext-image-copy-capture is, which is what grim uses). Aurora owns
@@ -105,6 +107,60 @@ reload:
 
 Scripted checks: run `scripts/qa-nested.sh` with `WAYLAND_DISPLAY` set to a headless host
 (never your live session). See [docs/m2-plan.md](docs/m2-plan.md).
+
+## Using it (M4)
+
+Status: the compositor side (IPC, supervision, theme, session lock) is in; the service
+binaries land per stream, see [docs/m4-plan.md](docs/m4-plan.md). Nothing is started for
+you, everything below is opt-in.
+
+**Services.** A `[services.<name>]` table in `config.toml` makes Aurora start and supervise
+a helper after its socket exists (keys: `command`, `enabled`, `autostart`, `restart`
+`never|on-failure|always`, `backoff_ms`, `max_backoff_ms`; commented examples in
+[config/aurora.example.toml](config/aurora.example.toml)). A dying service is restarted with
+doubling backoff, a reload never starts a running one twice, and all of them are stopped
+when the compositor exits. Children get `WAYLAND_DISPLAY` and `AURORA_IPC_SOCK`. Example:
+
+```toml
+[services.shell]
+command = "aurora-shell"
+restart = "always"
+[services.launcher]
+command = "aurora-launcher"
+restart = "always"
+[services.lock]          # started only by the `lock` action, never at login
+command = "aurora-lock"
+autostart = false
+restart = "always"       # restarted only while the session is locked
+```
+
+**Binds.** `"Mod+space" = "spawn aurora-launcher toggle"` and `"Mod+l" = "lock"` are the
+suggested ones (not bound by default). While locked every bind except the emergency chords
+is refused, and a dead lock client leaves the session locked.
+
+**IPC socket.** `$XDG_RUNTIME_DIR/aurora/ipc.sock` (directory 0700, same-uid peers only),
+overridden by `AURORA_IPC_SOCK`. Clients get a full snapshot on connect, then deltas;
+topics are workspaces, windows, focus, outputs, theme and config. Slow subscribers are
+coalesced, resynced with a fresh snapshot, and finally dropped; they never stall the
+compositor.
+
+**auroractl.** `auroractl snapshot` prints outputs, workspaces, windows (with titles) as
+JSON, `auroractl events [topic...]` prints one JSON event per line, and
+`auroractl raw '{"SwitchWorkspace":{"output":null,"index":2}}'` sends any request
+(`'"ListWindows"'`, `'"ReloadConfig"'`, `'"Lock"'`, ...).
+
+**Theme.** `theme.toml` next to `config.toml` (sections `[palette]`, `[fonts]`, `[shape]`,
+`[motion]`, every key optional, colors as `#rrggbb[aa]`). Reload (Super+Shift+r or
+SIGUSR1) re-reads it and pushes the new theme to every service, which repaint without a
+restart. A syntax error keeps the current theme and logs why.
+
+**notifd and dunst.** `aurora-notifd` speaks `org.freedesktop.Notifications`; run it
+only when you mean to replace dunst. QA uses a private `dbus-daemon`, never your session bus.
+
+Scripted checks: `scripts/qa-nested.sh ipc services theme shell launcher notifd lock`
+(same rules as before: a headless host, never your live session). A scenario whose binary
+is not built is skipped. Fullscreen windows hide the bar (Top layer); the launcher and
+toasts use the Overlay layer.
 
 ## Performance
 
