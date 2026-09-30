@@ -44,7 +44,7 @@ Crates are added as their milestone is reached.
 - [x] **M0** Nested compositor under an existing desktop (winit backend), one client shows
 - [x] **M1** Real session: DRM backend on the 4090, libinput, launch from a TTY
 - [x] **M2** Usable: tiling, workspaces, XWayland, layer-shell, config, multi-monitor. Verified on hardware
-- [ ] **M3** The look: animation engine, blur/shadows, live overview
+- [ ] **M3** The look: animation engine (window move/open/close, workspace slide), rounded corners, shadows and blur, live overview, scaled X11. Plan in [docs/m3-plan.md](docs/m3-plan.md)
 - [ ] **M4+** Services: `ipc`, shell, launcher, notifd, lock, then `term` and `files`
 
 ## Using it (M2)
@@ -80,10 +80,25 @@ Emergency chords are hardcoded and cannot be rebound or removed: Ctrl+Alt+BackSp
 Ctrl+AltGr+BackSpace quits, Ctrl+Alt+F1..F12 or Ctrl+AltGr+F1..F12 switches VT.
 
 Known limits: there is no ext-workspace or foreign-toplevel protocol yet, so a bar's
-workspace widget waits for the M4 IPC. X11 apps are never scaled (M3 item), so keep the monitor you run Proton games on at scale 1. wlr-screencopy
+workspace widget waits for the M4 IPC. X11 apps are never scaled (M3 item, see `xwayland.scale` once it lands), so keep the monitor you run Proton games on at scale 1. wlr-screencopy
 is not offered (ext-image-copy-capture is, which is what grim uses). Aurora owns
 `zwp_virtual_keyboard_v1` and routes its keys through the bind table, so any client can
 inject key presses and trigger binds; set `allow_virtual_keyboard = false` to turn that off.
+
+## Using it (M3)
+
+Placeholder, filled in when the M3 streams are merged. The new config sections, all
+documented in [config/aurora.example.toml](config/aurora.example.toml) and applied live on
+reload:
+
+- `[animations]`: `enabled`, `duration_ms` (0..=10000), `curve` (`linear`, `ease-out`,
+  `ease-in-out`, `spring [damping]`, `bezier x1 y1 x2 y2`), and per-kind overrides
+  `window_move`, `window_open`, `window_close`, `workspace`, `fade` (each may set
+  `enabled`, `duration_ms`, `curve`). `enabled = false` snaps like M2.
+- `[decoration]`: `rounding` (px), `shadow`, `shadow_radius`, `shadow_color`
+  (`#rrggbb[aa]`), `blur`, `blur_passes`, `blur_radius`, `inactive_opacity`. Skipped for
+  fullscreen windows.
+- Overview bind and `xwayland.scale`: to be documented when they land.
 
 Scripted checks: run `scripts/qa-nested.sh` with `WAYLAND_DISPLAY` set to a headless host
 (never your live session). See [docs/m2-plan.md](docs/m2-plan.md).
