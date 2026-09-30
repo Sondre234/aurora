@@ -1,0 +1,15 @@
+[package]
+name = "aurora-theme"
+description = "Aurora theme: palette, fonts, shape and motion, loaded from TOML and pushed live over IPC"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = ["toml"]
+# TOML loading. Off for consumers that only need the wire types (the ipc crate).
+toml = ["dep:toml"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+toml = { version = "0.8", optional = true }
