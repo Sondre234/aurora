@@ -15,13 +15,18 @@ use smithay::{
     },
     desktop::{Space, Window, space::SpaceElement},
     output::Output,
+    reexports::wayland_server::Resource,
     utils::{Logical, Point, Rectangle, Scale, Size},
     wayland::shell::wlr_layer::Layer,
 };
 
 use crate::{
     config::Decoration,
-    effects::{self, Programs, shadow},
+    effects::{
+        self, Programs,
+        blur::{self, BlurElement, Owner},
+        shadow,
+    },
     layers::layers_front_to_back,
     wm::window::{WindowElement, WindowRenderElement},
 };
@@ -37,6 +42,7 @@ render_elements! {
     Window=WindowRenderElement,
     Layer=Wrap<WaylandSurfaceRenderElement<GlesRenderer>>,
     Shadow=PixelShaderElement,
+    Blur=BlurElement,
 }
 
 /// Per-frame inputs of the effects, built once per render and passed down to the builder.
@@ -94,11 +100,19 @@ fn push_layers(
     output: &Output,
     kind: Layer,
     scale: Scale<f64>,
+    mut blur: Option<&mut Vec<blur::Request>>,
 ) {
     for (layer, at) in layers_front_to_back(output, kind) {
+        let start = out.len();
         let elements: Vec<Wrap<WaylandSurfaceRenderElement<GlesRenderer>>> =
             layer.render_elements(renderer, at.to_physical_precise_round(scale), scale, 1.0);
         out.extend(elements.into_iter().map(OutputElement::Layer));
+        if let Some(blur) = blur.as_deref_mut() {
+            let geo = layer.geometry();
+            let rect = Rectangle::new(at + geo.loc, geo.size);
+            let owner = Owner::Layer(layer.wl_surface().id());
+            blur.extend(blur::want(out, start, owner, rect, scale));
+        }
     }
 }
 
@@ -116,10 +130,30 @@ pub fn output_elements(
     let geo = space.output_geometry(output)?;
     let scale = Scale::from(output.current_scale().fractional_scale());
     let mut out = Vec::new();
+    // Blur requests, front to back; `blur::apply` inserts the elements once the list is done.
+    let blurring = blur::active(fx, output);
+    let mut requests = Vec::new();
+    if !blurring {
+        blur::release(renderer, output);
+    }
 
-    push_layers(&mut out, renderer, output, Layer::Overlay, scale);
+    push_layers(
+        &mut out,
+        renderer,
+        output,
+        Layer::Overlay,
+        scale,
+        blurring.then_some(&mut requests),
+    );
     if !top_hidden(output) {
-        push_layers(&mut out, renderer, output, Layer::Top, scale);
+        push_layers(
+            &mut out,
+            renderer,
+            output,
+            Layer::Top,
+            scale,
+            blurring.then_some(&mut requests),
+        );
     }
 
     // Menus and tooltips belong to no workspace: they stay above every window.
@@ -166,18 +200,32 @@ pub fn output_elements(
         // Hooks, in front-to-back order for this window: (1) the window's own elements below
         // (the corner program and `current - target` offset/scale apply there), (2) its
         // shadow, (3) blur of what is behind it. Streams push their variants here.
+        let start = out.len();
         out.extend(
             window
                 .render_elements_fx(renderer, at, scale, fx_on)
                 .into_iter()
                 .map(OutputElement::Window),
         );
+        if blurring {
+            let rect = Rectangle::new(loc - geo.loc, SpaceElement::geometry(window).size);
+            requests.extend(blur::want(
+                &out,
+                start,
+                Owner::Win(window.id()),
+                rect,
+                scale,
+            ));
+        }
         if let Some(shadow) = fx_on.and_then(|fx| window.shadow_element(at, fx)) {
             out.push(OutputElement::Shadow(shadow));
         }
     }
 
-    push_layers(&mut out, renderer, output, Layer::Bottom, scale);
-    push_layers(&mut out, renderer, output, Layer::Background, scale);
+    push_layers(&mut out, renderer, output, Layer::Bottom, scale, None);
+    push_layers(&mut out, renderer, output, Layer::Background, scale, None);
+    if blurring {
+        blur::apply(renderer, output, fx, &mut out, &requests);
+    }
     Some(out)
 }

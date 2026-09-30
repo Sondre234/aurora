@@ -10,6 +10,8 @@ use smithay::backend::renderer::gles::{GlesError, GlesPixelProgram, GlesRenderer
 pub mod corners;
 pub mod shadow;
 
+pub mod blur;
+
 /// Every compiled program. Cheap to clone (programs are reference counted), so a frame copies
 /// it out of the renderer and keeps using the renderer mutably.
 #[derive(Clone, Default)]
@@ -20,6 +22,8 @@ pub struct Programs {
     pub border: Option<GlesPixelProgram>,
     /// How many programs `compile` built, for the startup log line.
     compiled: usize,
+    /// Dual-Kawase down and up passes; `None` when compilation failed.
+    pub blur: Option<blur::BlurPrograms>,
 }
 
 impl Programs {
@@ -27,6 +31,7 @@ impl Programs {
     /// one effect and not the session.
     fn compile(renderer: &mut GlesRenderer) -> Self {
         let mut programs = Self::default();
+        programs.blur = blur::BlurPrograms::compile(renderer);
         programs.corners = compile("corners", || {
             renderer.compile_custom_texture_shader(corners::SHADER, &corners::uniform_names())
         });
@@ -38,7 +43,8 @@ impl Programs {
             renderer
                 .compile_custom_pixel_shader(shadow::BORDER_SHADER, &shadow::border_uniform_names())
         });
-        programs.compiled = usize::from(programs.corners.is_some())
+        programs.compiled = 2 * usize::from(programs.blur.is_some())
+            + usize::from(programs.corners.is_some())
             + usize::from(programs.shadow.is_some())
             + usize::from(programs.border.is_some());
         programs
