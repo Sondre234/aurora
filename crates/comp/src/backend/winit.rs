@@ -72,6 +72,8 @@ pub fn init(
             WinitEvent::Input(event) => state.process_input_event(event),
             WinitEvent::Redraw => {
                 let size = backend.window_size();
+                // The nested window redraws every frame, so the result needs no keep-alive.
+                state.wm.tick(Duration::from(state.clock.now()));
                 if let Err(err) = draw(
                     &mut backend,
                     &mut damage_tracker,

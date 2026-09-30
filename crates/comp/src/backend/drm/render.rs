@@ -62,6 +62,10 @@ enum Scheduled {
 pub struct RenderState {
     /// Something changed since the last render started.
     damaged: bool,
+    /// The last render advanced animations that are still running: the next vblank keeps the
+    /// output damaged so it renders again. Clear once they end, so an idle desktop schedules
+    /// nothing.
+    animating: bool,
     /// A frame was queued and its vblank has not arrived yet.
     frame_pending: bool,
     /// The repaint that is queued on the event loop, if any.
@@ -245,6 +249,8 @@ impl Aurora {
             return;
         };
         surface.render.damaged = false;
+        // Advance animations to the moment this frame is built; outputs share one clock.
+        surface.render.animating = self.wm.tick(Duration::from(self.clock.now()));
         let output = surface.output.clone();
         let _span = tracing::debug_span!("render_surface", output = %output.name()).entered();
 
@@ -404,6 +410,9 @@ impl Aurora {
             return;
         }
         surface.render.last_frame_callback = Some(self.clock.now());
+        if surface.render.animating {
+            surface.render.damage(&self.handle, node, crtc);
+        }
         let output = surface.output.clone();
         let feedback = surface.dmabuf_feedback.clone();
         self.post_repaint(
@@ -524,6 +533,10 @@ impl Aurora {
         }
         let _ = self.display_handle.flush_clients();
 
+        // Animations are still running: keep painting until the last frame has landed.
+        if render_again && surface.render.animating {
+            surface.render.damaged = true;
+        }
         if render_again && surface.render.damaged {
             // Clients paint off the frame callbacks sent at repaint; waiting part of the
             // frame first lets them land a buffer in this very repaint, which is about a

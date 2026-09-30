@@ -8,6 +8,7 @@ use smithay::{
     reexports::wayland_server::{backend::ObjectId, protocol::wl_surface::WlSurface},
 };
 
+use crate::anim::{Animated, RectF};
 use crate::config::Config;
 use window::WindowElement;
 
@@ -15,6 +16,7 @@ pub mod apply;
 pub mod focus;
 pub mod grabs;
 pub mod modes;
+pub mod motion;
 pub mod outputs;
 pub mod rules;
 pub mod window;
@@ -38,10 +40,12 @@ pub struct WinData {
     pub phase: Phase,
     /// Whether the window was inserted into a workspace layout yet.
     pub placed: bool,
-    /// Content rectangle (border excluded) from the last layout. M3 animates `current`
-    /// toward `target`; for now they are equal.
+    /// Content rectangle (border excluded) from the last layout.
     pub target: Rect,
+    /// The rectangle drawn: `motion` sampled by `Wm::tick`, rounded. Equals `target` when
+    /// animations are off.
     pub current: Rect,
+    pub motion: Animated<RectF>,
     pub sent_size: Option<(i32, i32)>,
     pub sent_flags: (bool, bool, bool),
     pub constraints: Constraints,
@@ -75,6 +79,7 @@ impl WinData {
             placed: false,
             target: Rect::default(),
             current: Rect::default(),
+            motion: Animated::new(RectF::default()),
             sent_size: None,
             sent_flags: (false, false, false),
             constraints: Constraints::default(),
@@ -138,6 +143,7 @@ pub struct Wm {
     /// The running interactive grab, if any. Layout logging is quiet and configures wait
     /// for acks while it runs.
     pub drag: Option<&'static str>,
+    clock: motion::Clock,
     next_id: u64,
 }
 

@@ -57,6 +57,7 @@ impl Aurora {
         let timer =
             self.handle
                 .insert_source(Timer::from_duration(interval), move |_, _, state| {
+                    state.wm.tick(Duration::from(state.clock.now()));
                     state.send_nested_frames(&ticking);
                     TimeoutAction::ToDuration(interval)
                 });

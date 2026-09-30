@@ -206,8 +206,7 @@ impl Aurora {
                     }
                 }
             }
-            win.target = content;
-            win.current = content;
+            win.set_target(content, None);
             win.floating = p.kind == Kind::Floating;
             win.fs = p.kind == Kind::Fullscreen;
             win.ws = ws;
