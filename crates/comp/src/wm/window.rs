@@ -27,6 +27,8 @@ use aurora_layout::WinId;
 
 use crate::focus::FocusTarget;
 
+use super::visual::Visual;
+
 /// Stacking layers, between the Bottom (20) and Top (40) layer-shell layers.
 pub const Z_TILED: u8 = 30;
 pub const Z_FLOATING: u8 = 31;
@@ -43,6 +45,10 @@ pub struct Deco {
     z: Cell<u8>,
     width: Cell<i32>,
     colors: Cell<[Rgba; 2]>,
+    /// How animation draws the window this frame, `None` when it sits at its target.
+    visual: Cell<Option<Visual>>,
+    /// Drawn but not touchable: the workspace it is on is sliding out.
+    inert: Cell<bool>,
 }
 
 impl Deco {
@@ -55,7 +61,21 @@ impl Deco {
             z: Cell::new(Z_TILED),
             width: Cell::new(0),
             colors: Cell::new([[0.0; 4]; 2]),
+            visual: Cell::new(None),
+            inert: Cell::new(false),
         }
+    }
+
+    pub fn set_visual(&self, visual: Option<Visual>) {
+        self.visual.set(visual);
+    }
+
+    pub fn visual(&self) -> Option<Visual> {
+        self.visual.get()
+    }
+
+    pub fn set_inert(&self, inert: bool) {
+        self.inert.set(inert);
     }
 
     pub fn set_z(&self, z: u8) {
@@ -195,7 +215,7 @@ impl SpaceElement for WindowElement {
     }
 
     fn is_in_input_region(&self, point: &Point<f64, Logical>) -> bool {
-        self.window.is_in_input_region(point)
+        !self.deco.inert.get() && self.window.is_in_input_region(point)
     }
 
     fn z_index(&self) -> u8 {
@@ -226,6 +246,61 @@ render_elements! {
     Border=SolidColorRenderElement,
 }
 
+impl WindowElement {
+    /// The window at its target, unanimated: surfaces first, then the four borders.
+    /// `location` is where the surface origin goes.
+    pub(crate) fn render_plain<R, C>(
+        &self,
+        renderer: &mut R,
+        location: Point<i32, Physical>,
+        scale: Scale<f64>,
+        alpha: f32,
+    ) -> Vec<C>
+    where
+        R: Renderer + ImportAll,
+        R::TextureId: Clone + 'static,
+        C: From<WindowRenderElement<R>>,
+    {
+        let mut out: Vec<C> = self
+            .window
+            .render_elements::<WaylandSurfaceRenderElement<R>>(renderer, location, scale, alpha)
+            .into_iter()
+            .map(|e| C::from(WindowRenderElement::Surface(e)))
+            .collect();
+        let geo = SpaceElement::geometry(&self.window);
+        self.push_borders(&mut out, geo, location, scale, alpha);
+        out
+    }
+
+    /// Borders around `geo` (surface coordinates) for a surface origin at `location`.
+    fn push_borders<R, C>(
+        &self,
+        out: &mut Vec<C>,
+        geo: Rectangle<i32, Logical>,
+        location: Point<i32, Physical>,
+        scale: Scale<f64>,
+        alpha: f32,
+    ) where
+        R: Renderer + ImportAll,
+        C: From<WindowRenderElement<R>>,
+    {
+        let bw = self.border();
+        if bw == 0 {
+            return;
+        }
+        let color = self.deco.color();
+        let rects = Self::border_rects(geo, bw);
+        let mut buffers = self.deco.borders.borrow_mut();
+        for (buffer, rect) in buffers.iter_mut().zip(rects) {
+            buffer.update(rect.size, color);
+            let at = location + rect.loc.to_physical_precise_round(scale);
+            out.push(C::from(WindowRenderElement::Border(
+                SolidColorRenderElement::from_buffer(buffer, at, scale, alpha, Kind::Unspecified),
+            )));
+        }
+    }
+}
+
 impl<R> AsRenderElements<R> for WindowElement
 where
     R: Renderer + ImportAll,
@@ -233,6 +308,9 @@ where
 {
     type RenderElement = WindowRenderElement<R>;
 
+    /// Draws the window where animation has it: the surface tree scaled and moved by
+    /// `drawn - target` (the Space keeps the window at its target, so input is unaffected)
+    /// and faded. A window at rest takes the untouched path.
     fn render_elements<C: From<Self::RenderElement>>(
         &self,
         renderer: &mut R,
@@ -240,33 +318,43 @@ where
         scale: Scale<f64>,
         alpha: f32,
     ) -> Vec<C> {
+        let Some(visual) = self.deco.visual() else {
+            return self.render_plain(renderer, location, scale, alpha);
+        };
+        let alpha = alpha * visual.alpha;
+        let moved = match visual.transform() {
+            Some(t) if visual.drawn != visual.target => t,
+            _ => return self.render_plain(renderer, location, scale, alpha),
+        };
+        let ((dx, dy), (sx, sy)) = moved;
+
+        let geo = SpaceElement::geometry(&self.window);
+        // Where the content's top-left corner is drawn: its place at the target, moved by
+        // how far the animation has taken it.
+        let shift: Point<f64, Logical> = (f64::from(dx), f64::from(dy)).into();
+        let origin = location
+            + geo.loc.to_physical_precise_round(scale)
+            + shift.to_physical(scale).to_i32_round();
+        // The surface tree scales about that corner: sizes by the factors, the origin of
+        // the surface moves so the geometry corner stays put.
+        let zoom = Scale::from((scale.x * f64::from(sx), scale.y * f64::from(sy)));
+        let surface_at = origin - geo.loc.to_physical_precise_round(zoom);
+
         let mut out: Vec<C> = self
             .window
-            .render_elements::<WaylandSurfaceRenderElement<R>>(renderer, location, scale, alpha)
+            .render_elements::<WaylandSurfaceRenderElement<R>>(renderer, surface_at, zoom, alpha)
             .into_iter()
             .map(|e| C::from(WindowRenderElement::Surface(e)))
             .collect();
-
-        let bw = self.border();
-        if bw > 0 {
-            let color = self.deco.color();
-            let geo = SpaceElement::geometry(&self.window);
-            let rects = Self::border_rects(geo, bw);
-            let mut buffers = self.deco.borders.borrow_mut();
-            for (buffer, rect) in buffers.iter_mut().zip(rects) {
-                buffer.update(rect.size, color);
-                let at = location + rect.loc.to_physical_precise_round(scale);
-                out.push(C::from(WindowRenderElement::Border(
-                    SolidColorRenderElement::from_buffer(
-                        buffer,
-                        at,
-                        scale,
-                        alpha,
-                        Kind::Unspecified,
-                    ),
-                )));
-            }
-        }
+        let content = Rectangle::new(
+            (0, 0).into(),
+            (
+                visual.drawn.w.round().max(1.0) as i32,
+                visual.drawn.h.round().max(1.0) as i32,
+            )
+                .into(),
+        );
+        self.push_borders(&mut out, content, origin, scale, alpha);
         out
     }
 }

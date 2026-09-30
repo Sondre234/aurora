@@ -9,9 +9,9 @@ use smithay::{
     backend::renderer::{
         element::{
             AsRenderElements, Wrap, memory::MemoryRenderBufferRenderElement, render_elements,
-            surface::WaylandSurfaceRenderElement,
+            surface::WaylandSurfaceRenderElement, texture::TextureRenderElement,
         },
-        gles::GlesRenderer,
+        gles::{GlesRenderer, GlesTexture},
     },
     desktop::{Space, Window, space::SpaceElement},
     output::Output,
@@ -23,7 +23,10 @@ use crate::{
     config::Decoration,
     effects::{self, Programs},
     layers::layers_front_to_back,
-    wm::window::{WindowElement, WindowRenderElement},
+    wm::{
+        ghost,
+        window::{WindowElement, WindowRenderElement},
+    },
 };
 
 render_elements! {
@@ -36,6 +39,7 @@ render_elements! {
     CursorSurface=WaylandSurfaceRenderElement<GlesRenderer>,
     Window=WindowRenderElement<GlesRenderer>,
     Layer=Wrap<WaylandSurfaceRenderElement<GlesRenderer>>,
+    Ghost=TextureRenderElement<GlesTexture>,
 }
 
 /// Per-frame inputs of the effects, built once per render and passed down to the builder.
@@ -110,7 +114,7 @@ pub fn output_elements(
     unmanaged: &Space<Window>,
     renderer: &mut GlesRenderer,
     output: &Output,
-    _fx: &SceneFx,
+    fx: &SceneFx,
 ) -> Option<Vec<OutputElement>> {
     let geo = space.output_geometry(output)?;
     let scale = Scale::from(output.current_scale().fractional_scale());
@@ -145,7 +149,16 @@ pub fn output_elements(
     // The space stacks bottom to top; the stable sort keeps that order within a z-index.
     let mut windows: Vec<&WindowElement> = space.elements().rev().collect();
     windows.sort_by_key(|w| Reverse(SpaceElement::z_index(*w)));
+    // Closing windows fade out at the stacking of the window they were: each one goes in
+    // front of the first window that is not above it.
+    let mut ghosts = ghost::elements(renderer, output, geo, scale, fx.now);
+    ghosts.sort_by_key(|(z, _)| Reverse(*z));
+    let mut ghosts = ghosts.into_iter().peekable();
     for window in windows {
+        let z = SpaceElement::z_index(window);
+        while let Some((_, element)) = ghosts.next_if(|(gz, _)| *gz >= z) {
+            out.push(OutputElement::Ghost(element));
+        }
         let (Some(bbox), Some(loc)) = (space.element_bbox(window), space.element_location(window))
         else {
             continue;
@@ -164,6 +177,8 @@ pub fn output_elements(
             1.0,
         ));
     }
+
+    out.extend(ghosts.map(|(_, element)| OutputElement::Ghost(element)));
 
     push_layers(&mut out, renderer, output, Layer::Bottom, scale);
     push_layers(&mut out, renderer, output, Layer::Background, scale);

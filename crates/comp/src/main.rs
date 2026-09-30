@@ -102,6 +102,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let result = event_loop.run(None, &mut state, |state| {
         // Input and request handlers only queue events; nothing else flushes them.
         let _ = state.display_handle.flush_clients();
+        // A workspace slide that ended has its outgoing windows to take out of the Space.
+        state.finish_slides();
     });
     // Every exit path: the window manager must go before the state drops, and the server
     // with it, so no Xwayland outlives the compositor.

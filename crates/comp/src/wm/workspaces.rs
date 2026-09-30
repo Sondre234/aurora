@@ -65,12 +65,18 @@ impl Aurora {
                     .and_then(|name| self.wm.outputs.iter().find(|o| o.name() == name))
                     .cloned();
                 let output = pinned.unwrap_or(focused);
+                let mut left = None;
                 if let Some(old) = self.wm.active_ws.insert(output.clone(), ws) {
                     self.wm.previous.insert(output.clone(), old);
                     self.wm.ws_output.remove(&old);
                     self.wm.last_layout.remove(&old);
+                    left = Some(old);
                 }
                 self.wm.ws_output.insert(ws, output.clone());
+                // Before `normalize`, which would unmap the workspace that is leaving.
+                if let Some(old) = left {
+                    self.start_slide(&output, old, ws);
+                }
                 self.normalize();
                 self.relayout_ws(ws);
                 self.focus_output_ws(&output);
@@ -318,12 +324,12 @@ impl Aurora {
 
     /// Windows on workspaces no output shows are not in the Space, so they draw nothing and
     /// get no frame callbacks.
-    fn hide_invisible(&mut self) {
+    pub(super) fn hide_invisible(&mut self) {
         let hidden: Vec<_> = self
             .wm
             .windows
             .values()
-            .filter(|w| !self.wm.ws_output.contains_key(&w.ws))
+            .filter(|w| !self.wm.ws_output.contains_key(&w.ws) && !self.wm.sliding_out(w.ws))
             .map(|w| w.element.clone())
             .collect();
         for element in hidden {
@@ -340,8 +346,10 @@ impl Aurora {
         }
         if !self.config.animations.enabled {
             self.wm.snap_animations();
+            self.finish_slides();
         }
         self.relayout_all();
+        self.sync_opacity();
     }
 }
 
