@@ -51,3 +51,11 @@ SIGUSR2 dump gains `dump: ipc clients=<n>`, `dump: lock state=unlocked|locking|l
 - [ ] lock: locks all outputs, windows never visible, pointer/keys blocked, correct unlock, `Ctrl+AltGr+BackSpace` and VT switch still work while locked, killing the lock client keeps the session locked.
 - [ ] killing shell/launcher/notifd never disturbs windows; supervision restarts them with backoff.
 - [ ] theme change reaches all services live.
+
+## P2-A notes (compositor IPC, services, theme)
+
+- **Workspaces over IPC:** Aurora's workspaces are global and numbered; `WorkspaceInfo.index` is that number and `output` the output showing it. A hidden workspace is listed only while it holds windows, under the output it was last shown on (or the one a `[[workspace]]` rule pins it to, else the first output). A bar per output draws `1..=workspaces` itself and marks `active`/`windows`/`urgent` from the list.
+- **Requests while locked:** only reads, `Lock`, `Unlock` (answered `Ok` for the lock client's connection, `Denied` for everyone else, and never unlocks by itself: the session unlocks when the client destroys its lock object), `ReloadConfig` and `SetTheme`. Everything that moves, focuses, closes or spawns is `Denied`.
+- **Services:** `[services.<name>]` with `command`, `enabled`, `autostart`, `restart` (`never|on-failure|always`), `backoff_ms`, `max_backoff_ms`. The `lock` action (and IPC `Lock`) starts the service named `lock`; it is restarted only while the session is locked. A reload changes nothing for unchanged services, applies a new command at the next start, stops removed or disabled ones. Children get `AURORA_IPC_SOCK` and `WAYLAND_DISPLAY`; services are stopped at shutdown (SIGTERM to the group, SIGKILL after 1 s).
+- **Theme:** `theme.toml` beside the config file; `Event::Theme` carries a revision that grows per change. `SetTheme` is in-memory only and the next reload restores the file.
+- **Slow subscribers:** events for one piece of state coalesce in the queue; past 256 KiB unsent the events are dropped and the client gets a fresh `Snapshot` instead; past 2 MiB it is disconnected.

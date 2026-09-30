@@ -586,6 +586,7 @@ impl Aurora {
     fn ipc_client_io(&mut self, key: u64) -> Io {
         let mut incoming = Vec::new();
         let mut more = false;
+        let mut eof = false;
         {
             let Some(c) = self.ipc.as_mut().and_then(|i| i.clients.get_mut(&key)) else {
                 return Io::Gone(None);
@@ -603,8 +604,10 @@ impl Aurora {
                 }
                 let mut r = &c.stream;
                 match r.read(&mut buf) {
+                    // The peer is done sending; what it sent is still answered.
                     Ok(0) => {
-                        c.closing = true;
+                        eof = true;
+                        break;
                     }
                     Ok(n) => {
                         total += n;
@@ -650,6 +653,12 @@ impl Aurora {
         }
         if let Some(ipc) = self.ipc.as_mut() {
             ipc.current = None;
+            if eof {
+                ipc.flush(key);
+                if let Some(c) = ipc.clients.get_mut(&key) {
+                    c.closing = true;
+                }
+            }
         }
 
         let mut gone = None;

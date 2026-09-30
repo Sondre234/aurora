@@ -467,6 +467,17 @@ impl Aurora {
         };
         let stopped_on_purpose = matches!(svc.run, Run::Running { stopping: true, .. });
         svc.run = Run::Stopped;
+        // Stopped for a disable that a later reload undid before the process left: it is
+        // wanted again, so start it now instead of waiting for another reload.
+        if stopped_on_purpose && svc.spec.enabled && svc.spec.autostart && !svc.removed {
+            svc.consecutive = 0;
+            tracing::info!(
+                "service: exited name={name} code={} restart=0",
+                info.label()
+            );
+            self.service_start(name);
+            return;
+        }
         svc.consecutive = next_consecutive(svc.consecutive, ran_for);
         let restart =
             !stopped_on_purpose && !svc.removed && restart_allowed(&svc.spec, info, locked);
