@@ -45,12 +45,12 @@ SIGUSR2 dump gains `dump: ipc clients=<n>`, `dump: lock state=unlocked|locking|l
 
 ## Hardware checklist (real machine, from a TTY)
 
-- [ ] shell bar shows per-output workspaces, focused title and clock on all three outputs; exclusive zone respected; fullscreen game hides it.
-- [ ] launcher opens instantly on the keybind, types, launches, closes; no focus loss afterwards.
-- [ ] notifd replaces dunst (only when started deliberately), toasts show, actions and expiry work.
-- [ ] lock: locks all outputs, windows never visible, pointer/keys blocked, correct unlock, `Ctrl+AltGr+BackSpace` and VT switch still work while locked, killing the lock client keeps the session locked.
-- [ ] killing shell/launcher/notifd never disturbs windows; supervision restarts them with backoff.
-- [ ] theme change reaches all services live.
+- [x] shell bar shows per-output workspaces, focused title and clock on all three outputs; exclusive zone respected; fullscreen game hides it.
+- [x] launcher opens instantly on the keybind, types, launches, closes; no focus loss afterwards.
+- [x] notifd replaces dunst (only when started deliberately), toasts show, actions and expiry work.
+- [x] lock: locks all outputs, windows never visible, pointer/keys blocked, correct unlock, `Ctrl+AltGr+BackSpace` and VT switch still work while locked, killing the lock client keeps the session locked.
+- [x] killing shell/launcher/notifd never disturbs windows; supervision restarts them with backoff.
+- [x] theme change reaches all services live.
 
 ## P2-A notes (compositor IPC, services, theme)
 

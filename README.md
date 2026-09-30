@@ -46,7 +46,7 @@ Crates are added as their milestone is reached.
 - [x] **M1** Real session: DRM backend on the 4090, libinput, launch from a TTY
 - [x] **M2** Usable: tiling, workspaces, XWayland, layer-shell, config, multi-monitor. Verified on hardware
 - [x] **M3** The look: animation engine, rounded corners, shadows, blur, live overview, X11 scaling. Verified on hardware
-- [ ] **M4** Services: `ipc`, `theme`, shell bar, launcher, notifd, lock. Plan in [docs/m4-plan.md](docs/m4-plan.md), hardware checklist there
+- [x] **M4** Services: `ipc`, `theme`, `ui`, shell bar, launcher, notifd, lock. Verified on hardware. Plan in [docs/m4-plan.md](docs/m4-plan.md)
 - [ ] **M5** `term` and `files`
 
 ## Using it (M2)
