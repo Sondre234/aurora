@@ -240,12 +240,26 @@ rect4() { sed -E 's/[,x ]/ /g' <<<"$1"; }
 shot() {
     local out=$SDIR/$1.png
     rm -f "$out"
-    wl grim "${@:2}" "$out" 2>>"$SDIR/clients.log"
-    [ -s "$out" ] || { fail "screenshot $1"; return 1; }
+    wl timeout 8 grim "${@:2}" "$out" 2>>"$SDIR/clients.log"
+    # Runs in $(...) callers: the message goes to stderr so it is not swallowed.
+    [ -s "$out" ] || { echo "FAIL [$NAME] screenshot $1" >&2; return 1; }
     echo "$out"
 }
 # pixel FILE X Y -> RRGGBB
 pixel() { magick "$1" -format "%[hex:p{$2,$3}]" info: 2>/dev/null | cut -c1-6; }
+
+# snap VAR NAME [grim args]: like `VAR=$(shot ...)`, but a failed capture is counted here (shot
+# runs in a subshell, so its failures would be lost) and the scenario carries on with VAR empty.
+snap() {
+    local out
+    if out=$(shot "${@:2}"); then
+        printf -v "$1" %s "$out"
+    else
+        FAIL=$((FAIL + 1))
+        printf -v "$1" ''
+        [ -z "$out" ] || echo "$out"
+    fi
+}
 
 end_scenario() {
     if grep -qaiE 'panicked' "$LOG" "$SDIR/stdout.log" 2>/dev/null; then
@@ -1220,24 +1234,27 @@ Exec=touch $SDIR/run/launched
 Terminal=false
 EOF
     launch || { end_scenario; return; }
+    # The daemon and every `toggle` share this socket; keep it out of the user's real
+    # $XDG_RUNTIME_DIR/aurora/launcher.sock.
+    export AURORA_LAUNCHER_SOCK="$SDIR/run/launcher.sock"
     client env XDG_DATA_DIRS="$SDIR/data" XDG_DATA_HOME="$SDIR/data" "$BINDIR/aurora-launcher"
     need_client 'launcher: ready apps=[1-9]' 15
     sleep 0.5
     if clog | grep -qa 'launcher: show'; then fail "launcher showed itself at startup"; else pass "daemon starts hidden"; fi
     local before shown typed after
-    before=$(shot l-hidden -o winit) || { end_scenario; return; }
+    snap before l-hidden -o winit
 
     # `toggle` is a second invocation that talks to the running daemon (over IPC or a socket).
     wl env XDG_DATA_DIRS="$SDIR/data" "$BINDIR/aurora-launcher" toggle >>"$SDIR/clients.log" 2>&1
     if wait_client_count 'launcher: show' 1 5; then pass "toggle shows"; else fail "MISSING log contract line: launcher: show"; fi
     sleep 0.5
-    shown=$(shot l-shown -o winit) || { end_scenario; return; }
-    if [ "$(diffpx "$before" "$shown")" -gt 500 ]; then pass "screen differs while the launcher is shown"; else fail "no visible launcher surface (diff $(diffpx "$before" "$shown") px)"; fi
+    snap shown l-shown -o winit
+    if [ -z "$before" ] || [ -z "$shown" ]; then :; elif [ "$(diffpx "$before" "$shown")" -gt 500 ]; then pass "screen differs while the launcher is shown"; else fail "no visible launcher surface (diff $(diffpx "$before" "$shown") px)"; fi
 
     wl wtype 'qahel'
     sleep 0.6
-    typed=$(shot l-typed -o winit) || { end_scenario; return; }
-    if [ "$(diffpx "$shown" "$typed")" -gt 50 ]; then pass "typing changes the view"; else fail "typing 'qahel' changed nothing on screen"; fi
+    snap typed l-typed -o winit
+    if [ -z "$shown" ] || [ -z "$typed" ]; then :; elif [ "$(diffpx "$shown" "$typed")" -gt 50 ]; then pass "typing changes the view"; else fail "typing 'qahel' changed nothing on screen"; fi
 
     # Escape hides it again.
     key "" Escape
@@ -1247,8 +1264,8 @@ EOF
     wl "$BINDIR/aurora-launcher" toggle >>"$SDIR/clients.log" 2>&1
     if wait_client_count 'launcher: hide' 2 5; then pass "toggle hides"; else fail "second launcher: hide missing"; fi
     sleep 0.4
-    after=$(shot l-after -o winit) || { end_scenario; return; }
-    if [ "$(diffpx "$before" "$after")" -lt 50 ]; then pass "hidden again leaves no residue"; else fail "screen differs after hide ($(diffpx "$before" "$after") px)"; fi
+    snap after l-after -o winit
+    if [ -z "$before" ] || [ -z "$after" ]; then :; elif [ "$(diffpx "$before" "$after")" -lt 50 ]; then pass "hidden again leaves no residue"; else fail "screen differs after hide ($(diffpx "$before" "$after") px)"; fi
 
     # A name and Return launch the fixture entry through IPC Spawn.
     wl "$BINDIR/aurora-launcher" toggle >>"$SDIR/clients.log" 2>&1
@@ -1259,6 +1276,7 @@ EOF
     key "" Return
     if waitfor 5 test -e "$SDIR/run/launched"; then pass "Return launched the selected entry"; else fail "fixture entry was not launched"; fi
     if wait_client_count 'launcher: hide' 3 5; then pass "launcher hides after launching"; else fail "launcher did not hide after launch"; fi
+    unset AURORA_LAUNCHER_SOCK
     end_scenario
 }
 
