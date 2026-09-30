@@ -7,19 +7,27 @@
 
 use smithay::backend::renderer::gles::GlesRenderer;
 
+pub mod blur;
+
 /// Every compiled program. Cheap to clone (programs are reference counted), so a frame copies
 /// it out of the renderer and keeps using the renderer mutably.
 #[derive(Clone, Default)]
 pub struct Programs {
     /// How many programs `compile` built, for the startup log line.
     compiled: usize,
+    /// Dual-Kawase down and up passes; `None` when compilation failed.
+    pub blur: Option<blur::BlurPrograms>,
 }
 
 impl Programs {
     /// Compiles every program, logging and skipping any that fails so a driver quirk costs
     /// one effect and not the session.
-    fn compile(_renderer: &mut GlesRenderer) -> Self {
-        let programs = Self::default();
+    fn compile(renderer: &mut GlesRenderer) -> Self {
+        let blur = blur::BlurPrograms::compile(renderer);
+        let programs = Self {
+            compiled: 2 * usize::from(blur.is_some()),
+            blur,
+        };
         // Streams: compile here, e.g.
         //   programs.corners = compile("corners", || renderer.compile_custom_texture_shader(..));
         //   programs.compiled += 1;
