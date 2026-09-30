@@ -43,9 +43,50 @@ Crates are added as their milestone is reached.
 
 - [x] **M0** Nested compositor under an existing desktop (winit backend), one client shows
 - [x] **M1** Real session: DRM backend on the 4090, libinput, launch from a TTY
-- [ ] **M2** Usable: tiling, workspaces, XWayland, layer-shell
+- [ ] **M2** Usable: tiling, workspaces, XWayland, layer-shell, config, multi-monitor. Code-complete; verified nested only (headless host); real DRM, mouse drags, override-redirect placement, pointer constraints and fractional scale are unproven until the hardware checklist in docs/m2-plan.md is run
 - [ ] **M3** The look: animation engine, blur/shadows, live overview
 - [ ] **M4+** Services: `ipc`, shell, launcher, notifd, lock, then `term` and `files`
+
+## Using it (M2)
+
+Config lives in `~/.config/aurora/config.toml`; nothing is generated for you. Copy
+[config/aurora.example.toml](config/aurora.example.toml), which documents every option,
+the outputs of the author's machine and the default binds. A missing file means defaults,
+a broken file keeps the previous settings and logs why. Reload with Super+Shift+r or
+`kill -USR1 <aurora-comp pid>`.
+
+Default binds (`Mod` is Super):
+
+| Keys | Action |
+|---|---|
+| Mod+q | spawn kitty |
+| Mod+c | close window |
+| Mod+w | toggle floating |
+| Mod+f | fullscreen |
+| Mod+j | toggle split direction |
+| Mod+Left/Right/Up/Down | focus in direction |
+| Mod+Shift+arrows | move window in direction |
+| Mod+Ctrl+arrows | resize the split (repeats) |
+| Mod+, / Mod+. | focus output left / right |
+| Mod+1..0 | workspace 1..10 |
+| Mod+Shift+1..0 | move window to workspace 1..10 |
+| Mod+left drag / right drag | move / resize floating window |
+| Mod+wheel | next / previous workspace |
+| Mod+Shift+r | reload config |
+| Mod+Shift+Escape | end the focused client's shortcuts inhibitor |
+| Mod+m | quit |
+
+Emergency chords are hardcoded and cannot be rebound or removed: Ctrl+Alt+BackSpace or
+Ctrl+AltGr+BackSpace quits, Ctrl+Alt+F1..F12 or Ctrl+AltGr+F1..F12 switches VT.
+
+Known limits: there is no ext-workspace or foreign-toplevel protocol yet, so a bar's
+workspace widget waits for the M4 IPC. X11 apps are never scaled (M3 item), so keep the monitor you run Proton games on at scale 1. wlr-screencopy
+is not offered (ext-image-copy-capture is, which is what grim uses). Aurora owns
+`zwp_virtual_keyboard_v1` and routes its keys through the bind table, so any client can
+inject key presses and trigger binds; set `allow_virtual_keyboard = false` to turn that off.
+
+Scripted checks: run `scripts/qa-nested.sh` with `WAYLAND_DISPLAY` set to a headless host
+(never your live session). See [docs/m2-plan.md](docs/m2-plan.md).
 
 ## Performance
 

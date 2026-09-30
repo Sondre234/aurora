@@ -1,19 +1,26 @@
 use smithay::{
     desktop::{
-        PopupKind, PopupManager, Space, Window, find_popup_root_surface, get_popup_toplevel_coords,
+        PopupKeyboardGrab, PopupKind, PopupManager, PopupPointerGrab, PopupUngrabStrategy,
+        find_popup_root_surface, get_popup_toplevel_coords,
     },
-    reexports::wayland_server::protocol::{wl_seat, wl_surface::WlSurface},
+    input::{Seat, pointer::Focus},
+    reexports::{
+        wayland_protocols::xdg::shell::server::xdg_toplevel,
+        wayland_server::protocol::{wl_output::WlOutput, wl_seat, wl_surface::WlSurface},
+    },
     utils::Serial,
-    wayland::{
-        compositor::with_states,
-        shell::xdg::{
-            PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
-            XdgToplevelSurfaceData,
-        },
+    wayland::seat::WaylandFocus,
+    wayland::shell::xdg::{
+        PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
     },
 };
 
-use crate::Aurora;
+use crate::{
+    Aurora,
+    focus::FocusTarget,
+    wm::grabs::{DragKind, xdg_edges},
+};
+use aurora_layout::FsMode;
 
 impl XdgShellHandler for Aurora {
     fn xdg_shell_state(&mut self) -> &mut XdgShellState {
@@ -21,8 +28,7 @@ impl XdgShellHandler for Aurora {
     }
 
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
-        let window = Window::new_wayland_window(surface);
-        self.space.map_element(window, (0, 0), false);
+        self.new_wm_window(surface);
     }
 
     fn new_popup(&mut self, surface: PopupSurface, _positioner: PositionerState) {
@@ -45,7 +51,8 @@ impl XdgShellHandler for Aurora {
         surface.send_repositioned(token);
     }
 
-    fn toplevel_destroyed(&mut self, _surface: ToplevelSurface) {
+    fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
+        self.wm_window_destroyed(surface.wl_surface());
         self.queue_redraw_all();
     }
 
@@ -53,37 +60,106 @@ impl XdgShellHandler for Aurora {
         self.queue_redraw_all();
     }
 
-    // Interactive move/resize arrive with the tiling layout.
+    fn move_request(&mut self, surface: ToplevelSurface, _seat: wl_seat::WlSeat, serial: Serial) {
+        self.xdg_drag(surface.wl_surface(), DragKind::Move, None, serial);
+    }
 
-    fn grab(&mut self, _surface: PopupSurface, _seat: wl_seat::WlSeat, _serial: Serial) {
-        // TODO popup grabs
+    fn resize_request(
+        &mut self,
+        surface: ToplevelSurface,
+        _seat: wl_seat::WlSeat,
+        serial: Serial,
+        edges: xdg_toplevel::ResizeEdge,
+    ) {
+        self.xdg_drag(
+            surface.wl_surface(),
+            DragKind::Resize,
+            xdg_edges(edges),
+            serial,
+        );
+    }
+
+    fn fullscreen_request(&mut self, surface: ToplevelSurface, _output: Option<WlOutput>) {
+        self.request_mode(surface.wl_surface(), FsMode::Fullscreen, true);
+    }
+
+    fn unfullscreen_request(&mut self, surface: ToplevelSurface) {
+        self.request_mode(surface.wl_surface(), FsMode::Fullscreen, false);
+    }
+
+    fn maximize_request(&mut self, surface: ToplevelSurface) {
+        self.request_mode(surface.wl_surface(), FsMode::Maximized, true);
+    }
+
+    fn unmaximize_request(&mut self, surface: ToplevelSurface) {
+        self.request_mode(surface.wl_surface(), FsMode::Maximized, false);
+    }
+
+    fn grab(&mut self, surface: PopupSurface, wl_seat: wl_seat::WlSeat, serial: Serial) {
+        let Some(seat) = Seat::<Aurora>::from_resource(&wl_seat) else {
+            return surface.send_popup_done();
+        };
+        let kind = PopupKind::Xdg(surface.clone());
+        let Ok(root) = find_popup_root_surface(&kind) else {
+            return surface.send_popup_done();
+        };
+        let (Some(keyboard), Some(pointer)) = (seat.get_keyboard(), seat.get_pointer()) else {
+            return surface.send_popup_done();
+        };
+        // The serial must be one the compositor issued (a client cannot name the future) from
+        // input the user just made, and the popup must belong to what holds the keyboard or the pointer.
+        let issued = smithay::utils::SERIAL_COUNTER.next_serial();
+        let root_of = |focus: Option<FocusTarget>| {
+            focus
+                .and_then(|f| f.wl_surface().map(|s| s.into_owned()))
+                .map(|s| match self.popups.find_popup(&s) {
+                    Some(kind) => find_popup_root_surface(&kind).unwrap_or(s),
+                    None => s,
+                })
+        };
+        // Layer surfaces that never take the keyboard (bars) open menus from a click, so the
+        // pointer's target counts as well.
+        let holds_input = root_of(keyboard.current_focus()).as_ref() == Some(&root)
+            || root_of(pointer.current_focus()).as_ref() == Some(&root);
+        let recent = keyboard
+            .last_enter()
+            .is_some_and(|e| serial.is_no_older_than(&e));
+        if !issued.is_no_older_than(&serial)
+            || !holds_input
+            || !(pointer.has_grab(serial) || keyboard.has_grab(serial) || recent)
+        {
+            return surface.send_popup_done();
+        }
+        let Ok(mut grab) =
+            self.popups
+                .grab_popup(FocusTarget::Wl(root.clone()), kind, &seat, serial)
+        else {
+            return surface.send_popup_done();
+        };
+        // A grab already held by something else (a drag, a move) that this popup is not
+        // nested in wins; the popup is dismissed.
+        let previous = grab.previous_serial();
+        if keyboard.is_grabbed()
+            && !(keyboard.has_grab(serial) || keyboard.has_grab(previous.unwrap_or(serial)))
+        {
+            grab.ungrab(PopupUngrabStrategy::All);
+            return;
+        }
+        if pointer.is_grabbed()
+            && !(pointer.has_grab(serial) || pointer.has_grab(previous.unwrap_or(grab.serial())))
+        {
+            grab.ungrab(PopupUngrabStrategy::All);
+            return;
+        }
+        keyboard.set_focus(self, grab.current_grab(), serial);
+        keyboard.set_grab(self, PopupKeyboardGrab::new(&grab), serial);
+        pointer.set_grab(self, PopupPointerGrab::new(&grab), serial, Focus::Keep);
+        self.popup_grab = Some((grab, root));
     }
 }
 
 /// Should be called on `WlSurface::commit`
-pub fn handle_commit(popups: &mut PopupManager, space: &Space<Window>, surface: &WlSurface) {
-    // Handle toplevel commits.
-    if let Some(window) = space
-        .elements()
-        .find(|w| w.toplevel().unwrap().wl_surface() == surface)
-        .cloned()
-    {
-        let initial_configure_sent = with_states(surface, |states| {
-            states
-                .data_map
-                .get::<XdgToplevelSurfaceData>()
-                .unwrap()
-                .lock()
-                .unwrap()
-                .initial_configure_sent
-        });
-
-        if !initial_configure_sent {
-            window.toplevel().unwrap().send_configure();
-        }
-    }
-
-    // Handle popup commits.
+pub fn handle_commit(popups: &mut PopupManager, surface: &WlSurface) {
     popups.commit(surface);
     if let Some(popup) = popups.find_popup(surface) {
         match popup {
@@ -106,15 +182,13 @@ impl Aurora {
         let Ok(root) = find_popup_root_surface(&PopupKind::Xdg(popup.clone())) else {
             return;
         };
-        let Some(window) = self
-            .space
-            .elements()
-            .find(|w| w.toplevel().unwrap().wl_surface() == &root)
-        else {
+        let Some(window) = self.wm.window_of(&root).map(|w| &w.element) else {
+            self.unconstrain_layer_popup(popup, &root);
             return;
         };
-
-        let window_geo = self.space.element_geometry(window).unwrap();
+        let Some(window_geo) = self.space.element_geometry(window) else {
+            return;
+        };
 
         // Output with the largest overlap with the window; first output if none overlaps.
         let overlap = |g: smithay::utils::Rectangle<i32, smithay::utils::Logical>| {
@@ -139,5 +213,27 @@ impl Aurora {
         popup.with_pending_state(|state| {
             state.geometry = state.positioner.get_unconstrained_geometry(target);
         });
+    }
+}
+
+impl Aurora {
+    /// Ends the active popup grab unless `target` is the surface it belongs to. A popup
+    /// grab swallows every focus change but its own, so a compositor-driven change (a
+    /// workspace switch, a closed window) would otherwise leave keys going to the popup.
+    pub fn end_popup_grab_for(&mut self, target: Option<&FocusTarget>) {
+        let Some((grab, root)) = self.popup_grab.as_mut() else {
+            return;
+        };
+        if grab.has_ended() {
+            self.popup_grab = None;
+            return;
+        }
+        let keeps = target
+            .and_then(|t| t.wl_surface())
+            .is_some_and(|s| *s == *root);
+        if !keeps {
+            grab.ungrab(PopupUngrabStrategy::All);
+            self.popup_grab = None;
+        }
     }
 }

@@ -15,17 +15,12 @@ use smithay::{
             element::{
                 Kind, RenderElementStates,
                 memory::MemoryRenderBufferRenderElement,
-                render_elements,
                 surface::{WaylandSurfaceRenderElement, render_elements_from_surface_tree},
             },
             gles::GlesRenderer,
         },
     },
-    desktop::{
-        Space, Window,
-        space::{SpaceRenderElements, space_render_elements},
-        utils::bbox_from_surface_tree,
-    },
+    desktop::{Space, Window, utils::bbox_from_surface_tree},
     input::pointer::{CursorImageAttributes, CursorImageStatus},
     output::Output,
     reexports::{
@@ -47,20 +42,14 @@ use super::{
 };
 use crate::{
     backend::{BACKGROUND, Backend},
+    capture::{self, Captures},
+    scene::{OutputElement, output_elements},
     state::{Aurora, take_presentation_feedback, update_primary_scanout_output},
+    wm::window::WindowElement,
 };
 
 /// Consecutive temporary render failures tolerated before waiting for the next damage.
 const MAX_RETRIES: u32 = 60;
-
-render_elements! {
-    /// Everything one output draws. The cursor is first so DrmCompositor can put it on the
-    /// cursor plane.
-    pub OutputElement<=GlesRenderer>;
-    Cursor=MemoryRenderBufferRenderElement<GlesRenderer>,
-    CursorSurface=WaylandSurfaceRenderElement<GlesRenderer>,
-    Space=SpaceRenderElements<GlesRenderer, WaylandSurfaceRenderElement<GlesRenderer>>,
-}
 
 enum Scheduled {
     Idle(Idle<'static>),
@@ -260,6 +249,7 @@ impl Aurora {
         let _span = tracing::debug_span!("render_surface", output = %output.name()).entered();
 
         self.space.refresh();
+        self.xwayland.unmanaged.refresh();
         self.popups.cleanup();
 
         let mut result = None;
@@ -268,6 +258,9 @@ impl Aurora {
                 surface,
                 renderer,
                 &self.space,
+                &self.xwayland.unmanaged,
+                &mut self.captures,
+                Duration::from(self.clock.now()),
                 self.pointer.current_location(),
                 &mut self.cursor_status,
                 cursors,
@@ -545,10 +538,14 @@ impl Aurora {
 
 /// Builds the element list and renders it; queues the frame for scanout if anything changed.
 /// `Ok(None)` means the output has no place in the layout right now.
+#[allow(clippy::too_many_arguments)]
 fn render_output(
     surface: &mut super::device::Surface,
     renderer: &mut GlesRenderer,
-    space: &Space<Window>,
+    space: &Space<WindowElement>,
+    unmanaged: &Space<Window>,
+    captures: &mut Captures,
+    now: Duration,
     pointer_location: Point<f64, Logical>,
     cursor_status: &mut CursorImageStatus,
     cursors: &mut CursorCache,
@@ -568,10 +565,12 @@ fn render_output(
         scale,
         output.current_scale().integer_scale(),
     );
-    match space_render_elements(renderer, [space], &output, 1.0) {
-        Ok(space_elements) => elements.extend(space_elements.into_iter().map(OutputElement::from)),
-        Err(_) => return Ok(None),
+    let n_cursor = elements.len();
+    match output_elements(space, unmanaged, renderer, &output) {
+        Some(scene) => elements.extend(scene),
+        None => return Ok(None),
     }
+    capture::serve(captures, renderer, &output, &elements, n_cursor, now);
 
     let result = surface
         .drm_output
@@ -593,9 +592,9 @@ fn render_output(
     let queued = !result.is_empty;
     let states = result.states;
 
-    update_primary_scanout_output(space, &output, cursor_status, &states);
+    update_primary_scanout_output(space, unmanaged, &output, cursor_status, &states);
     if queued {
-        let feedback = take_presentation_feedback(&output, space, &states);
+        let feedback = take_presentation_feedback(&output, space, unmanaged, &states);
         surface
             .drm_output
             .queue_frame(Some(feedback))

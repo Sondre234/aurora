@@ -1,0 +1,160 @@
+# Aurora configuration. Copy to ~/.config/aurora/config.toml (or pass --config <path>).
+# Aurora generates nothing implicitly, and every option below shows its default.
+#
+# Reload: bind `reload-config` (Super+Shift+r by default) or send SIGUSR1 to aurora-comp.
+# A file with a syntax error is refused and the previous settings stay active; a bad value
+# or list item is skipped with a warning in the log ("config: warning ..."). A missing
+# file means defaults. This file is also the source of the built-in default binds: the
+# [keybinds] and [mousebinds] tables below apply even when your file omits them, and your
+# own entries are merged over them.
+#
+# Emergency chords are hardcoded, always work (even under a shortcut-inhibiting client),
+# and cannot be bound or removed here; binds on them are ignored with a warning:
+#   Ctrl+Alt+BackSpace or Ctrl+AltGr+BackSpace   quit the compositor
+#   Ctrl+Alt+F1..F12 or Ctrl+AltGr+F1..F12       switch to that VT
+
+[general]
+gaps_in = 1               # px between tiled windows (0..1000)
+gaps_out = 5              # px between windows and the screen / bar edge (0..1000)
+border_width = 2          # px (0..100)
+border_focused = "#89b4fa"    # #rrggbb or #rrggbbaa
+border_unfocused = "#45475a"
+focus_follows_mouse = true
+move_follows = true       # move-to-workspace also switches the view to that workspace
+workspaces = 10           # numbered 1..N, N in 1..=32
+# Modifier that `Mod` expands to in binds: super, ctrl, shift, alt or altgr.
+mod_key = "super"
+# zwp_virtual_keyboard_v1 for tools such as wtype. Its keys go through the bind table.
+allow_virtual_keyboard = true
+# xdg-activation (an app asking to be raised): focus the window, or only mark it urgent.
+focus_on_activate = false
+
+# Binds: "<Mods>+<key>" = "<action>", or a table { action = "..", repeat = false,
+# bypass_inhibit = false }. Modifiers: Mod, Super (Logo, Win), Ctrl, Shift, Alt, AltGr.
+# The key is an xkb keysym name naming the UNSHIFTED key (write Shift+1, not exclam);
+# letters are case-insensitive. AltGr is its own modifier and never matches plain Alt.
+# `repeat` re-fires while held; `bypass_inhibit` fires even while a client inhibits
+# shortcuts. The action "none" removes a default bind.
+#
+# Actions:
+#   spawn <command>            run through `sh -c`
+#   close | fullscreen | maximize | toggle-floating | toggle-split
+#   focus|move|swap <dir>      dir: left right up down
+#   resize-split <dir> <px>
+#   workspace <N|next|prev> | move-to-workspace <N>
+#   focus-output <dir> | move-to-output <dir>
+#   revoke-inhibit             end the focused client's keyboard-shortcuts inhibitor and take
+#                              the keyboard back from an exclusive layer surface
+#   reload-config | quit | none
+#   drag-move | drag-resize    mouse binds only
+[keybinds]
+"Mod+q" = "spawn kitty"
+"Mod+c" = "close"
+"Mod+m" = "quit"
+"Mod+w" = "toggle-floating"
+"Mod+f" = "fullscreen"
+"Mod+j" = "toggle-split"
+"Mod+Shift+r" = "reload-config"
+"Mod+Shift+Escape" = { action = "revoke-inhibit", bypass_inhibit = true }
+
+"Mod+Left" = "focus left"
+"Mod+Right" = "focus right"
+"Mod+Up" = "focus up"
+"Mod+Down" = "focus down"
+
+"Mod+Shift+Left" = "move left"
+"Mod+Shift+Right" = "move right"
+"Mod+Shift+Up" = "move up"
+"Mod+Shift+Down" = "move down"
+
+"Mod+Ctrl+Left" = { action = "resize-split left 40", repeat = true }
+"Mod+Ctrl+Right" = { action = "resize-split right 40", repeat = true }
+"Mod+Ctrl+Up" = { action = "resize-split up 40", repeat = true }
+"Mod+Ctrl+Down" = { action = "resize-split down 40", repeat = true }
+
+"Mod+comma" = "focus-output left"
+"Mod+period" = "focus-output right"
+"Mod+Shift+comma" = "move-to-output left"
+"Mod+Shift+period" = "move-to-output right"
+
+"Mod+1" = "workspace 1"
+"Mod+2" = "workspace 2"
+"Mod+3" = "workspace 3"
+"Mod+4" = "workspace 4"
+"Mod+5" = "workspace 5"
+"Mod+6" = "workspace 6"
+"Mod+7" = "workspace 7"
+"Mod+8" = "workspace 8"
+"Mod+9" = "workspace 9"
+"Mod+0" = "workspace 10"
+
+"Mod+Shift+1" = "move-to-workspace 1"
+"Mod+Shift+2" = "move-to-workspace 2"
+"Mod+Shift+3" = "move-to-workspace 3"
+"Mod+Shift+4" = "move-to-workspace 4"
+"Mod+Shift+5" = "move-to-workspace 5"
+"Mod+Shift+6" = "move-to-workspace 6"
+"Mod+Shift+7" = "move-to-workspace 7"
+"Mod+Shift+8" = "move-to-workspace 8"
+"Mod+Shift+9" = "move-to-workspace 9"
+"Mod+Shift+0" = "move-to-workspace 10"
+
+# Mouse binds: buttons are left, right, middle, side, extra, BTN_LEFT or mouse:<code>;
+# wheel_up and wheel_down are also accepted.
+[mousebinds]
+"Mod+left" = "drag-move"
+"Mod+right" = "drag-resize"
+"Mod+wheel_down" = "workspace next"
+"Mod+wheel_up" = "workspace prev"
+
+# Outputs, by connector name. Every field is optional; an output without an entry is
+# enabled, placed to the right of the previous one in connector-name order, at its
+# preferred mode and scale 1.
+#   enabled  = false to leave the output off
+#   primary  = true for the output new windows and the first workspace land on
+#   position = [x, y] in layout pixels (after scaling)
+#   mode     = "WxH" or "WxH@Hz" (Hz may be fractional)
+#   scale    = 0.25..=8, fractional values use wp_fractional_scale
+# HDMI-A-1 and DP-3 are the two halves (2560x1440 each) of the 49 inch ultrawide in PBP
+# mode, DP-1 is a separate 1080p monitor. Positions are in scaled (logical) pixels:
+# 2560 / 1.25 = 2048 wide per half.
+[[output]]
+name = "HDMI-A-1"
+position = [0, 0]
+mode = "2560x1440@144"
+scale = 1.25
+primary = true
+
+[[output]]
+name = "DP-3"
+position = [2048, 0]
+mode = "2560x1440@200"
+scale = 1.25
+
+[[output]]
+name = "DP-1"
+position = [4096, 0]
+mode = "1920x1080@144"
+scale = 1
+
+# Workspace rules: pin workspace `id` to an output, and/or make it the one that output
+# shows at startup.
+# [[workspace]]
+# id = 1
+# output = "HDMI-A-1"
+# default = true
+
+# Window rules: match on at least one of app_id (Wayland), title, class (X11 WM_CLASS),
+# each an exact string or a pattern where * matches anything. Then apply any of:
+#   floating = true | false     workspace = N       output = "DP-1"
+#   size = [w, h] (floating)    fullscreen = true
+# [[window_rule]]
+# app_id = "pavucontrol"
+# floating = true
+#
+# [[window_rule]]
+# class = "steam_app_*"
+# workspace = 5
+
+# Commands run once, after the compositor's socket exists (never again on reload).
+# autostart = ["waybar", "swaync"]

@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{path::PathBuf, time::Duration};
 
 /// DRM sessions can black-screen the machine, so they exit on their own unless told otherwise.
 const DRM_DEFAULT_TIMEOUT: Duration = Duration::from_secs(120);
@@ -15,10 +15,12 @@ pub struct Cli {
     /// `None` means run until quit.
     pub timeout: Option<Duration>,
     pub command: String,
+    pub config: Option<PathBuf>,
+    /// Test mode: extra automation hooks for QA runs. Refused together with `--drm`.
+    pub qa: bool,
 }
 
-const USAGE: &str =
-    "usage: aurora-comp [--winit | --drm] [--timeout <secs>] [--no-timeout] [-c <command>]";
+const USAGE: &str = "usage: aurora-comp [--winit | --drm] [--timeout <secs>] [--no-timeout] [-c <command>] [--config <path>] [--qa]";
 
 impl Cli {
     pub fn parse() -> Result<Self, String> {
@@ -31,6 +33,8 @@ impl Cli {
         let (mut winit, mut drm, mut no_timeout) = (false, false, false);
         let mut timeout = None;
         let mut command = None;
+        let mut config = None;
+        let mut qa = false;
 
         let mut args = args;
         while let Some(arg) = args.next() {
@@ -45,6 +49,8 @@ impl Cli {
                         .map_err(|_| format!("invalid --timeout value {secs:?}"))?;
                     timeout = Some(Duration::from_secs(secs));
                 }
+                "--qa" => qa = true,
+                "--config" => config = Some(args.next().ok_or("--config needs a path")?.into()),
                 "-c" | "--command" => command = Some(args.next().ok_or("-c needs a command")?),
                 "-h" | "--help" => return Err(USAGE.to_string()),
                 other => return Err(format!("unknown argument {other:?}\n{USAGE}")),
@@ -65,6 +71,10 @@ impl Cli {
             _ => BackendKind::Drm,
         };
 
+        if qa && backend == BackendKind::Drm {
+            return Err("--qa cannot be combined with --drm".into());
+        }
+
         if backend == BackendKind::Drm && timeout.is_none() {
             if no_timeout {
                 tracing::warn!(
@@ -79,6 +89,8 @@ impl Cli {
             backend,
             timeout,
             command: command.unwrap_or_else(|| "kitty".to_string()),
+            config,
+            qa,
         })
     }
 }
@@ -96,6 +108,8 @@ mod tests {
         assert_eq!(parse(&[], true).unwrap().backend, BackendKind::Winit);
         assert_eq!(parse(&[], false).unwrap().backend, BackendKind::Drm);
         assert!(parse(&["--winit", "--drm"], true).is_err());
+        assert!(parse(&["--qa", "--drm"], true).is_err());
+        assert!(parse(&["--qa", "--winit"], true).unwrap().qa);
         assert_eq!(parse(&[], true).unwrap().timeout, None);
         assert_eq!(
             parse(&["--drm"], true).unwrap().timeout,

@@ -1,15 +1,30 @@
+mod action;
+mod actions;
 mod backend;
+mod capture;
 mod cli;
+mod config;
+mod debug;
 mod dmabuf;
+mod emergency;
+mod focus;
 mod handlers;
 mod input;
 mod keymap;
+mod layers;
 mod libinput;
 mod log;
+mod outputs;
+mod protocols;
 mod safety;
+mod scene;
 mod session;
+mod spawn;
 mod state;
 mod syncobj;
+mod virtual_input;
+mod wm;
+mod xwayland;
 
 use smithay::reexports::{calloop::EventLoop, wayland_server::Display};
 
@@ -29,7 +44,9 @@ fn main() {
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse()?;
-    tracing::info!(backend = ?cli.backend, timeout = ?cli.timeout, "aurora starting");
+    tracing::info!(backend = ?cli.backend, timeout = ?cli.timeout, qa = cli.qa, "aurora starting");
+    let config_path = config::resolve_path(cli.config.clone());
+    let config = config::Config::load_initial(&config_path);
 
     // Declared before `state` so the state (seat, session, devices) drops first.
     let mut event_loop: EventLoop<Aurora> = EventLoop::try_new()?;
@@ -48,7 +65,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             Backend::Drm(Box::new(DrmBackend::new(session, libinput, primary_gpu)))
         }
     };
-    let mut state = Aurora::new(&mut event_loop, display, backend).map_err(arm)?;
+    let mut state =
+        Aurora::new(&mut event_loop, display, backend, config, config_path).map_err(arm)?;
+    state.qa = cli.qa;
     state.apply_keymap();
     // Declared after `state`, so it drops first and bounds the teardown on every exit path.
     let _deadline = ExitDeadline;
@@ -69,39 +88,26 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // Children spawned from here on connect to us, not the host compositor.
-    unsafe { std::env::set_var("WAYLAND_DISPLAY", &state.socket_name) };
     tracing::info!(socket = ?state.socket_name, "aurora listening");
 
-    spawn_client(&cli.command);
+    state.start_xwayland();
+    state.spawn(&cli.command);
+    // exec-once: once per process, never re-run by a reload.
+    for cmd in state.config.autostart.clone() {
+        state.spawn(&cmd);
+    }
 
-    event_loop.run(None, &mut state, |state| {
+    let result = event_loop.run(None, &mut state, |state| {
         // Input and request handlers only queue events; nothing else flushes them.
         let _ = state.display_handle.flush_clients();
-    })?;
+    });
+    // Every exit path: the window manager must go before the state drops, and the server
+    // with it, so no Xwayland outlives the compositor.
+    state.shutdown_xwayland();
+    result?;
     safety::arm_exit_deadline();
     tracing::info!("aurora exiting");
     Ok(())
-}
-
-fn spawn_client(command: &str) {
-    use std::os::unix::process::CommandExt;
-
-    let mut cmd = std::process::Command::new(command);
-    // The signalfd source blocks SIGINT/SIGTERM/SIGHUP on this thread; children must not
-    // inherit that mask.
-    // Safety: only async-signal-safe calls between fork and exec.
-    unsafe {
-        cmd.pre_exec(|| {
-            let mut set: libc::sigset_t = std::mem::zeroed();
-            libc::sigemptyset(&mut set);
-            libc::sigprocmask(libc::SIG_SETMASK, &set, std::ptr::null_mut());
-            Ok(())
-        });
-    }
-    if let Err(err) = cmd.spawn() {
-        tracing::warn!(%command, %err, "failed to spawn startup client");
-    }
 }
 
 /// Arms the hard-exit deadline when dropped, including on early `?` returns.

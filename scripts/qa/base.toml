@@ -1,0 +1,28 @@
+# Base config for scripts/qa-nested.sh. Scenarios copy it and add to it. Everything not set
+# here keeps the built-in defaults (which include the Super binds of the example config).
+[general]
+gaps_in = 5
+gaps_out = 10
+border_width = 4
+border_focused = "#ff0000"
+border_unfocused = "#0000ff"
+# The pointer position inside the nested window is arbitrary, so hover must not steal focus.
+focus_follows_mouse = false
+
+[keybinds]
+# Harmless stand-ins for binds that would start real applications.
+"Mod+q" = "spawn true"
+"Mod+Return" = "spawn foot -a term"
+"Mod+Shift+period" = "move-to-output right"
+"Mod+Shift+comma" = "move-to-output left"
+# QA hooks (only honoured under --qa).
+"Mod+F1" = "debug-add-output HEADLESS-2 1920x1080@60"
+"Mod+F2" = "debug-remove-output HEADLESS-2"
+"Mod+F9" = "debug-dump"
+# Reports the environment spawned commands get.
+"Mod+F4" = "spawn sh -c 'printf \"%s\" \"$DISPLAY\" > \"$AURORA_QA_DIR/display\"; printf \"%s\" \"$WAYLAND_DISPLAY\" > \"$AURORA_QA_DIR/wayland\"'"
+
+# Pinned so the geometry does not depend on the size of the invisible host's output.
+[[output]]
+name = "winit"
+position = [0, 0]

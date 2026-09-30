@@ -1,4 +1,5 @@
 pub mod drm;
+pub mod headless;
 pub mod winit;
 
 use smithay::{

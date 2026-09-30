@@ -1,5 +1,10 @@
-use std::{ffi::OsString, sync::Arc, time::Duration};
+use std::{ffi::OsString, path::PathBuf, sync::Arc, time::Duration};
 
+use crate::config::Config;
+use crate::focus::FocusTarget;
+use crate::layers::Hit;
+use crate::protocols::Protocols;
+use crate::wm::{Wm, window::WindowElement};
 use crate::{backend::Backend, dmabuf::SurfaceDmabufFeedback};
 use smithay::input::keyboard::Keycode;
 
@@ -8,7 +13,7 @@ use smithay::{
         RenderElementStates, default_primary_scanout_output_compare, utils::select_dmabuf_feedback,
     },
     desktop::{
-        PopupManager, Space, Window, WindowSurfaceType, layer_map_for_output,
+        PopupManager, Space, Window, WindowSurface, WindowSurfaceType, layer_map_for_output,
         utils::{
             OutputPresentationFeedback, send_frames_surface_tree,
             surface_presentation_feedback_flags_from_states, surface_primary_scanout_output,
@@ -36,10 +41,8 @@ use smithay::{
         compositor::{CompositorClientState, CompositorState},
         dmabuf::{DmabufGlobal, DmabufState},
         drm_syncobj::DrmSyncobjState,
-        output::OutputManagerState,
-        presentation::PresentationState,
         selection::data_device::DataDeviceState,
-        shell::xdg::XdgShellState,
+        shell::{wlr_layer::Layer, xdg::XdgShellState},
         shm::ShmState,
         socket::ListeningSocketSource,
     },
@@ -55,21 +58,34 @@ pub struct Aurora {
     pub cursor_status: CursorImageStatus,
     /// Keys whose press was taken by a compositor shortcut; their release is swallowed too.
     pub suppressed_keys: Vec<Keycode>,
+    pub input: crate::input::InputState,
+    /// `--qa`: enables the debug input actions.
+    pub qa: bool,
+    pub config: Arc<Config>,
+    pub config_path: PathBuf,
     pub socket_name: OsString,
     pub display_handle: DisplayHandle,
     pub loop_signal: LoopSignal,
     pub handle: LoopHandle<'static, Aurora>,
 
-    pub space: Space<Window>,
+    pub wm: Wm,
+    /// QA outputs made by `debug-add-output`, by name.
+    pub headless: std::collections::HashMap<String, crate::backend::headless::HeadlessOutput>,
+    pub layer_focus: crate::layers::LayerFocus,
+    pub space: Space<WindowElement>,
+    pub xwayland: crate::xwayland::XWaylandState,
     pub popups: PopupManager,
+    /// The live xdg_popup grab with its root surface, kept so compositor focus changes can end it.
+    pub popup_grab: Option<(
+        smithay::desktop::PopupGrab<Aurora>,
+        smithay::reexports::wayland_server::protocol::wl_surface::WlSurface,
+    )>,
 
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShellState,
     pub shm_state: ShmState,
-    #[allow(dead_code)] // held so the xdg-output globals stay alive
-    pub output_manager_state: OutputManagerState,
-    #[allow(dead_code)] // held so the wp_presentation global stays alive
-    pub presentation_state: PresentationState,
+    pub protocols: Protocols,
+    pub captures: crate::capture::Captures,
     pub seat_state: SeatState<Aurora>,
     pub data_device_state: DataDeviceState,
     pub dmabuf_state: DmabufState,
@@ -77,7 +93,6 @@ pub struct Aurora {
     pub dmabuf_global: Option<DmabufGlobal>,
     pub syncobj_state: Option<DrmSyncobjState>,
 
-    #[allow(dead_code)] // held so the wl_seat global stays alive
     pub seat: Seat<Self>,
     pub keyboard: KeyboardHandle<Self>,
     pub pointer: PointerHandle<Self>,
@@ -88,17 +103,24 @@ impl Aurora {
         event_loop: &mut EventLoop<'static, Self>,
         display: Display<Self>,
         backend: Backend,
+        config: Arc<Config>,
+        config_path: PathBuf,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let dh = display.handle();
 
         let compositor_state = CompositorState::new::<Self>(&dh);
         let xdg_shell_state = XdgShellState::new::<Self>(&dh);
         let shm_state = ShmState::new::<Self>(&dh, vec![]);
-        let output_manager_state = OutputManagerState::new_with_xdg_output::<Self>(&dh);
         let data_device_state = DataDeviceState::new::<Self>(&dh);
         let clock = Clock::new();
-        let presentation_state = PresentationState::new::<Self>(&dh, clock.id() as u32);
+        let protocols = Protocols::new(
+            &dh,
+            &event_loop.handle(),
+            clock.id() as u32,
+            config.general.allow_virtual_keyboard,
+        );
 
+        let captures = crate::capture::Captures::new(&dh);
         let mut seat_state = SeatState::new();
         let mut seat: Seat<Self> = seat_state.new_wl_seat(&dh, backend.seat_name());
         // Hotplug tracking arrives with the DRM backend (M1).
@@ -114,17 +136,26 @@ impl Aurora {
             clock,
             cursor_status: CursorImageStatus::default_named(),
             suppressed_keys: Vec::new(),
+            input: Default::default(),
+            qa: false,
+            config,
+            config_path,
             socket_name,
             display_handle: dh,
             loop_signal: event_loop.get_signal(),
             handle: event_loop.handle(),
+            wm: Wm::default(),
+            headless: Default::default(),
+            layer_focus: Default::default(),
             space: Space::default(),
+            xwayland: Default::default(),
             popups: PopupManager::default(),
+            popup_grab: None,
             compositor_state,
             xdg_shell_state,
             shm_state,
-            output_manager_state,
-            presentation_state,
+            protocols,
+            captures,
             seat_state,
             data_device_state,
             dmabuf_state: DmabufState::new(),
@@ -173,14 +204,13 @@ impl Aurora {
     pub fn surface_under(
         &self,
         pos: Point<f64, Logical>,
-    ) -> Option<(WlSurface, Point<f64, Logical>)> {
-        self.space
-            .element_under(pos)
-            .and_then(|(window, location)| {
-                window
-                    .surface_under(pos - location.to_f64(), WindowSurfaceType::ALL)
-                    .map(|(surface, p)| (surface, (p + location).to_f64()))
-            })
+    ) -> Option<(FocusTarget, Point<f64, Logical>)> {
+        match self.hit_test(pos) {
+            Hit::Layer(hit) => Some((FocusTarget::Wl(hit.surface), hit.loc)),
+            Hit::Window(window, location) => window_focus(&window, pos, location),
+            Hit::Unmanaged(window, location) => window_focus(&window, pos, location),
+            Hit::Nothing => None,
+        }
     }
 
     /// Sends frame callbacks for everything drawn on `output`, plus dmabuf feedback when the
@@ -194,14 +224,38 @@ impl Aurora {
         states: &RenderElementStates,
     ) {
         let throttle = Some(Duration::from_secs(1));
+        self.send_output_scale(output);
 
         for window in self.space.elements() {
             if self.space.outputs_for_element(window).contains(output) {
                 window.send_frame(output, time, throttle, surface_primary_scanout_output);
+                if let Some(win) = self.wm.windows.get_mut(&window.id()) {
+                    win.frames_sent += 1;
+                }
             }
         }
+        for window in self.xwayland.unmanaged.elements() {
+            if self
+                .xwayland
+                .unmanaged
+                .outputs_for_element(window)
+                .contains(output)
+            {
+                window.send_frame(output, time, throttle, surface_primary_scanout_output);
+            }
+        }
+        // Layers hidden by a fullscreen window have no primary output worth trusting, so they
+        // fall to the throttle.
+        let top_hidden = crate::scene::top_hidden(output);
         for layer in layer_map_for_output(output).layers() {
-            layer.send_frame(output, time, throttle, surface_primary_scanout_output);
+            let hidden = top_hidden && layer.layer() == Layer::Top;
+            layer.send_frame(output, time, throttle, |s, d| {
+                if hidden {
+                    None
+                } else {
+                    surface_primary_scanout_output(s, d)
+                }
+            });
         }
         if let CursorImageStatus::Surface(surface) = &self.cursor_status {
             send_frames_surface_tree(
@@ -223,15 +277,40 @@ impl Aurora {
                 window.send_dmabuf_feedback(output, surface_primary_scanout_output, select);
             }
         }
+        for window in self.xwayland.unmanaged.elements() {
+            if self
+                .xwayland
+                .unmanaged
+                .outputs_for_element(window)
+                .contains(output)
+            {
+                window.send_dmabuf_feedback(output, surface_primary_scanout_output, select);
+            }
+        }
         for layer in layer_map_for_output(output).layers() {
             layer.send_dmabuf_feedback(output, surface_primary_scanout_output, select);
         }
     }
 }
 
+/// The surface of `window` at `pos` and where it sits, as a seat focus target.
+fn window_focus(
+    window: &Window,
+    pos: Point<f64, Logical>,
+    location: Point<i32, Logical>,
+) -> Option<(FocusTarget, Point<f64, Logical>)> {
+    let (surface, p) = window.surface_under(pos - location.to_f64(), WindowSurfaceType::ALL)?;
+    let target = match window.underlying_surface() {
+        WindowSurface::X11(x11) => FocusTarget::X11(x11.clone()),
+        WindowSurface::Wayland(_) => FocusTarget::Wl(surface),
+    };
+    Some((target, (p + location).to_f64()))
+}
+
 /// Records which output each surface is mostly presented on, from the last frame's element states.
 pub fn update_primary_scanout_output(
-    space: &Space<Window>,
+    space: &Space<WindowElement>,
+    unmanaged: &Space<Window>,
     output: &Output,
     cursor_status: &CursorImageStatus,
     states: &RenderElementStates,
@@ -249,6 +328,9 @@ pub fn update_primary_scanout_output(
     for window in space.elements() {
         window.with_surfaces(update);
     }
+    for window in unmanaged.elements() {
+        window.with_surfaces(update);
+    }
     for layer in layer_map_for_output(output).layers() {
         layer.with_surfaces(update);
     }
@@ -260,7 +342,8 @@ pub fn update_primary_scanout_output(
 /// Collects the presentation feedback requested by everything visible on `output`.
 pub fn take_presentation_feedback(
     output: &Output,
-    space: &Space<Window>,
+    space: &Space<WindowElement>,
+    unmanaged: &Space<Window>,
     states: &RenderElementStates,
 ) -> OutputPresentationFeedback {
     let mut feedback = OutputPresentationFeedback::new(output);
@@ -270,6 +353,11 @@ pub fn take_presentation_feedback(
 
     for window in space.elements() {
         if space.outputs_for_element(window).contains(output) {
+            window.take_presentation_feedback(&mut feedback, surface_primary_scanout_output, flags);
+        }
+    }
+    for window in unmanaged.elements() {
+        if unmanaged.outputs_for_element(window).contains(output) {
             window.take_presentation_feedback(&mut feedback, surface_primary_scanout_output, flags);
         }
     }

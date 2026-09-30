@@ -1,0 +1,8 @@
+[package]
+name = "aurora-layout"
+description = "Pure window layout logic for Aurora: tiling tree, workspaces, geometry"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]

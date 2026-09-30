@@ -1,7 +1,9 @@
 use crate::{Aurora, state::ClientState};
+use std::sync::OnceLock;
+
 use smithay::{
     backend::renderer::utils::on_commit_buffer_handler,
-    desktop::PopupKind,
+    desktop::{PopupKind, utils::surface_primary_scanout_output},
     input::pointer::CursorImageStatus,
     output::Output,
     reexports::wayland_server::{
@@ -12,10 +14,13 @@ use smithay::{
         buffer::BufferHandler,
         compositor::{
             CompositorClientState, CompositorHandler, CompositorState, get_parent,
-            is_sync_subsurface,
+            is_sync_subsurface, with_states,
         },
+        fractional_scale::{FractionalScaleHandler, with_fractional_scale},
+        seat::WaylandFocus,
         shm::{ShmHandler, ShmState},
     },
+    xwayland::XWaylandClientData,
 };
 
 use super::xdg_shell;
@@ -26,7 +31,16 @@ impl CompositorHandler for Aurora {
     }
 
     fn client_compositor_state<'a>(&self, client: &'a Client) -> &'a CompositorClientState {
-        &client.get_data::<ClientState>().unwrap().compositor_state
+        if let Some(data) = client.get_data::<XWaylandClientData>() {
+            return &data.compositor_state;
+        }
+        if let Some(data) = client.get_data::<ClientState>() {
+            return &data.compositor_state;
+        }
+        // Unknown client data never happens by construction; a shared default keeps a
+        // misregistered client from taking the compositor down.
+        static FALLBACK: OnceLock<CompositorClientState> = OnceLock::new();
+        FALLBACK.get_or_init(CompositorClientState::default)
     }
 
     fn new_surface(&mut self, surface: &WlSurface) {
@@ -39,34 +53,48 @@ impl CompositorHandler for Aurora {
         // A sync subsurface shows nothing until its parent commits.
         let sync_subsurface = is_sync_subsurface(surface);
         let mut outputs = Vec::new();
+        // A window known to Wm but not in the Space (hidden workspace, not yet mapped) draws
+        // nothing, so its commits repaint nothing.
+        let mut offscreen = false;
         if !sync_subsurface {
             let root = root_surface(surface);
-            let window = self
-                .space
-                .elements()
-                .find(|w| w.toplevel().unwrap().wl_surface() == &root)
-                .cloned();
+            let window = self.wm.window_of(&root).map(|w| w.element.clone());
             if let Some(window) = window {
                 window.on_commit();
                 outputs = self.space.outputs_for_element(&window);
+                offscreen = self.space.element_location(&window).is_none();
+            } else if let Some(window) = self
+                .xwayland
+                .unmanaged
+                .elements()
+                .find(|w| w.wl_surface().as_deref() == Some(&root))
+            {
+                window.on_commit();
+                outputs = self.xwayland.unmanaged.outputs_for_element(window);
             }
         };
 
-        xdg_shell::handle_commit(&mut self.popups, &self.space, surface);
+        if let Some(output) = self.layer_commit(surface) {
+            self.queue_redraw_output(&output);
+            return;
+        }
+        if self.wm.id_of(surface).is_some() {
+            self.toplevel_commit(surface);
+        }
+        xdg_shell::handle_commit(&mut self.popups, surface);
 
-        if sync_subsurface {
+        if sync_subsurface || offscreen {
             return;
         }
         if outputs.is_empty() {
-            outputs = self.outputs_for_unmapped(surface);
-        }
-        if outputs.is_empty() {
-            // Not a window, cursor or popup we can place; repaint everything.
-            self.queue_redraw_all();
-        } else {
-            for output in &outputs {
-                self.queue_redraw_output(output);
+            match self.outputs_for_unmapped(surface) {
+                Some(found) => outputs = found,
+                // Not a window, cursor or popup we can place; repaint everything.
+                None => return self.queue_redraw_all(),
             }
+        }
+        for output in &outputs {
+            self.queue_redraw_output(output);
         }
     }
 }
@@ -82,37 +110,43 @@ fn root_surface(surface: &WlSurface) -> WlSurface {
 impl Aurora {
     /// Outputs a commit from a surface outside the space can change: the pointer's for the
     /// cursor surface, the parent window's for a popup.
-    fn outputs_for_unmapped(&self, surface: &WlSurface) -> Vec<Output> {
+    fn outputs_for_unmapped(&self, surface: &WlSurface) -> Option<Vec<Output>> {
         let root = root_surface(surface);
         if let CursorImageStatus::Surface(cursor) = &self.cursor_status
             && cursor == &root
         {
             let pointer = self.pointer.current_location();
-            return self
-                .space
-                .outputs()
-                .filter(|o| {
-                    self.space
-                        .output_geometry(o)
-                        .is_some_and(|g| g.to_f64().contains(pointer))
-                })
-                .cloned()
-                .collect();
+            return Some(
+                self.space
+                    .outputs()
+                    .filter(|o| {
+                        self.space
+                            .output_geometry(o)
+                            .is_some_and(|g| g.to_f64().contains(pointer))
+                    })
+                    .cloned()
+                    .collect(),
+            );
         }
-        if let Some(parent) = self.popups.find_popup(&root).and_then(|popup| match popup {
-            PopupKind::Xdg(xdg) => xdg.get_parent_surface(),
-            _ => None,
-        }) {
-            let parent = root_surface(&parent);
-            if let Some(window) = self
-                .space
-                .elements()
-                .find(|w| w.toplevel().unwrap().wl_surface() == &parent)
-            {
-                return self.space.outputs_for_element(window);
+        if self.popups.find_popup(&root).is_some() {
+            // Walk up through nested popups to the window or layer that owns the menu. One
+            // whose owner is not on any output has nothing to repaint.
+            let mut owner = root;
+            for _ in 0..16 {
+                let Some(PopupKind::Xdg(xdg)) = self.popups.find_popup(&owner) else {
+                    break;
+                };
+                let Some(parent) = xdg.get_parent_surface() else {
+                    return Some(Vec::new());
+                };
+                owner = root_surface(&parent);
             }
+            if let Some(window) = self.wm.window_of(&owner).map(|w| &w.element) {
+                return Some(self.space.outputs_for_element(window));
+            }
+            return Some(self.layer_of(&owner).map(|(o, _)| o).into_iter().collect());
         }
-        Vec::new()
+        None
     }
 }
 
@@ -123,5 +157,33 @@ impl BufferHandler for Aurora {
 impl ShmHandler for Aurora {
     fn shm_state(&self) -> &ShmState {
         &self.shm_state
+    }
+}
+
+impl FractionalScaleHandler for Aurora {
+    /// Seeds the preferred scale before the surface has been presented anywhere: the output it
+    /// was last presented on, else the one its window or layer sits on, else the primary one.
+    fn new_fractional_scale(&mut self, surface: WlSurface) {
+        let root = root_surface(&surface);
+        let presented =
+            |s: &WlSurface| with_states(s, |data| surface_primary_scanout_output(s, data));
+        let output = presented(&surface)
+            .or_else(|| presented(&root))
+            .or_else(|| {
+                let win = self.wm.window_of(&root)?;
+                self.wm.output_for_ws(win.ws).or_else(|| {
+                    self.space
+                        .outputs_for_element(&win.element)
+                        .first()
+                        .cloned()
+                })
+            })
+            .or_else(|| self.layer_of(&root).map(|(output, _)| output))
+            .or_else(|| self.primary_output());
+        let Some(output) = output else { return };
+        let scale = output.current_scale().fractional_scale();
+        with_states(&surface, |data| {
+            with_fractional_scale(data, |fs| fs.set_preferred_scale(scale));
+        });
     }
 }
