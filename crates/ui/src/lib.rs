@@ -14,15 +14,24 @@
 //! - `runtime`: Wayland surface runners, shm pool, scaling, input and the calloop loop.
 
 pub mod cache;
+pub mod damage;
 pub mod geom;
+pub mod input;
 pub mod painter;
 pub mod skia;
 pub mod text;
+pub mod ui;
+pub mod widget;
 
 #[cfg(test)]
 mod text_tests;
+#[cfg(test)]
+mod ui_tests;
 
 pub use geom::{Color, Insets, Point, Rect, Size};
+pub use input::{Button, Id, Input, Key, KeyEvent, Mods, UiEvent};
 pub use painter::{Image, Painter};
+pub use ui::Ui;
+pub use widget::{Align, Dim, Justify, List, ListItem, Node, Shadow, Style, TextAlign, TextInput};
 pub use skia::{PaintBudgets, PaintCaches, PixelBuffer, SkiaPainter};
 pub use text::{FontFamily, ShapedText, TextBudgets, TextStyle, TextSystem, TextWrap};
