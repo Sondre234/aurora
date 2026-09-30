@@ -523,7 +523,13 @@ pub fn resolve_path(cli: Option<PathBuf>) -> PathBuf {
 impl Aurora {
     /// Never fails: an unreadable or unparsable file keeps the previous config.
     pub fn reload_config(&mut self) {
-        match Config::load(&self.config_path) {
+        let _ = self.reload_config_checked();
+    }
+
+    /// Reloads the config and the theme, restarts nothing that runs fine, and tells IPC
+    /// subscribers how it went. `Err` is the error that made it keep the previous config.
+    pub fn reload_config_checked(&mut self) -> Result<(), String> {
+        let (result, warnings) = match Config::load(&self.config_path) {
             Ok((config, warnings)) => {
                 config.log_loaded(&self.config_path, &warnings);
                 self.protocols
@@ -534,12 +540,17 @@ impl Aurora {
                 self.reapply_output_config();
                 self.drm_apply_output_config();
                 self.services_reload();
+                (Ok(()), warnings)
             }
-            Err(err) => tracing::warn!(
-                "config: error {} keeping previous",
-                err.lines().next().unwrap_or_default()
-            ),
-        }
+            Err(err) => {
+                let first = err.lines().next().unwrap_or_default().to_string();
+                tracing::warn!("config: error {first} keeping previous");
+                (Err(first.clone()), vec![first])
+            }
+        };
+        self.reload_theme();
+        self.ipc_config_reloaded(result.is_ok(), warnings);
+        result
     }
 }
 
@@ -774,7 +785,10 @@ mod tests {
     fn services_section_of_the_wrong_type_is_reported() {
         let (config, warnings) = resolve("services = 3\n");
         assert!(config.services.is_empty());
-        assert!(warnings.iter().any(|w| w.contains("services")), "{warnings:?}");
+        assert!(
+            warnings.iter().any(|w| w.contains("services")),
+            "{warnings:?}"
+        );
     }
 
     #[test]

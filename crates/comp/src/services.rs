@@ -163,7 +163,10 @@ enum Run {
         stopping: bool,
     },
     /// Waiting out the backoff; the timer must be removed if the service is stopped first.
-    Waiting { ticket: u64, timer: RegistrationToken },
+    Waiting {
+        ticket: u64,
+        timer: RegistrationToken,
+    },
 }
 
 struct Svc {
@@ -228,7 +231,10 @@ fn signal_group(pid: u32, signal: i32) {
 
 impl Aurora {
     /// Registers the exit channel with the loop. Called once from `Aurora::new`.
-    pub fn services_source(handle: &smithay::reexports::calloop::LoopHandle<'static, Aurora>, rx: Channel<Exit>) {
+    pub fn services_source(
+        handle: &smithay::reexports::calloop::LoopHandle<'static, Aurora>,
+        rx: Channel<Exit>,
+    ) {
         let result = handle.insert_source(rx, |event, _, state| {
             if let channel::Event::Msg(exit) = event {
                 state.service_exited(exit);
@@ -321,8 +327,9 @@ impl Aurora {
         let tx = self.services.tx.clone();
         let gone = Arc::new(AtomicBool::new(false));
 
-        let started = spawn_service(&command, &env).map_err(|e| e.to_string()).and_then(
-            |mut child| {
+        let started = spawn_service(&command, &env)
+            .map_err(|e| e.to_string())
+            .and_then(|mut child| {
                 let pid = child.id();
                 let (svc_name, flag) = (name.to_string(), gone.clone());
                 std::thread::Builder::new()
@@ -348,8 +355,7 @@ impl Aurora {
                         signal_group(pid, libc::SIGKILL);
                         format!("cannot start a reaper thread: {e}")
                     })
-            },
-        );
+            });
         match started {
             Ok(pid) => {
                 if let Some(svc) = self.services.find(name) {
@@ -404,10 +410,11 @@ impl Aurora {
                 tracing::info!("service: stopping name={name} pid={pid}");
                 signal_group(pid, libc::SIGTERM);
                 let n = name.to_string();
-                let killer = handle.insert_source(Timer::from_duration(KILL_AFTER), move |_, _, state| {
-                    state.service_kill_if_still(&n, ticket);
-                    TimeoutAction::Drop
-                });
+                let killer =
+                    handle.insert_source(Timer::from_duration(KILL_AFTER), move |_, _, state| {
+                        state.service_kill_if_still(&n, ticket);
+                        TimeoutAction::Drop
+                    });
                 if let Err(err) = killer {
                     tracing::warn!(%err, "service: cannot arm the kill timer");
                 }
@@ -461,7 +468,8 @@ impl Aurora {
         let stopped_on_purpose = matches!(svc.run, Run::Running { stopping: true, .. });
         svc.run = Run::Stopped;
         svc.consecutive = next_consecutive(svc.consecutive, ran_for);
-        let restart = !stopped_on_purpose && !svc.removed && restart_allowed(&svc.spec, info, locked);
+        let restart =
+            !stopped_on_purpose && !svc.removed && restart_allowed(&svc.spec, info, locked);
         if !restart {
             tracing::info!(
                 "service: exited name={name} code={} restart=none",
@@ -470,7 +478,11 @@ impl Aurora {
             self.services_prune();
             return;
         }
-        let delay = backoff_delay(svc.spec.backoff_ms, svc.spec.max_backoff_ms, svc.consecutive);
+        let delay = backoff_delay(
+            svc.spec.backoff_ms,
+            svc.spec.max_backoff_ms,
+            svc.consecutive,
+        );
         let ticket = self.services.ticket();
         let n = name.to_string();
         let timer = handle.insert_source(Timer::from_duration(delay), move |_, _, state| {
@@ -525,7 +537,9 @@ impl Aurora {
             .iter()
             .any(|s| s.spec.name == LOCK_SERVICE && s.spec.enabled && !s.removed);
         if !known {
-            tracing::warn!("lock: no enabled [services.{LOCK_SERVICE}] configured, nothing to start");
+            tracing::warn!(
+                "lock: no enabled [services.{LOCK_SERVICE}] configured, nothing to start"
+            );
             return;
         }
         if let Some(svc) = self.services.find(LOCK_SERVICE) {
@@ -539,6 +553,14 @@ impl Aurora {
         if !self.service_start(LOCK_SERVICE) {
             tracing::info!("lock: the lock service is already running");
         }
+    }
+
+    /// Whether `lock` is configured, for the IPC `Lock` request.
+    pub fn lock_service_configured(&self) -> bool {
+        self.services
+            .list
+            .iter()
+            .any(|s| s.spec.name == LOCK_SERVICE && s.spec.enabled && !s.removed)
     }
 
     /// After the loop ends: stops every service so none outlives the compositor. SIGTERM to
@@ -561,7 +583,9 @@ impl Aurora {
             }
         }
         let deadline = Instant::now() + SHUTDOWN_GRACE;
-        while pending.iter().any(|(_, _, gone)| !gone.load(Ordering::SeqCst))
+        while pending
+            .iter()
+            .any(|(_, _, gone)| !gone.load(Ordering::SeqCst))
             && Instant::now() < deadline
         {
             std::thread::sleep(Duration::from_millis(20));
@@ -731,11 +755,11 @@ mod tests {
         let mut off = spec("shell");
         off.enabled = false;
         assert_eq!(
-            plan(&[on.clone()], &[off.clone()]),
+            plan(std::slice::from_ref(&on), std::slice::from_ref(&off)),
             vec![Op::Update(off.clone()), Op::Stop("shell".into())]
         );
         assert_eq!(
-            plan(&[off], &[on.clone()]),
+            plan(&[off], std::slice::from_ref(&on)),
             vec![Op::Update(on), Op::Start("shell".into())]
         );
     }
@@ -760,7 +784,7 @@ mod tests {
         demand.autostart = false;
         let auto = spec("lock");
         assert_eq!(
-            plan(&[demand], &[auto.clone()]),
+            plan(&[demand], std::slice::from_ref(&auto)),
             vec![Op::Update(auto), Op::Start("lock".into())]
         );
     }

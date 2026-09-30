@@ -627,8 +627,14 @@ fn service(
         None => RestartPolicy::OnFailure,
     };
     let backoff = |key: &str, default: u32, warnings: &mut Vec<String>| {
-        ranged(ctx, key, t, 10..=i64::from(ServiceSpec::MAX_BACKOFF_MS), warnings)
-            .map_or(default, |n| n as u32)
+        ranged(
+            ctx,
+            key,
+            t,
+            10..=i64::from(ServiceSpec::MAX_BACKOFF_MS),
+            warnings,
+        )
+        .map_or(default, |n| n as u32)
     };
     let backoff_ms = backoff("backoff_ms", 500, warnings);
     let max_backoff_ms = backoff("max_backoff_ms", 30_000, warnings);

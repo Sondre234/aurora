@@ -457,6 +457,14 @@ impl Aurora {
         )
     }
 
+    /// The process id of the client that holds the session lock, if any.
+    pub fn lock_owner_pid(&self) -> Option<i32> {
+        let (_, owner) = self.lock.as_ref()?.owner.as_ref()?;
+        let client = owner.client()?;
+        let creds = client.get_credentials(&self.display_handle).ok()?;
+        Some(creds.pid)
+    }
+
     /// `dump: lock state=unlocked|locking|locked surfaces=<n>`.
     pub fn dump_lock(&self) {
         let (state, surfaces) = self.lock.as_ref().map_or(("unlocked", 0), |s| {

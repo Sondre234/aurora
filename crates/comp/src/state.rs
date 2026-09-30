@@ -79,6 +79,11 @@ pub struct Aurora {
     pub lock: Option<crate::lock::LockState>,
     /// Supervised `[services]` processes.
     pub services: crate::services::Services,
+    /// The IPC server, `None` when it could not start.
+    pub ipc: Option<crate::ipc::Ipc>,
+    /// The live theme and where it is loaded from.
+    pub theme: aurora_theme::ThemeSnapshot,
+    pub theme_path: PathBuf,
     pub space: Space<WindowElement>,
     pub xwayland: crate::xwayland::XWaylandState,
     pub popups: PopupManager,
@@ -137,6 +142,8 @@ impl Aurora {
         let pointer = seat.add_pointer();
 
         let socket_name = Self::init_wayland_listener(display, event_loop)?;
+        let theme_path = crate::ipc::theme::path_for(&config_path);
+        let theme = crate::ipc::theme::load_initial(&theme_path);
         let (services, service_exits) = crate::services::Services::new();
         Self::services_source(&event_loop.handle(), service_exits);
 
@@ -159,6 +166,9 @@ impl Aurora {
             layer_focus: Default::default(),
             lock: None,
             services,
+            ipc: None,
+            theme,
+            theme_path,
             space: Space::default(),
             xwayland: Default::default(),
             popups: PopupManager::default(),

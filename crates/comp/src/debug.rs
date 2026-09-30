@@ -213,6 +213,7 @@ impl Aurora {
         self.dump_overview();
         self.dump_lock();
         self.dump_services();
+        self.dump_ipc();
         tracing::info!("dump: end {seq}");
     }
 

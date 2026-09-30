@@ -75,7 +75,7 @@ impl Aurora {
         }
     }
 
-    fn open_overview(&mut self) {
+    pub fn open_overview(&mut self) {
         if self.is_locked() {
             return;
         }

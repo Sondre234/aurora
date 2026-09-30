@@ -85,8 +85,15 @@ impl Aurora {
 
     /// Asks the focused window to close; the client decides.
     fn close_focused(&mut self) {
-        let Some(win) = self.wm.focused.and_then(|id| self.wm.windows.get(&id)) else {
-            return;
+        if let Some(id) = self.wm.focused {
+            self.close_window(id);
+        }
+    }
+
+    /// Asks window `id` to close; the client decides. False when there is no such window.
+    pub fn close_window(&mut self, id: WinId) -> bool {
+        let Some(win) = self.wm.windows.get(&id) else {
+            return false;
         };
         match win.element.underlying_surface() {
             WindowSurface::Wayland(toplevel) => toplevel.send_close(),
@@ -96,6 +103,7 @@ impl Aurora {
                 }
             }
         }
+        true
     }
 
     pub(crate) fn focused_with_ws(&self) -> Option<(WinId, u32)> {

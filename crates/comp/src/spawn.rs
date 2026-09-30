@@ -15,6 +15,15 @@ fn shell_command(cmd: &str, env: &[(&str, &OsStr)]) -> Command {
     command
 }
 
+/// `argv[0]` looked up in `PATH` with `argv[1..]` as its arguments, no shell involved.
+fn argv_command(argv: &[String], env: &[(&str, &OsStr)]) -> Option<Command> {
+    let (program, args) = argv.split_first()?;
+    let mut command = Command::new(program);
+    command.args(args);
+    prepare(&mut command, env);
+    Some(command)
+}
+
 fn prepare(command: &mut Command, env: &[(&str, &OsStr)]) {
     command.stdin(Stdio::null());
     for (key, value) in env {
@@ -60,6 +69,16 @@ pub fn spawn(cmd: &str, env: &[(&str, &OsStr)]) {
     launch(shell_command(cmd, env), cmd);
 }
 
+/// Runs a program without a shell (`argv[0]` from `PATH`), in its own session.
+pub fn spawn_argv(argv: &[String], env: &[(&str, &OsStr)]) {
+    let Some(command) = argv_command(argv, env) else {
+        return;
+    };
+    let line = argv.join(" ");
+    tracing::info!("spawn: {line}");
+    launch(command, &line);
+}
+
 /// Starts `cmd` (through `sh -c`, own session) for the service supervisor, which reaps the
 /// child itself so it can learn how it ended.
 pub fn spawn_service(cmd: &str, env: &[(&str, &OsStr)]) -> std::io::Result<Child> {
@@ -67,7 +86,8 @@ pub fn spawn_service(cmd: &str, env: &[(&str, &OsStr)]) -> std::io::Result<Child
 }
 
 impl Aurora {
-    /// What every child sees: how to reach this compositor and its X server. Set on the Command only; the compositor's own environment stays as it was.
+    /// What every child sees: how to reach this compositor, its X server and its IPC
+    /// socket. Set on the Command only; the compositor's own environment stays as it was.
     pub fn base_env(&self) -> Vec<(&'static str, OsString)> {
         let mut env: Vec<(&'static str, OsString)> = vec![
             ("WAYLAND_DISPLAY", self.socket_name.clone()),
@@ -76,6 +96,9 @@ impl Aurora {
         ];
         if let Some(display) = self.xwayland.display {
             env.push(("DISPLAY", format!(":{display}").into()));
+        }
+        if let Some(path) = self.ipc_socket_path() {
+            env.push(("AURORA_IPC_SOCK", path.into_os_string()));
         }
         env
     }
@@ -97,5 +120,12 @@ impl Aurora {
         let env = self.spawn_env();
         let env: Vec<_> = env.iter().map(|(k, v)| (*k, v.as_os_str())).collect();
         spawn(cmd, &env);
+    }
+
+    /// Starts a program (no shell) that talks to this compositor.
+    pub fn spawn_argv(&mut self, argv: &[String]) {
+        let env = self.spawn_env();
+        let env: Vec<_> = env.iter().map(|(k, v)| (*k, v.as_os_str())).collect();
+        spawn_argv(argv, &env);
     }
 }
