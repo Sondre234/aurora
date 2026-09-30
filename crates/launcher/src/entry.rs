@@ -80,7 +80,12 @@ pub fn app_from_desktop(id: &str, de: &DesktopEntry, env: &Env) -> Option<AppEnt
         comment: de.comment(&env.locales).and_then(non_empty),
         keywords: de
             .keywords(&env.locales)
-            .map(|k| k.iter().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect())
+            .map(|k| {
+                k.iter()
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect()
+            })
             .unwrap_or_default(),
         icon: icon.map(str::to_string),
         argv,
@@ -95,7 +100,12 @@ pub fn app_from_desktop(id: &str, de: &DesktopEntry, env: &Env) -> Option<AppEnt
 /// entry's path, `%%` a literal percent. An argument that was nothing but a code is
 /// dropped; one that merely contains a code keeps its other text. `None` when nothing
 /// executable is left.
-pub fn strip_exec(exec: &str, name: &str, icon: Option<&str>, path: Option<&str>) -> Option<Vec<String>> {
+pub fn strip_exec(
+    exec: &str,
+    name: &str,
+    icon: Option<&str>,
+    path: Option<&str>,
+) -> Option<Vec<String>> {
     let mut argv: Vec<String> = Vec::new();
     for raw in split_exec(exec) {
         let (text, quoted) = raw;
@@ -228,19 +238,28 @@ mod tests {
     #[test]
     fn plain_and_quoted_arguments() {
         assert_eq!(strip("firefox"), Some(s(&["firefox"])));
-        assert_eq!(strip("env FOO=1 app --flag"), Some(s(&["env", "FOO=1", "app", "--flag"])));
+        assert_eq!(
+            strip("env FOO=1 app --flag"),
+            Some(s(&["env", "FOO=1", "app", "--flag"]))
+        );
         assert_eq!(
             strip(r#""/opt/My App/bin/app" --name "two words""#),
             Some(s(&["/opt/My App/bin/app", "--name", "two words"]))
         );
-        assert_eq!(strip(r#"sh -c "echo \"hi\" \$HOME""#), Some(s(&["sh", "-c", r#"echo "hi" $HOME"#])));
+        assert_eq!(
+            strip(r#"sh -c "echo \"hi\" \$HOME""#),
+            Some(s(&["sh", "-c", r#"echo "hi" $HOME"#]))
+        );
     }
 
     #[test]
     fn field_codes_are_removed() {
         assert_eq!(strip("firefox %u"), Some(s(&["firefox"])));
         assert_eq!(strip("gimp %F %U"), Some(s(&["gimp"])));
-        assert_eq!(strip("app --open=%f --new-window"), Some(s(&["app", "--open=", "--new-window"])));
+        assert_eq!(
+            strip("app --open=%f --new-window"),
+            Some(s(&["app", "--open=", "--new-window"]))
+        );
         for code in ["f", "F", "u", "U", "d", "D", "n", "N", "v", "m"] {
             assert_eq!(strip(&format!("app %{code}")), Some(s(&["app"])), "%{code}");
         }
@@ -250,7 +269,10 @@ mod tests {
     fn icon_name_path_and_percent_codes() {
         assert_eq!(strip("app %i"), Some(s(&["app", "--icon", "app-icon"])));
         assert_eq!(strip_exec("app %i", "N", None, None), Some(s(&["app"])));
-        assert_eq!(strip("app --title=%c"), Some(s(&["app", "--title=App Name"])));
+        assert_eq!(
+            strip("app --title=%c"),
+            Some(s(&["app", "--title=App Name"]))
+        );
         assert_eq!(strip("app %k"), Some(s(&["app", "/x/app.desktop"])));
         assert_eq!(strip("printf 100%%"), Some(s(&["printf", "100%"])));
     }
@@ -269,7 +291,10 @@ mod tests {
             locales_from(&[None, Some("de_DE.UTF-8@euro".into()), Some("C".into())]),
             s(&["de_DE", "de"])
         );
-        assert_eq!(locales_from(&[Some("en".into()), Some("en_US.UTF-8".into())]), s(&["en", "en_US"]));
+        assert_eq!(
+            locales_from(&[Some("en".into()), Some("en_US.UTF-8".into())]),
+            s(&["en", "en_US"])
+        );
         assert!(locales_from(&[Some("POSIX".into())]).is_empty());
         assert_eq!(desktops_from(Some("Aurora:GNOME")), s(&["aurora", "gnome"]));
         assert!(desktops_from(None).is_empty());

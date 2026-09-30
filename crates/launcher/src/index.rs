@@ -290,7 +290,10 @@ mod tests {
         let hits = i.search("fire", &Frecency::new(), 0, 10);
         assert_eq!(i.get(hits[0].app).unwrap().name, "Firefox");
         assert_eq!(hits[0].positions, vec![0, 1, 2, 3]);
-        assert!(hits.iter().all(|h| i.get(h.app).unwrap().name != "Terminal"));
+        assert!(
+            hits.iter()
+                .all(|h| i.get(h.app).unwrap().name != "Terminal")
+        );
     }
 
     #[test]
@@ -307,13 +310,20 @@ mod tests {
 
     #[test]
     fn empty_query_lists_by_frecency_then_name() {
-        let i = index(vec![app("a", "Alpha"), app("b", "Bravo"), app("c", "Charlie")]);
+        let i = index(vec![
+            app("a", "Alpha"),
+            app("b", "Bravo"),
+            app("c", "Charlie"),
+        ]);
         let mut f = Frecency::new();
         f.record_launch("c", 100);
         f.record_launch("c", 101);
         f.record_launch("b", 102);
         let hits = i.search("", &f, 103, 10);
-        let names: Vec<&str> = hits.iter().map(|h| i.get(h.app).unwrap().name.as_str()).collect();
+        let names: Vec<&str> = hits
+            .iter()
+            .map(|h| i.get(h.app).unwrap().name.as_str())
+            .collect();
         assert_eq!(names, ["Charlie", "Bravo", "Alpha"]);
         assert_eq!(i.search("", &f, 103, 2).len(), 2);
     }
@@ -329,7 +339,10 @@ mod tests {
 
     #[test]
     fn desktop_ids_follow_the_spec() {
-        assert_eq!(desktop_id(Path::new("org.gnome.Nautilus.desktop")), "org.gnome.Nautilus");
+        assert_eq!(
+            desktop_id(Path::new("org.gnome.Nautilus.desktop")),
+            "org.gnome.Nautilus"
+        );
         assert_eq!(desktop_id(Path::new("kde/foo.desktop")), "kde-foo");
     }
 
@@ -355,18 +368,26 @@ mod tests {
 
     #[test]
     fn scan_reads_a_directory_and_a_user_override_hides_a_system_entry() {
-        let root = std::env::temp_dir().join(format!("aurora-launcher-scan-{}", std::process::id()));
+        let root =
+            std::env::temp_dir().join(format!("aurora-launcher-scan-{}", std::process::id()));
         let user = root.join("user");
         let system = root.join("system");
         std::fs::create_dir_all(user.join("sub")).unwrap();
         std::fs::create_dir_all(&system).unwrap();
         let entry = |name: &str| {
-            format!("[Desktop Entry]\nType=Application\nName={name}\nExec={}\n", name.to_lowercase())
+            format!(
+                "[Desktop Entry]\nType=Application\nName={name}\nExec={}\n",
+                name.to_lowercase()
+            )
         };
         std::fs::write(system.join("one.desktop"), entry("One")).unwrap();
         std::fs::write(system.join("two.desktop"), entry("Two")).unwrap();
         std::fs::write(system.join("readme.txt"), "x").unwrap();
-        std::fs::write(user.join("two.desktop"), "[Desktop Entry]\nType=Application\nName=Two\nExec=two\nHidden=true\n").unwrap();
+        std::fs::write(
+            user.join("two.desktop"),
+            "[Desktop Entry]\nType=Application\nName=Two\nExec=two\nHidden=true\n",
+        )
+        .unwrap();
         std::fs::write(user.join("sub").join("three.desktop"), entry("Three")).unwrap();
         let env = Env {
             desktops: Vec::new(),

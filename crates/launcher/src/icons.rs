@@ -11,8 +11,8 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
-use aurora_ui::cache::{CacheStats, LruCache};
 use aurora_ui::Image;
+use aurora_ui::cache::{CacheStats, LruCache};
 
 /// Decoded straight-alpha RGBA, `w * h * 4` bytes.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -73,11 +73,15 @@ fn decode_png(path: &Path) -> Option<RawIcon> {
     let rgba = match info.color_type {
         png::ColorType::Rgba => data.to_vec(),
         png::ColorType::Rgb => data
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .flat_map(|p| [p[0], p[1], p[2], 255])
             .collect(),
         png::ColorType::GrayscaleAlpha => data
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .flat_map(|p| [p[0], p[0], p[0], p[1]])
             .collect(),
         png::ColorType::Grayscale => data.iter().flat_map(|g| [*g, *g, *g, 255]).collect(),
@@ -91,7 +95,7 @@ fn render_svg(path: &Path, px: u32) -> Option<RawIcon> {
     let tree = resvg::usvg::Tree::from_data(&data, &resvg::usvg::Options::default()).ok()?;
     let size = tree.size();
     let longest = size.width().max(size.height());
-    if !(longest > 0.0) {
+    if !longest.is_finite() || longest <= 0.0 {
         return None;
     }
     let scale = px as f32 / longest;
@@ -105,7 +109,7 @@ fn render_svg(path: &Path, px: u32) -> Option<RawIcon> {
     );
     // tiny-skia is premultiplied; `Image::from_rgba` wants straight alpha.
     let mut rgba = pixmap.take();
-    for p in rgba.chunks_exact_mut(4) {
+    for p in rgba.as_chunks_mut::<4>().0 {
         let a = p[3] as u32;
         if a != 0 && a != 255 {
             for c in &mut p[..3] {
@@ -146,12 +150,12 @@ pub fn fit(src: &RawIcon, px: u32) -> RawIcon {
                 }
             }
             let o = (y as usize * w as usize + x as usize) * 4;
-            if a > 0 {
-                out[o] = ((r + a / 2) / a) as u8;
-                out[o + 1] = ((g + a / 2) / a) as u8;
-                out[o + 2] = ((b + a / 2) / a) as u8;
-                out[o + 3] = ((a + n / 2) / n) as u8;
-            }
+            // Average color weighted by alpha, so transparent pixels do not darken edges.
+            let div = |v: u64, by: u64| (v + by / 2).checked_div(by).unwrap_or(0) as u8;
+            out[o] = div(r, a);
+            out[o + 1] = div(g, a);
+            out[o + 2] = div(b, a);
+            out[o + 3] = div(a, n);
         }
     }
     RawIcon { w, h, rgba: out }
@@ -261,7 +265,12 @@ mod tests {
         RawIcon {
             w,
             h,
-            rgba: px.iter().copied().cycle().take((w * h * 4) as usize).collect(),
+            rgba: px
+                .iter()
+                .copied()
+                .cycle()
+                .take((w * h * 4) as usize)
+                .collect(),
         }
     }
 
@@ -304,7 +313,10 @@ mod tests {
         // 32x32x4 = 4096 bytes: only two fit in 10_000.
         for n in ["x", "y", "z"] {
             assert!(c.should_request(n));
-            assert!(c.store(n.into(), Some(solid(32, 32, [1, 2, 3, 255]))).is_some());
+            assert!(
+                c.store(n.into(), Some(solid(32, 32, [1, 2, 3, 255])))
+                    .is_some()
+            );
         }
         let s = c.stats();
         assert!(s.bytes <= 10_000, "{s:?}");

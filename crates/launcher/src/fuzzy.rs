@@ -50,7 +50,11 @@ pub fn is_subsequence(needle: &str, haystack: &str) -> bool {
 /// Matches `query` against `candidate`. An empty query matches everything with score 0
 /// and no positions.
 pub fn fuzzy_match(query: &str, candidate: &str) -> Option<Match> {
-    let needle: Vec<char> = query.chars().filter(|c| !c.is_whitespace()).map(lower).collect();
+    let needle: Vec<char> = query
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .map(lower)
+        .collect();
     if needle.is_empty() {
         return Some(Match {
             score: 0,
@@ -111,7 +115,8 @@ pub fn fuzzy_match(query: &str, candidate: &str) -> Option<Match> {
             j -= 1;
             let here = d[i][j];
             if here != NEG && (required || here == best[i][j]) {
-                required = i > 0 && j > 0 && best[i][j] == d[i - 1][j - 1] + SCORE_MATCH_CONSECUTIVE;
+                required =
+                    i > 0 && j > 0 && best[i][j] == d[i - 1][j - 1] + SCORE_MATCH_CONSECUTIVE;
                 positions[i] = j;
                 break;
             }
@@ -197,7 +202,9 @@ mod tests {
 
     #[test]
     fn shorter_candidate_wins_on_equal_match() {
-        assert!(score("term", "Terminal").unwrap() > score("term", "Terminal Emulator Pro").unwrap());
+        assert!(
+            score("term", "Terminal").unwrap() > score("term", "Terminal Emulator Pro").unwrap()
+        );
     }
 
     #[test]

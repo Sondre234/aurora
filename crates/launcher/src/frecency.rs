@@ -130,10 +130,7 @@ pub fn bonus_for(score: f64) -> i32 {
 
 /// `$XDG_STATE_HOME/aurora/launcher.json`, else `~/.local/state/aurora/launcher.json`.
 pub fn state_path() -> Option<PathBuf> {
-    state_path_from(
-        std::env::var_os("XDG_STATE_HOME"),
-        std::env::var_os("HOME"),
-    )
+    state_path_from(std::env::var_os("XDG_STATE_HOME"), std::env::var_os("HOME"))
 }
 
 pub fn state_path_from(
@@ -183,7 +180,7 @@ mod tests {
         f.record_launch("once", 7 * DAY);
         assert!(f.score("habit", 7 * DAY) > f.score("once", 7 * DAY));
         // ... but only for so long.
-        assert!(f.score("habit", 120 * DAY)  < 0.1);
+        assert!(f.score("habit", 120 * DAY) < 0.1);
     }
 
     #[test]
