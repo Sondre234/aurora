@@ -1,4 +1,5 @@
 mod action;
+mod anim;
 mod actions;
 mod backend;
 mod capture;
