@@ -82,3 +82,27 @@ Frame-time rules for M3:
 QA proves the log contract lines (`scripts/qa-nested.sh anim effects overview xscale`);
 frame pacing, VRAM use and scanout are on the hardware checklist in
 [m3-plan.md](m3-plan.md).
+
+## M4 service budgets and metrics
+
+Services are separate processes, so their cost never lands on the compositor's paint path.
+The compositor side of M4 (IPC, supervision, theme) runs on the main loop but only does
+small, bounded work: the snapshot diff is cheap, per-client queues are capped, nothing
+blocks on a client. Targets below are initial and get measured on the hardware checklist in
+[m4-plan.md](m4-plan.md).
+
+| Item | Budget | Metric |
+|---|---|---|
+| IPC snapshot diff + broadcast | negligible next to a frame, no allocation when nothing changed; never on the render path | `ipc: broadcast topic=<t> clients=<n>` (only when something changed) |
+| IPC client queue | coalesced per state; over 256 KiB unsent the client is resynced with a snapshot, over 2 MiB it is disconnected | `ipc: slow client name=<n> resynced`, `dump: ipc clients=<n>` |
+| IPC frames | small typed messages, capped at 1 MiB, large buffers only by fd | n/a |
+| Idle service cost | ~0 CPU and 0 GPU: no timers except the clock (once a minute), no frame callbacks while nothing changes, damage regions only | client-side `perf:` lines per service |
+| Resident memory per service | a few MB each (wl_shm pool, glyph cache), all services together well under 200 MB | `dump: service <name> pid=<p> restarts=<n>` then `/proc/<pid>/status` |
+| Glyph/shaping cache (`ui`) | per process, byte-budgeted with LRU eviction (initial 16 MB) | hit rate, bytes, evictions in a `perf:` line every 5 s while active |
+| Launcher | app index and fuzzy tables built once at startup, surface created once and shown/hidden: toggle to first frame under one refresh interval | `launcher: ready apps=<n>`, `launcher: show`/`hide` |
+| Bar | retained surface, repaints only on IPC delta, theme change or the minute tick | `shell: ready outputs=<n>` |
+| Supervision | restarts back off 500 ms doubling to 30 s; a run of 10 s resets it; no restart storm can burn CPU | `service: started`, `service: exited ... restart=<ms>` |
+| Theme push | one `Event::Theme` per real change (identical file: nothing), services repaint without restart | `theme: changed rev=<n>` |
+
+QA proves the log contract (`scripts/qa-nested.sh ipc services theme shell launcher
+notifd lock`); memory, idle CPU and toggle latency are on the hardware checklist.
