@@ -1,0 +1,25 @@
+[package]
+name = "aurora-lock"
+description = "Aurora screen locker: ext-session-lock client with PAM authentication"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+build = "build.rs"
+
+[[bin]]
+name = "aurora-lock"
+path = "src/main.rs"
+
+[features]
+default = ["pam"]
+# Link libpam and authenticate through it. Without PAM (feature off or library missing at
+# build time) the crate builds a stub that refuses to unlock, so it fails closed.
+pam = []
+
+[dependencies]
+aurora-ui = { path = "../ui" }
+aurora-theme = { workspace = true }
+libc = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+zeroize = "1"
