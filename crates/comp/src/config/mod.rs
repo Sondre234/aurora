@@ -224,6 +224,31 @@ impl Default for Decoration {
     }
 }
 
+/// `[xwayland]`: how X11 clients are scaled.
+#[derive(Clone, Debug, PartialEq)]
+pub struct XWayland {
+    /// X pixels per logical pixel. 1 leaves X11 windows unscaled (the compositor resamples
+    /// them on scaled outputs); the output's scale makes them render 1:1 on its pixels.
+    pub scale: f64,
+}
+
+impl XWayland {
+    pub const MIN_SCALE: f64 = 1.0;
+    pub const MAX_SCALE: f64 = 4.0;
+
+    /// The resolution to hand the X server so toolkits that read it grow with the scale, or
+    /// `None` at scale 1 where the server keeps its own default.
+    pub fn dpi(&self) -> Option<u32> {
+        ((self.scale - 1.0).abs() > 1e-6).then(|| (96.0 * self.scale).round() as u32)
+    }
+}
+
+impl Default for XWayland {
+    fn default() -> Self {
+        Self { scale: 1.0 }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ModeSpec {
     pub width: i32,
@@ -328,6 +353,7 @@ pub struct Config {
     pub general: General,
     pub animations: Animations,
     pub decoration: Decoration,
+    pub xwayland: XWayland,
     pub binds: BindTable,
     pub outputs: Vec<OutputRule>,
     pub workspace_rules: Vec<WorkspaceRule>,
@@ -347,6 +373,7 @@ impl Config {
         let general = raw::general(raw.general.as_ref(), &mut w);
         let animations = raw::animations(raw.animations.as_ref(), &mut w);
         let decoration = raw::decoration(raw.decoration.as_ref(), &mut w);
+        let xwayland = raw::xwayland(raw.xwayland.as_ref(), &mut w);
         let binds = BindTable::build(
             general.mod_key.mods(),
             general.workspaces,
@@ -357,6 +384,7 @@ impl Config {
         let config = Self {
             animations,
             decoration,
+            xwayland,
             binds,
             outputs: raw::outputs(raw.output.as_ref(), &mut w),
             workspace_rules: raw::workspace_rules(
@@ -496,6 +524,7 @@ mod tests {
         assert_eq!(config.animations.enabled, a.enabled);
         assert_eq!(config.animations.duration_ms, a.duration_ms);
         assert_eq!(config.animations.curve, a.curve);
+        assert_eq!(config.xwayland, XWayland::default());
         assert_eq!(config.decoration.rounding, d.rounding);
         assert_eq!(config.decoration.shadow_radius, d.shadow_radius);
         assert_eq!(config.decoration.shadow_color, d.shadow_color);
@@ -563,6 +592,27 @@ mod tests {
                 "{needle}: {warnings:?}"
             );
         }
+    }
+
+    #[test]
+    fn xwayland_scale_parses_and_rejects_bad_values() {
+        let (config, warnings) = resolve("[xwayland]\nscale = 1.25\n");
+        assert_eq!(config.xwayland.scale, 1.25);
+        assert_eq!(config.xwayland.dpi(), Some(120));
+        assert!(warnings.is_empty(), "{warnings:?}");
+        let (config, _) = resolve("[xwayland]\nscale = 2\n");
+        assert_eq!(config.xwayland.scale, 2.0);
+        for bad in ["0", "9.5", "\"big\"", "-1"] {
+            let (config, warnings) = resolve(&format!("[xwayland]\nscale = {bad}\n"));
+            assert_eq!(config.xwayland, XWayland::default(), "{bad}");
+            assert!(warnings.iter().any(|w| w.contains("scale")), "{bad}");
+        }
+    }
+
+    #[test]
+    fn default_xwayland_scale_changes_nothing() {
+        assert_eq!(XWayland::default().scale, 1.0);
+        assert_eq!(XWayland::default().dpi(), None);
     }
 
     #[test]

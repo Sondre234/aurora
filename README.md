@@ -80,8 +80,10 @@ Emergency chords are hardcoded and cannot be rebound or removed: Ctrl+Alt+BackSp
 Ctrl+AltGr+BackSpace quits, Ctrl+Alt+F1..F12 or Ctrl+AltGr+F1..F12 switches VT.
 
 Known limits: there is no ext-workspace or foreign-toplevel protocol yet, so a bar's
-workspace widget waits for the M4 IPC. X11 apps are never scaled (M3 item, see `xwayland.scale` once it lands), so keep the monitor you run Proton games on at scale 1. wlr-screencopy
-is not offered (ext-image-copy-capture is, which is what grim uses). Aurora owns
+workspace widget waits for the M4 IPC. X11 apps are unscaled by default, so they look
+blurry on a scaled output; set `[xwayland] scale` to that output's scale (read when
+XWayland starts, see the example config) for sharp native-resolution X11 windows (not yet
+verified on hardware). wlr-screencopy is not offered (ext-image-copy-capture is, which is what grim uses). Aurora owns
 `zwp_virtual_keyboard_v1` and routes its keys through the bind table, so any client can
 inject key presses and trigger binds; set `allow_virtual_keyboard = false` to turn that off.
 
