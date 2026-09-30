@@ -28,7 +28,7 @@ Read README.md, docs/performance.md and docs/m2-plan.md first. Every step leaves
 - **B. Rounded corners + shadows:** shaders and elements in `effects/corners.rs`, `effects/shadow.rs`, hooked from `wm/window.rs` render path, borders follow the rounding.
 - **C. Blur:** `effects/blur.rs` for layer-shell surfaces (bar, launcher) and windows with translucency, backdrop cache with LRU/byte budget and tracing metrics, config keys, skip on fullscreen.
 - **D. Live overview:** `overview/` module, action, input interception, thumbnails, click to focus/move window between workspaces, open/close animation using the anim engine.
-- **E. X11 scaling:** `xwayland.scale` config key with `-force-xrandr-emulation` (or per-output unscaling), so X11 apps render sharp on scaled outputs; update README known limits.
+- **E. X11 scaling (implemented as `[xwayland] scale`, hardware check pending):** `xwayland.scale` config key with `-force-xrandr-emulation` (or per-output unscaling), so X11 apps render sharp on scaled outputs; update README known limits.
 - **F. QA + docs:** new `scripts/qa-nested.sh` scenarios (anim, effects, overview, xscale), screenshot pixel checks, `docs/performance.md` budgets and metrics, README.
 
 **Step 3 (serial):** merge streams into `feat/m3-look`, resolve conflicts in `scene.rs`/`window.rs`, full build, clippy, tests, QA run, release build, hardware checklist.
