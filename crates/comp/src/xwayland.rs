@@ -55,6 +55,9 @@ pub struct XWaylandState {
     /// Every override-redirect window with the workspace it belongs to: it leaves the
     /// unmanaged space while that workspace is hidden.
     pub covering: Vec<Covering>,
+    /// `xwayland.scale` as of the current server's start. The window manager reads the client
+    /// scale once when it starts, so it must not change under a running server.
+    scale: f64,
     restarts: VecDeque<Instant>,
     /// The current server's window manager came up. `-terminate` makes a server that served
     /// its clients exit normally, which is not a crash however short its life.
@@ -68,11 +71,20 @@ impl Aurora {
         if self.xwayland.down || self.xwayland.token.is_some() {
             return;
         }
+        let settings = self.config.xwayland.clone();
+        self.xwayland.scale = settings.scale;
+        // Toolkits that read the server's resolution grow with the scale; at 1 the server
+        // gets no extra arguments at all.
+        let args: Vec<String> = settings
+            .dpi()
+            .into_iter()
+            .flat_map(|dpi| ["-dpi".to_owned(), dpi.to_string()])
+            .collect();
         let spawned = XWayland::spawn(
             &self.display_handle,
             self.xwayland.display.or_else(free_display),
             std::iter::empty::<(String, String)>(),
-            std::iter::empty::<String>(),
+            args,
             true,
             Stdio::null(),
             Stdio::null(),
@@ -103,8 +115,13 @@ impl Aurora {
     }
 
     fn xwayland_ready(&mut self, socket: UnixStream, number: u32, client: Client) {
-        // X11 clients are not scaled: their coordinates are the global logical ones.
-        self.client_compositor_state(&client).set_client_scale(1.0);
+        // Smithay maps between the X client's pixels and our logical coordinates by this
+        // client scale (geometry, sizes, pointer, xdg-output), so X windows get `scale` X
+        // pixels per logical pixel and render 1:1 at the matching output scale. It must be
+        // set before the window manager starts, which reads it once. Scale 1 is the default
+        // identity mapping.
+        let scale = self.xwayland.scale;
+        self.client_compositor_state(&client).set_client_scale(scale);
         let mut wm =
             match X11Wm::start_wm(self.handle.clone(), &self.display_handle, socket, client) {
                 Ok(wm) => wm,

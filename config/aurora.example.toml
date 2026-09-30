@@ -53,6 +53,14 @@ blur_passes = 3           # dual-Kawase passes (1..=8)
 blur_radius = 6           # px offset per pass (1..=64)
 inactive_opacity = 1.0    # 0..=1, 1 leaves unfocused windows untouched
 
+# X11 (XWayland) clients, e.g. Proton games. `scale` is X pixels per logical pixel: 1 leaves
+# them unscaled (the compositor resamples them on scaled outputs, which is blurry). Set it to
+# the scale of the output they run on (1.25 on a 1.25 output) and they render 1:1 on its
+# pixels: sharp, the native resolution, but UI that ignores Xft.dpi looks smaller. Range
+# 1..=4. Read when XWayland starts (login); a reload does not apply it.
+[xwayland]
+scale = 1.0
+
 # Binds: "<Mods>+<key>" = "<action>", or a table { action = "..", repeat = false,
 # bypass_inhibit = false }. Modifiers: Mod, Super (Logo, Win), Ctrl, Shift, Alt, AltGr.
 # The key is an xkb keysym name naming the UNSHIFTED key (write Shift+1, not exclam);

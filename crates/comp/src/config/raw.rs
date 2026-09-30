@@ -6,7 +6,7 @@ use toml::{Table, Value};
 
 use super::{
     AnimSpec, Animations, Color, Decoration, General, Glob, ModKey, ModeSpec, OutputRule,
-    WindowRule, WorkspaceRule,
+    WindowRule, WorkspaceRule, XWayland,
 };
 use crate::anim::Curve;
 
@@ -17,6 +17,7 @@ pub struct RawConfig {
     pub general: Option<Value>,
     pub animations: Option<Value>,
     pub decoration: Option<Value>,
+    pub xwayland: Option<Value>,
     pub keybinds: Option<Value>,
     pub mousebinds: Option<Value>,
     pub output: Option<Value>,
@@ -358,6 +359,28 @@ pub fn decoration(section: Option<&Value>, warnings: &mut Vec<String>) -> Decora
         }
     }
     d
+}
+
+/// `[xwayland]`: `scale`, per-key fallback like `[general]`.
+pub fn xwayland(section: Option<&Value>, warnings: &mut Vec<String>) -> XWayland {
+    let mut x = XWayland::default();
+    let Some(table) = table_of("xwayland", section, warnings) else {
+        return x;
+    };
+    let ctx = "xwayland";
+    check_keys(ctx, table, &["scale"], warnings);
+    if let Some(f) = soft(get_float(ctx, table, "scale"), warnings) {
+        if (XWayland::MIN_SCALE..=XWayland::MAX_SCALE).contains(&f) {
+            x.scale = f;
+        } else {
+            warnings.push(format!(
+                "{ctx}.scale: {f} is out of range ({}..={})",
+                XWayland::MIN_SCALE,
+                XWayland::MAX_SCALE
+            ));
+        }
+    }
+    x
 }
 
 /// Items of a `[[list]]` section; `convert` errors drop only that item.
