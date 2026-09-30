@@ -73,7 +73,8 @@ xc() { env -u WAYLAND_DISPLAY DISPLAY="$XD" "$@"; }
 
 client() {
     [ -n "$SOCK" ] || { fail "client without SOCK"; return 1; }
-    wl "$@" >>"$SDIR/clients.log" 2>&1 &
+    # No function in between: $! must be the client itself (env execs it), so kill works.
+    env -u DISPLAY WAYLAND_DISPLAY="$SOCK" AURORA_IPC_SOCK="$IPC" "$@" >>"$SDIR/clients.log" 2>&1 &
     LASTPID=$!
     CPIDS+=("$LASTPID")
 }
