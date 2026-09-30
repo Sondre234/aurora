@@ -86,7 +86,7 @@ impl XdgActivationHandler for Aurora {
         surface: WlSurface,
     ) {
         self.protocols.activation.remove_token(&token);
-        if data.timestamp.elapsed() > TOKEN_TTL {
+        if data.timestamp.elapsed() > TOKEN_TTL || self.is_locked() {
             return;
         }
         let mut root = surface;

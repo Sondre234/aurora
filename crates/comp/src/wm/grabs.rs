@@ -369,6 +369,9 @@ impl Aurora {
         button: u32,
         serial: Serial,
     ) -> bool {
+        if self.is_locked() {
+            return false;
+        }
         let Some(win) = self.wm.windows.get(&id) else {
             return false;
         };

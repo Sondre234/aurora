@@ -162,7 +162,7 @@ impl Aurora {
                 takes_keyboard: covers,
             });
         }
-        if covers && shown {
+        if covers && shown && !self.is_locked() {
             tracing::info!("x11: override-redirect window covers an output, focusing it");
             let serial = SERIAL_COUNTER.next_serial();
             let keyboard = self.keyboard.clone();
@@ -202,9 +202,12 @@ impl Aurora {
         }
         self.queue_redraw_all();
         if let Some(x11) = back {
-            let serial = SERIAL_COUNTER.next_serial();
-            let keyboard = self.keyboard.clone();
-            keyboard.set_focus(self, Some(FocusTarget::X11(x11)), serial);
+            // The lock surface keeps the keyboard while locked.
+            if !self.is_locked() {
+                let serial = SERIAL_COUNTER.next_serial();
+                let keyboard = self.keyboard.clone();
+                keyboard.set_focus(self, Some(FocusTarget::X11(x11)), serial);
+            }
         } else if hidden
             .into_iter()
             .flatten()
@@ -326,7 +329,7 @@ impl Aurora {
         if let Some(window) = window {
             self.xwayland.unmanaged.map_element(window, geo.loc, false);
             self.queue_redraw_all();
-            if take_keyboard {
+            if take_keyboard && !self.is_locked() {
                 let serial = SERIAL_COUNTER.next_serial();
                 let keyboard = self.keyboard.clone();
                 keyboard.set_focus(self, Some(FocusTarget::X11(x11.clone())), serial);
