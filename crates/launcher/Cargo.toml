@@ -1,0 +1,25 @@
+[package]
+name = "aurora-launcher"
+description = "Warm app launcher daemon for the Aurora desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "aurora-launcher"
+path = "src/main.rs"
+
+[dependencies]
+aurora-ui = { path = "../ui" }
+aurora-ipc = { workspace = true }
+aurora-theme = { workspace = true }
+freedesktop-desktop-entry = { version = "0.7", default-features = false }
+freedesktop-icons = "0.3"
+notify = "8"
+serde = { workspace = true }
+serde_json = "1"
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+libc = { workspace = true }
+png = "0.18"
+resvg = { version = "0.48", default-features = false }
