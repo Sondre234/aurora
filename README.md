@@ -44,7 +44,7 @@ Crates are added as their milestone is reached.
 - [x] **M0** Nested compositor under an existing desktop (winit backend), one client shows
 - [x] **M1** Real session: DRM backend on the 4090, libinput, launch from a TTY
 - [x] **M2** Usable: tiling, workspaces, XWayland, layer-shell, config, multi-monitor. Verified on hardware
-- [ ] **M3** The look: animation engine (window move/open/close, workspace slide), rounded corners, shadows and blur, live overview, scaled X11. Plan in [docs/m3-plan.md](docs/m3-plan.md)
+- [x] **M3** The look: animation engine, rounded corners, shadows, blur, live overview, X11 scaling. Verified on hardware
 - [ ] **M4+** Services: `ipc`, shell, launcher, notifd, lock, then `term` and `files`
 
 ## Using it (M2)

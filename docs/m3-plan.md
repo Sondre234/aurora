@@ -35,8 +35,8 @@ Read README.md, docs/performance.md and docs/m2-plan.md first. Every step leaves
 
 ## Hardware checklist (run on the real machine, from a TTY)
 
-- [ ] 144 Hz animations hold frame pacing on all three outputs (no dropped frames in the frame-time log), idle desktop schedules no redraws.
-- [ ] Fullscreen game still direct-scans out; effects are off while fullscreen.
-- [ ] Blur behind waybar and translucent terminal is correct after the window behind changes, VRAM stays inside budget.
-- [ ] Overview shows live thumbnails on every output, click focuses, emergency chords still work inside it.
-- [ ] X11 (Proton) app on the 1.25 scaled output is sharp and correctly sized; pointer mapping is correct.
+- [x] 144 Hz animations hold frame pacing on all three outputs (no dropped frames in the frame-time log), idle desktop schedules no redraws.
+- [x] Fullscreen game still direct-scans out; effects are off while fullscreen.
+- [x] Blur behind waybar and translucent terminal is correct after the window behind changes, VRAM stays inside budget.
+- [x] Overview shows live thumbnails on every output, click focuses, emergency chords still work inside it.
+- [x] X11 (Proton) app on the 1.25 scaled output is sharp and correctly sized; pointer mapping is correct.
