@@ -77,6 +77,7 @@ scale = 1.0
 #   focus-output <dir> | move-to-output <dir>
 #   revoke-inhibit             end the focused client's keyboard-shortcuts inhibitor and take
 #                              the keyboard back from an exclusive layer surface
+#   lock                       start the `lock` service (see [services])
 #   reload-config | quit | none
 #   drag-move | drag-resize    mouse binds only
 [keybinds]
@@ -193,3 +194,42 @@ scale = 1
 
 # Commands run once, after the compositor's socket exists (never again on reload).
 # autostart = ["waybar", "swaync"]
+
+# Services: long-lived helpers (bar, launcher, notifier, lock client) that Aurora starts and
+# supervises, one table per name. They get WAYLAND_DISPLAY and AURORA_IPC_SOCK, and are
+# stopped when the compositor exits. A service that dies is restarted with exponential
+# backoff (a run of 10 s or more resets it). A reload never starts a running service twice
+# or restarts a healthy one: a changed command applies the next time it starts, a removed or
+# disabled service is stopped.
+#   command        run through `sh -c` (required)
+#   enabled        false keeps it from ever starting                      (default true)
+#   autostart      start with the compositor; false means only on demand   (default true)
+#   restart        "never" | "on-failure" | "always"                       (default "on-failure")
+#   backoff_ms     first restart delay, doubled per quick failure          (default 500)
+#   max_backoff_ms upper bound of that delay                               (default 30000)
+# The service named "lock" is what the `lock` action starts (bind it in [keybinds]); it should
+# not autostart. A lock client that dies while the session is locked is started again (the
+# session stays locked meanwhile); after an unlock it is not.
+# Nothing runs unless you uncomment it. Do not start aurora-notifd while dunst owns the
+# notification name on your session bus (it only takes over when asked to). Colors and
+# fonts of all services come from theme.toml next to this file, live on reload.
+# [services.shell]
+# command = "aurora-shell"
+# restart = "always"
+#
+# [services.launcher]
+# command = "aurora-launcher"
+# restart = "always"
+#
+# [services.notifd]
+# command = "aurora-notifd"
+#
+# [services.lock]
+# command = "aurora-lock"
+# autostart = false
+# restart = "always"
+#
+# Suggested binds for the services (put them in [keybinds] above; left out so that the
+# built-in defaults stay as they are):
+#   "Mod+space" = "spawn aurora-launcher toggle"
+#   "Mod+l" = "lock"

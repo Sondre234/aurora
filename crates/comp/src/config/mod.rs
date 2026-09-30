@@ -348,6 +348,49 @@ pub struct WindowRule {
     pub fullscreen: Option<bool>,
 }
 
+/// What the supervisor does when a service's process ends.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RestartPolicy {
+    /// Never restarted.
+    Never,
+    /// Restarted after a non-zero exit or a signal, not after a clean exit.
+    OnFailure,
+    /// Restarted whatever the exit status.
+    Always,
+}
+
+impl RestartPolicy {
+    fn parse(text: &str) -> Option<Self> {
+        Some(match text {
+            "never" => Self::Never,
+            "on-failure" => Self::OnFailure,
+            "always" => Self::Always,
+            _ => return None,
+        })
+    }
+}
+
+/// One `[services.<name>]` entry: a long-lived helper process (bar, launcher, notifier,
+/// lock client) that the compositor starts and supervises.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ServiceSpec {
+    pub name: String,
+    /// Run through `sh -c`, like autostart.
+    pub command: String,
+    pub enabled: bool,
+    /// Started with the compositor. False means only an explicit request starts it (the
+    /// `lock` action starts the service named `lock`).
+    pub autostart: bool,
+    pub restart: RestartPolicy,
+    /// First restart delay; doubles per consecutive quick failure up to `max_backoff_ms`.
+    pub backoff_ms: u32,
+    pub max_backoff_ms: u32,
+}
+
+impl ServiceSpec {
+    pub const MAX_BACKOFF_MS: u32 = 600_000;
+}
+
 #[derive(Debug, Default)]
 pub struct Config {
     pub general: General,
@@ -360,6 +403,8 @@ pub struct Config {
     pub window_rules: Vec<WindowRule>,
     /// Commands run once per compositor process, after the socket exists.
     pub autostart: Vec<String>,
+    /// `[services.<name>]`, supervised by `services.rs`, sorted by name.
+    pub services: Vec<ServiceSpec>,
     /// False when the file did not exist and everything is defaults.
     pub from_file: bool,
 }
@@ -394,6 +439,7 @@ impl Config {
             ),
             window_rules: raw::window_rules(raw.window_rule.as_ref(), general.workspaces, &mut w),
             autostart: raw::autostart(raw.autostart.as_ref(), &mut w),
+            services: raw::services(raw.services.as_ref(), &mut w),
             general,
             from_file: true,
         };
@@ -477,7 +523,13 @@ pub fn resolve_path(cli: Option<PathBuf>) -> PathBuf {
 impl Aurora {
     /// Never fails: an unreadable or unparsable file keeps the previous config.
     pub fn reload_config(&mut self) {
-        match Config::load(&self.config_path) {
+        let _ = self.reload_config_checked();
+    }
+
+    /// Reloads the config and the theme, restarts nothing that runs fine, and tells IPC
+    /// subscribers how it went. `Err` is the error that made it keep the previous config.
+    pub fn reload_config_checked(&mut self) -> Result<(), String> {
+        let (result, warnings) = match Config::load(&self.config_path) {
             Ok((config, warnings)) => {
                 config.log_loaded(&self.config_path, &warnings);
                 self.protocols
@@ -487,12 +539,18 @@ impl Aurora {
                 self.apply_config();
                 self.reapply_output_config();
                 self.drm_apply_output_config();
+                self.services_reload();
+                (Ok(()), warnings)
             }
-            Err(err) => tracing::warn!(
-                "config: error {} keeping previous",
-                err.lines().next().unwrap_or_default()
-            ),
-        }
+            Err(err) => {
+                let first = err.lines().next().unwrap_or_default().to_string();
+                tracing::warn!("config: error {first} keeping previous");
+                (Err(first.clone()), vec![first])
+            }
+        };
+        self.reload_theme();
+        self.ipc_config_reloaded(result.is_ok(), warnings);
+        result
     }
 }
 
@@ -668,6 +726,69 @@ mod tests {
                 "{needle}: {warnings:?}"
             );
         }
+    }
+
+    #[test]
+    fn services_parse_with_defaults_and_drop_bad_entries() {
+        let (config, warnings) = resolve(
+            r#"
+            [services.shell]
+            command = "aurora-shell"
+
+            [services.lock]
+            command = "aurora-lock"
+            autostart = false
+            restart = "always"
+            backoff_ms = 100
+            max_backoff_ms = 5000
+
+            [services.off]
+            command = "x"
+            enabled = false
+
+            [services.nocmd]
+            restart = "never"
+
+            [services."bad name"]
+            command = "x"
+
+            [services.badrestart]
+            command = "x"
+            restart = "sometimes"
+
+            [services.inverted]
+            command = "x"
+            backoff_ms = 9000
+            max_backoff_ms = 100
+            "#,
+        );
+        let names: Vec<_> = config.services.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, ["lock", "off", "shell"]);
+        let shell = &config.services[2];
+        assert!(shell.enabled && shell.autostart);
+        assert_eq!(shell.restart, RestartPolicy::OnFailure);
+        assert_eq!((shell.backoff_ms, shell.max_backoff_ms), (500, 30_000));
+        let lock = &config.services[0];
+        assert!(!lock.autostart);
+        assert_eq!(lock.restart, RestartPolicy::Always);
+        assert_eq!((lock.backoff_ms, lock.max_backoff_ms), (100, 5000));
+        assert!(!config.services[1].enabled);
+        for needle in ["nocmd", "bad name", "badrestart", "inverted"] {
+            assert!(
+                warnings.iter().any(|w| w.contains(needle)),
+                "{needle}: {warnings:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn services_section_of_the_wrong_type_is_reported() {
+        let (config, warnings) = resolve("services = 3\n");
+        assert!(config.services.is_empty());
+        assert!(
+            warnings.iter().any(|w| w.contains("services")),
+            "{warnings:?}"
+        );
     }
 
     #[test]

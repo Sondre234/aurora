@@ -8,6 +8,25 @@
 #   effects   shader programs compiled at startup, rounded corner and shadow pixels (grim+magick)
 #   overview  open/close logs, dump: overview, Escape closes, emergency chords work while open
 #   xscale    the xwayland scale key loads without warnings, an X11 client still maps
+#            ipc services theme shell launcher notifd lock   (M4; written against the log
+#            contract in docs/m4-plan.md; a scenario whose binary is not built SKIPs)
+#   ipc       socket listens, auroractl snapshot/events/raw, ws: log follows a switch, a stopped
+#             subscriber and a garbage client do no harm, dump: ipc
+#   services  [services.*] supervision: backoff restarts, reload never double-starts, disable
+#             and shutdown stop the process, children get AURORA_IPC_SOCK and WAYLAND_DISPLAY
+#   theme     theme.toml change + reload pushes Event::Theme; broken file keeps the old theme
+#   shell     aurora-shell: ready line, top layer with exclusive zone, bar pixels, live theme
+#   launcher  aurora-launcher daemon starts hidden, `toggle` shows/hides, typing changes the
+#             view, Return launches a fixture desktop entry
+#   notifd    aurora-notifd on a PRIVATE dbus-daemon only: shown, replace, close, expiry
+#   lock      aurora-lock: surfaces, lock: locked, binds refused, emergency chords, client
+#             death stays locked, unlock only with the right test credential (else SKIP part)
+#
+# Isolation: every scenario sets AURORA_IPC_SOCK to a file in its scratch dir (never touch the
+# live $XDG_RUNTIME_DIR/aurora/ipc.sock) and points DBUS_SESSION_BUS_ADDRESS at a dead path, so
+# no client can reach your session bus (and dunst). notifd gets its own dbus-daemon.
+#   AURORA_BIN_DIR  where aurora-shell, aurora-launcher, aurora-notifd, aurora-lock and
+#                   auroractl live, default: the directory of AURORA_BIN
 #
 # Needs a Wayland host to nest in (WAYLAND_DISPLAY), which must NOT be your real session:
 # the nested window appears there. Use a headless compositor. Never runs --drm. Only ever
@@ -32,7 +51,13 @@ fi
 [ -x "$BIN" ] || { echo "no binary at $BIN, run cargo build" >&2; exit 2; }
 mkdir -p "$SCRATCH"
 
-PASS=0 FAIL=0
+# Nothing started here may reach the user's session bus: an explicit dead address wins over the
+# $XDG_RUNTIME_DIR/bus fallback that dbus libraries apply. The notifd scenario overrides it.
+export DBUS_SESSION_BUS_ADDRESS="unix:path=$SCRATCH/no-such-bus"
+BINDIR=${AURORA_BIN_DIR:-$(dirname "$BIN")}
+
+PASS=0 FAIL=0 SKIP=0
+IPC="" PBUS="" PBPID=""
 APID="" SOCK="" XD="" LOG="" OFF=0 SDIR="" NAME="" CFG="" LASTPID="" MATCH=""
 CPIDS=()
 
@@ -43,12 +68,13 @@ matches() { grep -qaE -- "$1" <<<"$2"; }
 # ok NAME COMMAND...   passes when the command succeeds
 ok() { local n=$1; shift; if "$@" >/dev/null 2>&1; then pass "$n"; else fail "$n"; fi; }
 
-wl() { env -u DISPLAY WAYLAND_DISPLAY="$SOCK" "$@"; }
+wl() { env -u DISPLAY WAYLAND_DISPLAY="$SOCK" AURORA_IPC_SOCK="$IPC" "$@"; }
 xc() { env -u WAYLAND_DISPLAY DISPLAY="$XD" "$@"; }
 
 client() {
     [ -n "$SOCK" ] || { fail "client without SOCK"; return 1; }
-    wl "$@" >>"$SDIR/clients.log" 2>&1 &
+    # No function in between: $! must be the client itself (env execs it), so kill works.
+    env -u DISPLAY WAYLAND_DISPLAY="$SOCK" AURORA_IPC_SOCK="$IPC" "$@" >>"$SDIR/clients.log" 2>&1 &
     LASTPID=$!
     CPIDS+=("$LASTPID")
 }
@@ -81,8 +107,13 @@ stop_aurora() {
     [ -n "$APID" ] && wait "$APID" 2>/dev/null
     APID=""
 }
-trap 'stop_aurora; exit 130' INT TERM
-trap 'stop_aurora' EXIT
+stop_pbus() {
+    [ -n "$PBPID" ] && kill "$PBPID" 2>/dev/null
+    [ -n "$PBPID" ] && wait "$PBPID" 2>/dev/null
+    PBPID=""
+}
+trap 'stop_aurora; stop_pbus; exit 130' INT TERM
+trap 'stop_aurora; stop_pbus' EXIT
 
 mark() { OFF=$(stat -c %s "$LOG" 2>/dev/null || echo 0); }
 newlog() { tail -c +$((OFF + 1)) "$LOG" 2>/dev/null | sed -E 's/\x1b\[[0-9;]*m//g'; }
@@ -127,6 +158,7 @@ begin() {
     LOG=$SDIR/state/aurora/comp.log
     : >"$SDIR/clients.log"
     SOCK="" XD=""
+    IPC=$SDIR/run/ipc.sock
     echo "== $NAME"
 }
 
@@ -140,6 +172,7 @@ launch() {
     env WAYLAND_DISPLAY="$HOST" \
         XDG_STATE_HOME="$SDIR/state" XDG_CONFIG_HOME="$SDIR/cfg" \
         XKB_DEFAULT_LAYOUT=us XKB_DEFAULT_VARIANT=altgr-intl AURORA_QA_DIR="$SDIR/run" \
+        AURORA_IPC_SOCK="$IPC" \
         "$BIN" --winit --qa --timeout "${QA_TIMEOUT:-40}" --config "$CFG" -c true \
         >"$SDIR/stdout.log" 2>&1 &
     APID=$!
@@ -208,14 +241,30 @@ rect4() { sed -E 's/[,x ]/ /g' <<<"$1"; }
 shot() {
     local out=$SDIR/$1.png
     rm -f "$out"
-    wl grim "${@:2}" "$out" 2>>"$SDIR/clients.log"
-    [ -s "$out" ] || { fail "screenshot $1"; return 1; }
+    wl timeout 8 grim "${@:2}" "$out" 2>>"$SDIR/clients.log"
+    # shot runs in $(...): a fail here would be lost with its subshell, so leave a marker for
+    # end_scenario to count.
+    [ -s "$out" ] || { echo "screenshot $1" >>"$SDIR/shotfail"; return 1; }
     echo "$out"
 }
 # pixel FILE X Y -> RRGGBB
 pixel() { magick "$1" -format "%[hex:p{$2,$3}]" info: 2>/dev/null | cut -c1-6; }
 
+# snap VAR NAME [grim args]: like `VAR=$(shot ...)`, but a failed capture is counted here (shot
+# runs in a subshell, so its failures would be lost) and the scenario carries on with VAR empty.
+snap() {
+    local out
+    if out=$(shot "${@:2}"); then
+        printf -v "$1" %s "$out"
+    else
+        FAIL=$((FAIL + 1))
+        printf -v "$1" ''
+        [ -z "$out" ] || echo "$out"
+    fi
+}
+
 end_scenario() {
+    [ -s "$SDIR/shotfail" ] && fail "$(head -1 "$SDIR/shotfail") failed (no frame from the host?)"
     if grep -qaiE 'panicked' "$LOG" "$SDIR/stdout.log" 2>/dev/null; then
         fail "no panic in logs"
     else
@@ -463,8 +512,31 @@ sc_workspaces() {
     end_scenario
 }
 
+# start_pbus: private session bus in $SDIR/run/bus (never the user's bus); exports it.
+start_pbus() {
+    PBUS="unix:path=$SDIR/run/bus"
+    env -u DBUS_SESSION_BUS_ADDRESS dbus-daemon --session --nofork --address="$PBUS" \
+        >"$SDIR/dbus.log" 2>&1 &
+    PBPID=$!
+    if ! waitfor 5 test -S "$SDIR/run/bus"; then
+        fail "private dbus-daemon did not start: $(head -c 200 "$SDIR/dbus.log")"
+        stop_pbus
+        return 1
+    fi
+    export DBUS_SESSION_BUS_ADDRESS="$PBUS"
+}
+
+# waybar needs a working session bus (it aborts with "Could not connect" without one).
 sc_layer() {
     begin layer
+    command -v dbus-daemon >/dev/null || { skip "dbus-daemon is not installed"; return; }
+    start_pbus || return
+    layer_body
+    stop_pbus
+    export DBUS_SESSION_BUS_ADDRESS="unix:path=$SCRATCH/no-such-bus"
+}
+
+layer_body() {
     launch || { end_scenario; return; }
     client waybar -c "$ROOT/scripts/qa/waybar.jsonc" -s "$ROOT/scripts/qa/waybar.css"
     need 'layer: out=winit usable=0,30' 10
@@ -820,7 +892,612 @@ EOF
     end_scenario
 }
 
-ALL=(keys emergency reload tiling workspaces layer xwayland multi robust anim effects overview xscale)
+# ------------------------------------------------------------------------------------------
+# M4 scenarios (docs/m4-plan.md log contract)
+
+skip() { SKIP=$((SKIP + 1)); echo "SKIP [$NAME] $1"; }
+# require NAME BIN...: names the scenario; SKIPs (returns 1) when a binary is not built.
+require() {
+    NAME=$1
+    shift
+    local b
+    for b in "$@"; do
+        if [ ! -x "$BINDIR/$b" ]; then
+            skip "$b is not built at $BINDIR/$b (cargo build, or set AURORA_BIN_DIR)"
+            return 1
+        fi
+    done
+    return 0
+}
+ctl() { env -u DISPLAY AURORA_IPC_SOCK="$IPC" "$BINDIR/auroractl" "$@"; }
+# Never background `ctl` (a function): $! would be a subshell, so kill/STOP would miss auroractl.
+# Runs a service binary as a Wayland client with the scenario's socket and IPC path.
+svc() { local b=$1; shift; client "$BINDIR/$b" "$@"; }
+
+# Output of the clients (services started with `svc`), ANSI stripped.
+clog() { sed -E 's/\x1b\[[0-9;]*m//g' "$SDIR/clients.log" 2>/dev/null; }
+# need_client REGEX [SECS]: a line in the client output (whole file, not marked).
+need_client() {
+    local i n=$((${2:-8} * 10))
+    for i in $(seq "$n"); do
+        if clog | grep -qaE -- "$1"; then pass "client log: $1"; return 0; fi
+        sleep 0.1
+    done
+    fail "MISSING log contract line: $1"
+    return 1
+}
+# wait_client_count REGEX N SECS: waits until at least N client lines match.
+wait_client_count() {
+    local i n=$(($3 * 10))
+    for i in $(seq "$n"); do
+        [ "$(clog | grep -acE -- "$1")" -ge "$2" ] && return 0
+        sleep 0.1
+    done
+    return 1
+}
+# diffpx A.png B.png -> number of differing pixels
+diffpx() { magick compare -metric AE "$1" "$2" null: 2>&1 | awk '{print int($1)}'; }
+# waitfor SECS COMMAND...: retries until the command succeeds.
+waitfor() {
+    local i n=$(($1 * 10))
+    shift
+    for i in $(seq "$n"); do
+        "$@" >/dev/null 2>&1 && return 0
+        sleep 0.1
+    done
+    return 1
+}
+# started_ge NAME N: the service was started at least N times since the mark (re-evaluated per poll).
+started_ge() { [ "$(count_log "service: started name=$1 ")" -ge "$2" ]; }
+pid_dead() { ! kill -0 "$1" 2>/dev/null; }
+# pid_from_log NAME: pid of the last `service: started name=NAME pid=N` since the last mark.
+pid_from_log() { newlog | grep -a "service: started name=$1 " | tail -1 | sed -E 's/.* pid=([0-9]+).*/\1/'; }
+need_ctl() {
+    [ -x "$BINDIR/auroractl" ] && return 0
+    skip "auroractl is not built at $BINDIR/auroractl"
+    return 1
+}
+
+sc_ipc() {
+    NAME=ipc
+    need_ctl || return
+    begin ipc
+    launch || { end_scenario; return; }
+    need_boot 'ipc: listening path=' 5
+    local boot
+    boot=$(OFF=0 newlog | grep -a -m1 'ipc: listening path=')
+    if contains "$boot" "path=$IPC"; then pass "listens on AURORA_IPC_SOCK"; else fail "ipc: listening path is not $IPC ($boot)"; fi
+    ok "socket file exists" test -S "$IPC"
+
+    client foot -a ipcw -T qa-title sh -c "sleep 2; printf '\\033]2;retitled\\007'; sleep 1000"
+    need ':ipcw:' 10
+    mark
+    env -u DISPLAY AURORA_IPC_SOCK="$IPC" "$BINDIR/auroractl" events >"$SDIR/events.log" 2>&1 &
+    local evpid=$!
+    CPIDS+=("$evpid")
+    need 'ipc: client connected name=auroractl proto=[0-9]+' 5
+    sleep 0.3
+
+    local snap
+    snap=$(ctl snapshot | tr -d ' \n')
+    if contains "$snap" '"name":"winit"'; then pass "snapshot lists the output"; else fail "snapshot has no output winit: ${snap:0:200}"; fi
+    if contains "$snap" '"app_id":"ipcw"'; then pass "snapshot lists the window"; else fail "snapshot has no window ipcw"; fi
+    if contains "$snap" '"title":"qa-title"'; then pass "snapshot carries the window title"; else fail "snapshot title missing"; fi
+    if matches '"workspaces":\[\{' "$snap"; then pass "snapshot lists workspaces"; else fail "snapshot has no workspaces"; fi
+
+    # A title change reaches subscribers.
+    if waitfor 8 grep -qa retitled "$SDIR/events.log"; then pass "title change arrives as an event"; else fail "no retitled event: $(head -c 300 "$SDIR/events.log")"; fi
+
+    # Switching workspace over the socket logs like the bind does, and is broadcast.
+    mark
+    local reply
+    reply=$(ctl raw '{"SwitchWorkspace":{"output":null,"index":2}}' | tr -d ' \n')
+    if [ "$reply" = '"Ok"' ]; then pass "raw SwitchWorkspace answers Ok"; else fail "SwitchWorkspace reply: $reply"; fi
+    need 'ws: visible winit=2' 3
+    need 'ipc: broadcast topic=Workspaces clients=[1-9]' 3
+    if waitfor 3 grep -qa 'WorkspaceChanged' "$SDIR/events.log"; then pass "WorkspaceChanged event delivered"; else fail "no WorkspaceChanged in events"; fi
+    ctl raw '{"SwitchWorkspace":{"output":null,"index":1}}' >/dev/null
+    reply=$(ctl raw '"ListWindows"' | tr -d ' \n')
+    if contains "$reply" '"ipcw"'; then pass "raw ListWindows lists the window"; else fail "ListWindows: ${reply:0:160}"; fi
+
+    dump
+    if matches '^dump: ipc clients=[1-9]' "$(dumpline ipc)"; then pass "dump: ipc clients"; else fail "MISSING log contract line: dump: ipc clients=<n> ('$(dumpline ipc)')"; fi
+
+    # A stopped subscriber must not stall the compositor or other clients.
+    env -u DISPLAY AURORA_IPC_SOCK="$IPC" "$BINDIR/auroractl" events >/dev/null 2>&1 &
+    local slow=$!
+    CPIDS+=("$slow")
+    sleep 0.3
+    kill -STOP "$slow"
+    local i
+    for i in $(seq 120); do
+        ctl raw "{\"SwitchWorkspace\":{\"output\":null,\"index\":$((i % 2 + 1))}}" >/dev/null 2>&1 || break
+    done
+    if timeout 5 env AURORA_IPC_SOCK="$IPC" "$BINDIR/auroractl" snapshot >/dev/null 2>&1; then pass "snapshot still answers with a stopped subscriber"; else fail "snapshot stalled with a stopped subscriber"; fi
+    if alive; then pass "compositor alive after 120 switches"; else fail "compositor died with a stopped subscriber"; fi
+    kill -CONT "$slow" 2>/dev/null
+    kill "$slow" 2>/dev/null
+
+    # Garbage and oversized frames: the client is dropped, everyone else carries on.
+    if command -v python3 >/dev/null; then
+        python3 - "$IPC" <<'PY'
+import socket, sys
+for payload in (b"garbage\xff\xff\xff\xff" * 64, b"\xff\xff\xff\xff", b"\x00\x00\x00\x00", b"\x05\x00\x00\x00abcde"):
+    s = socket.socket(socket.AF_UNIX)
+    s.connect(sys.argv[1])
+    try:
+        s.sendall(payload)
+    except OSError:
+        pass
+    s.close()
+PY
+        sleep 0.5
+        if alive; then pass "compositor alive after garbage clients"; else fail "compositor died on garbage clients"; fi
+        if ctl snapshot >/dev/null 2>&1; then pass "ipc still serves after garbage clients"; else fail "ipc dead after garbage clients"; fi
+    else
+        skip "python3 missing, garbage client part not run"
+    fi
+
+    mark
+    kill "$evpid" 2>/dev/null
+    need 'ipc: client gone name=auroractl' 5
+    end_scenario
+}
+
+sc_services() {
+    NAME=services
+    begin services
+    cat >"$SDIR/run/fake.sh" <<EOS
+#!/bin/sh
+echo \$\$ >> "$SDIR/run/fake.starts"
+sleep 0.2
+exit 3
+EOS
+    cat >"$SDIR/run/steady.sh" <<EOS
+#!/bin/sh
+echo \$\$ >> "$SDIR/run/steady.starts"
+printf %s "\$AURORA_IPC_SOCK" > "$SDIR/run/steady.ipc"
+printf %s "\$WAYLAND_DISPLAY" > "$SDIR/run/steady.wl"
+exec sleep 1000
+EOS
+    chmod +x "$SDIR/run/fake.sh" "$SDIR/run/steady.sh"
+    append_cfg <<EOF
+
+[services.fake]
+command = "$SDIR/run/fake.sh"
+restart = "on-failure"
+backoff_ms = 100
+max_backoff_ms = 800
+
+[services.steady]
+command = "$SDIR/run/steady.sh"
+restart = "always"
+EOF
+    QA_TIMEOUT=60
+    launch || { end_scenario; QA_TIMEOUT=40; return; }
+    OFF=0
+    need 'service: started name=fake pid=[0-9]+' 5
+    need 'service: started name=steady pid=[0-9]+' 5
+    # A service that keeps exiting is restarted with growing delays, capped by max_backoff_ms.
+    if waitfor 10 started_ge fake 4; then pass "fake restarted 3 times"; else fail "fake started only $(count_log 'service: started name=fake ') times"; fi
+    need 'service: exited name=fake code=3 restart=[0-9]+' 3
+    local delays d1 d2 d3
+    delays=$(newlog | grep -a 'service: exited name=fake' | sed -E 's/.* restart=([0-9a-z]+).*/\1/' | head -4 | tr '\n' ' ')
+    read -r d1 d2 d3 _ <<<"$delays"
+    if [ "${d1:-x}" -ge 100 ] 2>/dev/null && [ "${d2:-0}" -gt "${d1:-x}" ] 2>/dev/null && [ "${d3:-0}" -gt "${d2:-0}" ] 2>/dev/null; then
+        pass "backoff grows: $delays"
+    else
+        fail "backoff delays do not grow: $delays"
+    fi
+    if newlog | grep -aE 'service: exited name=fake.*restart=[0-9]+' | sed -E 's/.* restart=([0-9]+).*/\1/' | awk '$1 > 800 {bad=1} END {exit bad}'; then pass "backoff never exceeds max_backoff_ms"; else fail "a restart delay above 800 ms"; fi
+
+    # Supervised children see the compositor's IPC socket and Wayland display.
+    if waitfor 3 test -s "$SDIR/run/steady.ipc"; then
+        if [ "$(cat "$SDIR/run/steady.ipc")" = "$IPC" ]; then pass "service gets AURORA_IPC_SOCK"; else fail "service AURORA_IPC_SOCK=$(cat "$SDIR/run/steady.ipc")"; fi
+        if [ "$(cat "$SDIR/run/steady.wl")" = "$SOCK" ]; then pass "service gets WAYLAND_DISPLAY"; else fail "service WAYLAND_DISPLAY=$(cat "$SDIR/run/steady.wl")"; fi
+    else
+        fail "steady service did not run"
+    fi
+
+    # Reload never double-starts a running service.
+    local spid r
+    spid=$(pid_from_log steady)
+    for r in 1 2 3; do
+        mark
+        kill -USR1 "$APID"
+        need 'config: loaded' 3
+    done
+    if [ "$(wc -l <"$SDIR/run/steady.starts")" = 1 ]; then pass "3 reloads did not restart or double-start steady"; else fail "steady started $(wc -l <"$SDIR/run/steady.starts") times"; fi
+    dump
+    if matches "^dump: service steady pid=[0-9]+ restarts=0" "$(dumpline 'service steady')"; then pass "dump: service steady"; else fail "MISSING log contract line: dump: service steady pid=<p> restarts=0 ('$(dumpline 'service steady')')"; fi
+    if matches '^dump: service fake pid=.* restarts=[1-9]' "$(dumpline 'service fake')"; then pass "dump: service fake counts restarts"; else fail "dump: service fake: '$(dumpline 'service fake')'"; fi
+
+    # Disabling through a reload stops it; re-enabling starts it again (once).
+    sed -i '/^\[services.steady\]/a enabled = false' "$CFG"
+    mark
+    kill -USR1 "$APID"
+    need 'service: stopping name=steady pid=[0-9]+' 3
+    if [ -n "$spid" ] && waitfor 4 pid_dead "$spid"; then pass "disabled service process is gone"; else fail "steady pid $spid still alive after disable"; fi
+    absent 'service: started name=steady' "a disabled service is not restarted" 1.5
+    sed -i '/^enabled = false/d' "$CFG"
+    mark
+    kill -USR1 "$APID"
+    need 'service: started name=steady pid=[0-9]+' 3
+    sleep 0.5
+    if [ "$(count_log 'service: started name=steady ')" = 1 ]; then pass "re-enabled service started exactly once"; else fail "steady started $(count_log 'service: started name=steady ') times"; fi
+    spid=$(pid_from_log steady)
+
+    # Shutdown stops everything it supervises.
+    mark
+    kill "$APID"
+    local i
+    for i in $(seq 60); do alive || break; sleep 0.1; done
+    if alive; then fail "aurora still running 6 s after SIGTERM"; else pass "aurora exits on SIGTERM"; fi
+    need 'service: stopping name=steady pid=[0-9]+' 3
+    if [ -n "$spid" ] && waitfor 3 pid_dead "$spid"; then pass "service stopped at shutdown"; else fail "steady pid $spid outlived the compositor"; fi
+    if [ -s "$SDIR/run/steady.starts" ]; then
+        local sp
+        sp=$(tail -1 "$SDIR/run/steady.starts")
+        if pid_dead "$sp"; then pass "service child process is gone"; else fail "child $sp outlived the compositor"; fi
+    fi
+    wait "$APID" 2>/dev/null
+    APID=""
+    QA_TIMEOUT=40
+}
+
+sc_theme() {
+    NAME=theme
+    need_ctl || return
+    begin theme
+    local TH="$SDIR/cfg/aurora/theme.toml"
+    printf '[palette]\naccent = "#010203"\n' >"$TH"
+    launch || { end_scenario; return; }
+    need_boot 'theme: loaded path=.* warnings=0' 5
+    env -u DISPLAY AURORA_IPC_SOCK="$IPC" "$BINDIR/auroractl" events theme >"$SDIR/events.log" 2>&1 &
+    local evpid=$!
+    CPIDS+=("$evpid")
+    need 'ipc: client connected name=auroractl' 5
+    sleep 0.3
+    local cur
+    cur=$(ctl raw '"GetTheme"' | tr -d ' \n')
+    if contains "$cur" '1,2,3,255'; then pass "initial theme.toml is live (accent 1,2,3)"; else fail "GetTheme does not show the file's accent: ${cur:0:200}"; fi
+
+    printf '[palette]\naccent = "#abcdef"\n' >"$TH"
+    mark
+    kill -USR1 "$APID"
+    need 'theme: changed rev=[0-9]+' 3
+    if waitfor 3 grep -qa '171,205,239' "$SDIR/events.log"; then pass "Event::Theme pushed with the new accent"; else fail "no Theme event with 171,205,239: $(head -c 300 "$SDIR/events.log")"; fi
+    need 'ipc: broadcast topic=Theme clients=[1-9]' 3
+
+    # No change, no push.
+    mark
+    kill -USR1 "$APID"
+    need 'config: loaded' 3
+    absent 'theme: changed' "an unchanged theme.toml pushes nothing"
+
+    # A syntax error keeps the current theme; a bad value only warns.
+    printf '[palette\naccent = = ' >"$TH"
+    mark
+    kill -USR1 "$APID"
+    need 'theme: error .*keeping previous' 3
+    cur=$(ctl raw '"GetTheme"' | tr -d ' \n')
+    if contains "$cur" '171,205,239'; then pass "broken theme.toml keeps the previous theme"; else fail "theme after a broken file: ${cur:0:200}"; fi
+    printf '[palette]\naccent = "not-a-color"\n' >"$TH"
+    mark
+    kill -USR1 "$APID"
+    need 'theme: warning' 3
+    if alive; then pass "alive after a bad theme value"; else fail "died on a bad theme value"; fi
+    end_scenario
+}
+
+# bar_hits PNG Y RRGGBB WIDTH: how many of 9 samples along row Y have that color.
+bar_hits() {
+    local i hits=0 px
+    for i in 1 2 3 4 5 6 7 8 9; do
+        px=$(pixel "$1" $(($4 * i / 10)) "$2")
+        [ "${px^^}" = "$3" ] && hits=$((hits + 1))
+    done
+    echo "$hits"
+}
+
+sc_shell() {
+    require shell aurora-shell || return
+    begin shell
+    # Opaque bar so the pixel check is exact, whatever the widgets draw.
+    printf '[palette]\nbg = "#123456"\n' >"$SDIR/cfg/aurora/theme.toml"
+    launch || { end_scenario; return; }
+    mark
+    svc aurora-shell
+    local spid=$LASTPID
+    need_client 'shell: ready outputs=[1-9]' 15
+    need 'layer: out=winit usable=0,[1-9][0-9]* ' 10
+    local bary
+    bary=$(sed -E 's/.*usable=0,([0-9]+) .*/\1/' <<<"$MATCH")
+    sleep 0.8
+    dump
+    local gx gy gw gh png hits px
+    read -r gx gy gw gh <<<"$(rect4 "$(dumpline out | sed -nE 's/.* geo=([-0-9]+,[-0-9]+ [0-9]+x[0-9]+).*/\1/p')")"
+    png=$(shot bar -o winit) || { end_scenario; return; }
+    hits=$(bar_hits "$png" $((bary / 2)) 123456 "$gw")
+    if [ "$hits" -ge 6 ]; then pass "bar strip is the theme bg ($hits/9 samples are 123456)"; else fail "bar strip pixels are not 123456 ($hits/9), e.g. $(pixel "$png" $((gw / 10)) $((bary / 2)))"; fi
+    px=$(pixel "$png" $((gw / 2)) $((bary + 6)))
+    if [ "${px^^}" != 123456 ]; then pass "below the bar is not bar colored"; else fail "pixel below the bar is bar colored"; fi
+
+    # Tiled windows stay below the exclusive zone.
+    term sh1; need ':sh1:' 10
+    sleep 0.3
+    dump
+    local x y w h
+    read -r x y w h <<<"$(rect4 "$(dumpwin sh1 rect)")"
+    if [ "${y:-0}" -ge "$bary" ]; then pass "window sits below the bar (y=$y, zone $bary)"; else fail "window y=${y:-?} overlaps the bar zone $bary"; fi
+
+    # The theme reaches the running shell without a restart.
+    printf '[palette]\nbg = "#654321"\n' >"$SDIR/cfg/aurora/theme.toml"
+    mark
+    kill -USR1 "$APID"
+    need 'theme: changed rev=' 3
+    sleep 0.8
+    png=$(shot bar2 -o winit) || { end_scenario; return; }
+    hits=$(bar_hits "$png" $((bary / 2)) 654321 "$gw")
+    if [ "$hits" -ge 6 ]; then pass "bar repainted with the new theme ($hits/9)"; else fail "bar did not follow the theme ($hits/9 are 654321)"; fi
+
+    # A dying bar releases its zone and never hurts windows.
+    mark
+    kill "$spid" 2>/dev/null
+    need 'layer: out=winit usable=0,0 ' 5
+    if alive; then pass "compositor alive after the shell died"; else fail "compositor died with the shell"; fi
+    dump
+    if [ -n "$(dumpwin sh1 rect)" ]; then pass "window survives the shell"; else fail "window sh1 gone after the shell died"; fi
+    end_scenario
+}
+
+sc_launcher() {
+    require launcher aurora-launcher || return
+    begin launcher
+    mkdir -p "$SDIR/data/applications"
+    cat >"$SDIR/data/applications/qa-hello.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=QaHello
+Exec=touch $SDIR/run/launched
+Terminal=false
+EOF
+    launch || { end_scenario; return; }
+    # The daemon and every `toggle` share this socket; keep it out of the user's real
+    # $XDG_RUNTIME_DIR/aurora/launcher.sock.
+    export AURORA_LAUNCHER_SOCK="$SDIR/run/launcher.sock"
+    client env XDG_DATA_DIRS="$SDIR/data" XDG_DATA_HOME="$SDIR/data" "$BINDIR/aurora-launcher"
+    need_client 'launcher: ready apps=[1-9]' 15
+    sleep 0.5
+    if clog | grep -qa 'launcher: show'; then fail "launcher showed itself at startup"; else pass "daemon starts hidden"; fi
+    local before shown typed after
+    snap before l-hidden -o winit
+
+    # `toggle` is a second invocation that talks to the running daemon (over IPC or a socket).
+    wl env XDG_DATA_DIRS="$SDIR/data" "$BINDIR/aurora-launcher" toggle >>"$SDIR/clients.log" 2>&1
+    if wait_client_count 'launcher: show' 1 5; then pass "toggle shows"; else fail "MISSING log contract line: launcher: show"; fi
+    sleep 0.5
+    snap shown l-shown -o winit
+    if [ -z "$before" ] || [ -z "$shown" ]; then :; elif [ "$(diffpx "$before" "$shown")" -gt 500 ]; then pass "screen differs while the launcher is shown"; else fail "no visible launcher surface (diff $(diffpx "$before" "$shown") px)"; fi
+
+    wl wtype 'qahel'
+    sleep 0.6
+    snap typed l-typed -o winit
+    if [ -z "$shown" ] || [ -z "$typed" ]; then :; elif [ "$(diffpx "$shown" "$typed")" -gt 50 ]; then pass "typing changes the view"; else fail "typing 'qahel' changed nothing on screen"; fi
+
+    # Escape hides it again.
+    key "" Escape
+    if wait_client_count 'launcher: hide' 1 5; then pass "Escape hides"; else fail "MISSING log contract line: launcher: hide (Escape)"; fi
+    wl "$BINDIR/aurora-launcher" toggle >>"$SDIR/clients.log" 2>&1
+    if wait_client_count 'launcher: show' 2 5; then pass "second toggle shows again"; else fail "second launcher: show missing"; fi
+    wl "$BINDIR/aurora-launcher" toggle >>"$SDIR/clients.log" 2>&1
+    if wait_client_count 'launcher: hide' 2 5; then pass "toggle hides"; else fail "second launcher: hide missing"; fi
+    sleep 0.4
+    snap after l-after -o winit
+    if [ -z "$before" ] || [ -z "$after" ]; then :; elif [ "$(diffpx "$before" "$after")" -lt 50 ]; then pass "hidden again leaves no residue"; else fail "screen differs after hide ($(diffpx "$before" "$after") px)"; fi
+
+    # A name and Return launch the fixture entry through IPC Spawn.
+    wl "$BINDIR/aurora-launcher" toggle >>"$SDIR/clients.log" 2>&1
+    wait_client_count 'launcher: show' 3 5 || fail "launcher: show (third) missing"
+    sleep 0.4
+    wl wtype 'qahel'
+    sleep 0.4
+    key "" Return
+    if waitfor 5 test -e "$SDIR/run/launched"; then pass "Return launched the selected entry"; else fail "fixture entry was not launched"; fi
+    if wait_client_count 'launcher: hide' 3 5; then pass "launcher hides after launching"; else fail "launcher did not hide after launch"; fi
+    unset AURORA_LAUNCHER_SOCK
+    end_scenario
+}
+
+NOTIF_DEST=(--dest org.freedesktop.Notifications --object-path /org/freedesktop/Notifications)
+notif_call() { gdbus call --session "${NOTIF_DEST[@]}" --method "org.freedesktop.Notifications.$1" "${@:2}" 2>&1; }
+
+sc_notifd() {
+    require notifd aurora-notifd || return
+    begin notifd
+    local tool
+    for tool in dbus-daemon notify-send gdbus; do
+        command -v "$tool" >/dev/null || { skip "$tool is not installed"; return; }
+    done
+    # The private bus. Its address is explicit and lives in the scratch dir; the user's
+    # session bus is never named anywhere in this scenario.
+    PBUS="unix:path=$SDIR/run/bus"
+    env -u DBUS_SESSION_BUS_ADDRESS dbus-daemon --session --nofork --address="$PBUS" \
+        >"$SDIR/dbus.log" 2>&1 &
+    PBPID=$!
+    if ! waitfor 5 test -S "$SDIR/run/bus"; then
+        fail "private dbus-daemon did not start: $(head -c 200 "$SDIR/dbus.log")"
+        stop_pbus
+        return
+    fi
+    export DBUS_SESSION_BUS_ADDRESS="$PBUS"
+    notifd_body
+    end_scenario
+    stop_pbus
+    export DBUS_SESSION_BUS_ADDRESS="unix:path=$SCRATCH/no-such-bus"
+}
+
+notifd_body() {
+    case "$DBUS_SESSION_BUS_ADDRESS" in "unix:path=$SDIR/"*) ;; *) fail "refusing: bus address is not private"; return ;; esac
+    launch || return
+    svc aurora-notifd
+    local npid=$LASTPID
+    need_client 'notifd: ready name=' 15
+    local out
+    out=$(notif_call GetServerInformation)
+    if contains "$out" 'aurora'; then pass "GetServerInformation answers on the private bus ($out)"; else fail "GetServerInformation: $out"; fi
+    out=$(notif_call GetCapabilities)
+    if contains "$out" 'body'; then pass "capabilities include body"; else fail "GetCapabilities: $out"; fi
+
+    sleep 0.5
+    local base shown gone id1 id2 n
+    base=$(shot n-base -o winit) || return
+    notify-send -a qa -t 0 "QA title" "QA body text" >>"$SDIR/clients.log" 2>&1
+    need_client 'notifd: shown id=[0-9]+' 8
+    sleep 0.6
+    shown=$(shot n-shown -o winit) || return
+    if [ "$(diffpx "$base" "$shown")" -gt 500 ]; then pass "a toast is on screen"; else fail "no toast pixels ($(diffpx "$base" "$shown") px)"; fi
+
+    # Replace keeps the id (replaces_id).
+    out=$(notif_call Notify qa 0 "" "First" "one" '[]' '{}' 0)
+    id1=$(sed -nE 's/^\(uint32 ([0-9]+),\)$/\1/p' <<<"$out")
+    out=$(notif_call Notify qa "${id1:-0}" "" "First" "replaced" '[]' '{}' 0)
+    id2=$(sed -nE 's/^\(uint32 ([0-9]+),\)$/\1/p' <<<"$out")
+    if [ -n "$id1" ] && [ "$id1" = "$id2" ]; then pass "replaces_id keeps the id ($id1)"; else fail "replace changed the id: '$id1' -> '$id2' ($out)"; fi
+    need_client "notifd: shown id=${id1:-0}" 5
+
+    # CloseNotification removes toasts (ids are small integers, close the first dozen).
+    for n in $(seq 1 12); do notif_call CloseNotification "$n" >/dev/null; done
+    sleep 0.8
+    gone=$(shot n-closed -o winit) || return
+    if [ "$(diffpx "$base" "$gone")" -lt 50 ]; then pass "all toasts gone after CloseNotification"; else fail "toast residue after close ($(diffpx "$base" "$gone") px)"; fi
+
+    # Expiry removes a timed toast on its own.
+    notify-send -a qa -t 1200 "brief" "expires" >>"$SDIR/clients.log" 2>&1
+    sleep 0.6
+    gone=$(shot n-exp1 -o winit) || return
+    if [ "$(diffpx "$base" "$gone")" -gt 500 ]; then pass "timed toast visible"; else fail "timed toast not visible"; fi
+    sleep 2.5
+    gone=$(shot n-exp2 -o winit) || return
+    if [ "$(diffpx "$base" "$gone")" -lt 50 ]; then pass "timed toast expired"; else fail "timed toast still visible after expiry"; fi
+
+    # Killing notifd never disturbs the compositor.
+    kill "$npid" 2>/dev/null
+    sleep 0.5
+    if alive; then pass "compositor alive after notifd died"; else fail "compositor died with notifd"; fi
+}
+
+sc_lock() {
+    require lock aurora-lock || return
+    begin lock
+    local CRED="" cmd="$BINDIR/aurora-lock"
+    # Test-only authenticator: the lock crate's feature docs must define a test credential
+    # env. Assumed name AURORA_LOCK_TEST_PASSWORD (aurora-lock built with its test feature).
+    if grep -rqs 'AURORA_LOCK_TEST_PASSWORD' "$ROOT/crates/lock" 2>/dev/null; then
+        CRED=qa-secret
+        cmd="env AURORA_LOCK_TEST_PASSWORD=$CRED $BINDIR/aurora-lock"
+    fi
+    add_binds <<EOF
+"Mod+F5" = "lock"
+"Mod+F6" = "spawn touch $SDIR/run/leak"
+EOF
+    append_cfg <<EOF
+
+[services.lock]
+command = "$cmd"
+autostart = false
+restart = "always"
+backoff_ms = 100
+max_backoff_ms = 400
+EOF
+    launch || { end_scenario; return; }
+    OFF=0
+    absent 'service: started name=lock' "the lock service is not started at boot" 0.5
+    term lk; need ':lk:' 10
+    sleep 0.5
+    dump
+    local x y w h png px
+    read -r x y w h <<<"$(rect4 "$(dumpwin lk rect)")"
+    mark
+    key logo F5
+    need 'lock: requested' 3
+    need 'service: started name=lock pid=[0-9]+' 3
+    need 'lock: surface output=winit' 10
+    need 'lock: locked' 10
+    sleep 0.3
+    dump
+    if matches '^dump: lock state=locked surfaces=[1-9]' "$(dumpline lock)"; then pass "dump: lock state=locked"; else fail "MISSING log contract line: dump: lock state=locked ('$(dumpline lock)')"; fi
+    png=$(shot locked -o winit) || { end_scenario; return; }
+    px=$(pixel "$png" $((x + w / 2)) $((y - 2)))
+    if [ "${px^^}" != FF0000 ] && [ "${px^^}" != 0000FF ]; then pass "no window border visible while locked"; else fail "window border pixel visible while locked: $px"; fi
+
+    # Binds are refused.
+    mark
+    key logo F6
+    key logo 2
+    key logo q
+    absent 'action: ' "binds are refused while locked" 0.8
+    if [ ! -e "$SDIR/run/leak" ]; then pass "spawn bind did not run"; else fail "bind ran while locked"; fi
+    # Requests that move things, and Unlock from anyone but the lock client, are denied over IPC.
+    if [ -x "$BINDIR/auroractl" ]; then
+        local reply
+        reply=$(ctl raw '{"SwitchWorkspace":{"output":null,"index":3}}' 2>&1 | tr -d ' \n')
+        if contains "$reply" 'Denied'; then pass "IPC SwitchWorkspace is Denied while locked"; else fail "SwitchWorkspace while locked: $reply"; fi
+        reply=$(ctl raw '"Unlock"' 2>&1 | tr -d ' \n')
+        if contains "$reply" 'Denied'; then pass "IPC Unlock from another client is Denied"; else fail "Unlock from auroractl: $reply"; fi
+        dump
+        if matches 'state=locked' "$(dumpline lock)"; then pass "still locked after the Unlock attempt"; else fail "lock state changed: '$(dumpline lock)'"; fi
+    fi
+
+    # The emergency VT chord keeps working.
+    mark
+    key ctrl+altgr F1
+    need 'VT switch requested' 3
+    if alive; then pass "survives the VT chord while locked"; else fail "died on the VT chord"; fi
+
+    # A dead lock client keeps the session locked; the supervisor starts a new one.
+    local lpid
+    mark
+    lpid=$(OFF=0 pid_from_log lock)
+    if [ -n "$lpid" ]; then kill "$lpid" 2>/dev/null; else fail "no lock pid in the log"; fi
+    need 'lock: client gone, session stays locked' 5
+    need 'service: started name=lock pid=[0-9]+' 5
+    need 'lock: surface output=winit' 10
+    sleep 0.3
+    dump
+    if matches 'state=locked' "$(dumpline lock)"; then pass "still locked after the lock client died"; else fail "lock state after client death: '$(dumpline lock)'"; fi
+
+    if [ -n "$CRED" ]; then
+        mark
+        wl wtype "wrong-password"
+        key "" Return
+        absent 'lock: unlocked' "a wrong credential does not unlock" 1.2
+        wl wtype "$CRED"
+        key "" Return
+        need 'lock: unlocked' 5
+        dump
+        if matches 'state=unlocked' "$(dumpline lock)"; then pass "unlocked with the right credential"; else fail "dump after unlock: '$(dumpline lock)'"; fi
+        mark
+        key logo 2
+        need 'action: workspace 2' 3
+        key logo 1
+        key logo F5
+        need 'lock: locked' 10
+    else
+        skip "unlock with a test credential: crates/lock does not define AURORA_LOCK_TEST_PASSWORD yet (the lock crate's feature docs must, see docs/m4-plan.md)"
+    fi
+
+    # The quit chord works even when locked.
+    mark
+    key ctrl+altgr BackSpace
+    need 'quitting: quit chord' 3
+    local i
+    for i in $(seq 50); do alive || break; sleep 0.1; done
+    if alive; then fail "quit chord ignored while locked"; else pass "quit chord works while locked"; fi
+    end_scenario
+}
+
+ALL=(keys emergency reload tiling workspaces layer xwayland multi robust anim effects overview xscale ipc services theme shell launcher notifd lock)
 if [ $# -eq 0 ]; then set -- "${ALL[@]}"; fi
 for s in "$@"; do
     declare -F "sc_$s" >/dev/null || { echo "unknown scenario $s" >&2; exit 2; }
@@ -829,5 +1506,5 @@ for s in "$@"; do
     "sc_$s"
     stop_aurora
 done
-echo "== summary: $PASS passed, $FAIL failed"
+echo "== summary: $PASS passed, $FAIL failed, $SKIP skipped"
 [ "$FAIL" = 0 ]

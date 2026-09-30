@@ -33,7 +33,8 @@ impl Aurora {
         let prev = self.wm.focused;
         // An exclusive layer owns the keyboard: window focus then only updates what the
         // keyboard returns to.
-        let locked = self.layer_focus.exclusive.is_some();
+        // The session lock owns it the same way, without exception.
+        let locked = self.layer_focus.exclusive.is_some() || self.is_locked();
         // The keyboard may sit on a layer while `wm.focused` still names the window.
         let target = id
             .and_then(|i| self.wm.windows.get(&i))
@@ -166,6 +167,7 @@ impl Aurora {
                 self.focus_window(Some(id), raise);
             }
             Hit::Layer(hit) => self.focus_layer_on_click(&hit.layer),
+            Hit::Lock { surface, .. } => self.lock_focus_surface(&surface),
             Hit::Unmanaged(window, _) => {
                 if let Some(x11) = window.x11_surface()
                     && Aurora::x11_takes_click_focus(x11)

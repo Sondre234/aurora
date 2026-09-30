@@ -6,7 +6,7 @@ use toml::{Table, Value};
 
 use super::{
     AnimSpec, Animations, Color, Decoration, General, Glob, ModKey, ModeSpec, OutputRule,
-    WindowRule, WorkspaceRule, XWayland,
+    RestartPolicy, ServiceSpec, WindowRule, WorkspaceRule, XWayland,
 };
 use crate::anim::Curve;
 
@@ -24,6 +24,7 @@ pub struct RawConfig {
     pub workspace: Option<Value>,
     pub window_rule: Option<Value>,
     pub autostart: Option<Value>,
+    pub services: Option<Value>,
     /// Unknown top-level keys, reported as warnings.
     #[serde(flatten)]
     pub extra: Table,
@@ -564,6 +565,93 @@ pub fn autostart(section: Option<&Value>, warnings: &mut Vec<String>) -> Vec<Str
         }
     }
     out
+}
+
+/// `[services.<name>]` tables: `command` (required), `enabled`, `autostart`, `restart`
+/// (`never`, `on-failure`, `always`), `backoff_ms`, `max_backoff_ms`. A bad entry is dropped
+/// alone; the result is sorted by name (the table's own order).
+pub fn services(section: Option<&Value>, warnings: &mut Vec<String>) -> Vec<ServiceSpec> {
+    let Some(table) = table_of("services", section, warnings) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for (name, value) in table {
+        let ctx = format!("services.{name}");
+        let Some(t) = table_of(&ctx, Some(value), warnings) else {
+            continue;
+        };
+        match service(name, &ctx, t, warnings) {
+            Ok(spec) => out.push(spec),
+            Err(err) => warnings.push(format!("{ctx}: {err}, service dropped")),
+        }
+    }
+    out
+}
+
+fn service(
+    name: &str,
+    ctx: &str,
+    t: &Table,
+    warnings: &mut Vec<String>,
+) -> Result<ServiceSpec, String> {
+    check_keys(
+        ctx,
+        t,
+        &[
+            "command",
+            "enabled",
+            "autostart",
+            "restart",
+            "backoff_ms",
+            "max_backoff_ms",
+        ],
+        warnings,
+    );
+    let e = |err| strip(err, ctx);
+    if name.is_empty()
+        || name.len() > 64
+        || !name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+    {
+        return Err("name must be 1..=64 of letters, digits, '-', '_', '.'".into());
+    }
+    let command = get_str(ctx, t, "command")
+        .map_err(e)?
+        .map(str::trim)
+        .filter(|c| !c.is_empty())
+        .ok_or("missing command")?;
+    let restart = match get_str(ctx, t, "restart").map_err(e)? {
+        Some(text) => RestartPolicy::parse(text)
+            .ok_or_else(|| format!("unknown restart {text:?} (never, on-failure, always)"))?,
+        None => RestartPolicy::OnFailure,
+    };
+    let backoff = |key: &str, default: u32, warnings: &mut Vec<String>| {
+        ranged(
+            ctx,
+            key,
+            t,
+            10..=i64::from(ServiceSpec::MAX_BACKOFF_MS),
+            warnings,
+        )
+        .map_or(default, |n| n as u32)
+    };
+    let backoff_ms = backoff("backoff_ms", 500, warnings);
+    let max_backoff_ms = backoff("max_backoff_ms", 30_000, warnings);
+    if max_backoff_ms < backoff_ms {
+        return Err(format!(
+            "max_backoff_ms {max_backoff_ms} is below backoff_ms {backoff_ms}"
+        ));
+    }
+    Ok(ServiceSpec {
+        name: name.to_string(),
+        command: command.to_string(),
+        enabled: get_bool(ctx, t, "enabled").map_err(e)?.unwrap_or(true),
+        autostart: get_bool(ctx, t, "autostart").map_err(e)?.unwrap_or(true),
+        restart,
+        backoff_ms,
+        max_backoff_ms,
+    })
 }
 
 /// Keeps the first item per key, so a later duplicate cannot silently override.

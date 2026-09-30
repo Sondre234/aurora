@@ -8,15 +8,19 @@ use std::{
 use smithay::{
     backend::renderer::{
         element::{
-            AsRenderElements, Wrap, memory::MemoryRenderBufferRenderElement, render_elements,
-            surface::WaylandSurfaceRenderElement, texture::TextureRenderElement,
+            AsRenderElements, Kind, Wrap,
+            memory::MemoryRenderBufferRenderElement,
+            render_elements,
+            solid::SolidColorRenderElement,
+            surface::{WaylandSurfaceRenderElement, render_elements_from_surface_tree},
+            texture::TextureRenderElement,
         },
         gles::{GlesRenderer, GlesTexture, element::PixelShaderElement},
     },
     desktop::{Space, Window, space::SpaceElement},
     output::Output,
     reexports::wayland_server::Resource,
-    utils::{Logical, Point, Rectangle, Scale, Size},
+    utils::{Logical, Physical, Point, Rectangle, Scale, Size},
     wayland::shell::wlr_layer::Layer,
 };
 
@@ -107,6 +111,39 @@ pub fn top_hidden(output: &Output) -> bool {
         .is_some_and(|f| f.0.load(Ordering::Relaxed))
 }
 
+/// What a locked `output` draws, front to back: its lock surface, then opaque black. With no
+/// lock surface (client dead, output new) only the black.
+fn lock_elements(
+    renderer: &mut GlesRenderer,
+    output: &Output,
+    geo: Rectangle<i32, Logical>,
+    scale: Scale<f64>,
+) -> Vec<OutputElement> {
+    let (surface, black) = crate::lock::view(output, geo.size);
+    let origin: Point<i32, Physical> = Point::from((0, 0));
+    let mut out = Vec::new();
+    if let Some(surface) = surface {
+        let elements: Vec<WaylandSurfaceRenderElement<GlesRenderer>> =
+            render_elements_from_surface_tree(
+                renderer,
+                &surface,
+                origin,
+                scale,
+                1.0,
+                Kind::Unspecified,
+            );
+        out.extend(
+            elements
+                .into_iter()
+                .map(|e| OutputElement::Layer(Wrap::from(e))),
+        );
+    }
+    out.push(OutputElement::Window(WindowRenderElement::Border(
+        SolidColorRenderElement::from_buffer(&black, origin, scale, 1.0, Kind::Unspecified),
+    )));
+    out
+}
+
 fn push_layers(
     out: &mut Vec<OutputElement>,
     renderer: &mut GlesRenderer,
@@ -142,6 +179,11 @@ pub fn output_elements(
 ) -> Option<Vec<OutputElement>> {
     let geo = space.output_geometry(output)?;
     let scale = Scale::from(output.current_scale().fractional_scale());
+    // A locked session shows the output's lock surface over black and nothing else: no
+    // layer, window, blur or overview element is even built.
+    if crate::lock::engaged() {
+        return Some(lock_elements(renderer, output, geo, scale));
+    }
     let mut out = Vec::new();
     // Blur requests, front to back; `blur::apply` inserts the elements once the list is done.
     let blurring = blur::active(fx, output);

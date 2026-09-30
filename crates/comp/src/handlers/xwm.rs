@@ -107,8 +107,11 @@ impl XwmHandler for Aurora {
     }
 
     fn property_notify(&mut self, _xwm: XwmId, window: X11Surface, property: WmWindowProperty) {
-        if property == WmWindowProperty::NormalHints {
-            self.x11_hints_changed(&window);
+        match property {
+            WmWindowProperty::NormalHints => self.x11_hints_changed(&window),
+            WmWindowProperty::Title => self.x11_title_changed(&window),
+            WmWindowProperty::Class => self.x11_class_changed(&window),
+            _ => {}
         }
     }
 

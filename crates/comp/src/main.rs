@@ -12,15 +12,18 @@ mod emergency;
 mod focus;
 mod handlers;
 mod input;
+mod ipc;
 mod keymap;
 mod layers;
 mod libinput;
+mod lock;
 mod log;
 mod outputs;
 mod overview;
 mod protocols;
 mod safety;
 mod scene;
+mod services;
 mod session;
 mod spawn;
 mod state;
@@ -93,21 +96,30 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     tracing::info!(socket = ?state.socket_name, "aurora listening");
 
+    // Before any child starts, so they all see AURORA_IPC_SOCK.
+    state.ipc_start();
     state.start_xwayland();
     state.spawn(&cli.command);
     // exec-once: once per process, never re-run by a reload.
     for cmd in state.config.autostart.clone() {
         state.spawn(&cmd);
     }
+    state.services_init();
 
     let result = event_loop.run(None, &mut state, |state| {
         // Input and request handlers only queue events; nothing else flushes them.
         let _ = state.display_handle.flush_clients();
         // A workspace slide that ended has its outgoing windows to take out of the Space.
         state.finish_slides();
+        // Window, workspace, focus and output changes reach IPC subscribers.
+        state.ipc_update();
+        // A lock client that vanished, or an output that changed, while locked.
+        state.lock_update();
     });
     // Every exit path: the window manager must go before the state drops, and the server
     // with it, so no Xwayland outlives the compositor.
+    state.services_shutdown();
+    state.ipc_shutdown();
     state.shutdown_xwayland();
     result?;
     safety::arm_exit_deadline();

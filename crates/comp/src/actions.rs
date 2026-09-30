@@ -20,6 +20,12 @@ fn layout_dir(dir: Dir) -> layout::Dir {
 impl Aurora {
     pub fn dispatch(&mut self, action: Action) {
         tracing::info!("action: {action}");
+        // Whatever the source (bind, repeat, mouse bind), a locked session runs nothing but
+        // quitting and introspection.
+        if self.is_locked() && !matches!(action, Action::Quit | Action::DebugDump | Action::None) {
+            tracing::info!("action: ignored while locked");
+            return;
+        }
         match action {
             Action::Spawn(cmd) => self.spawn(&cmd),
             Action::Close => self.close_focused(),
@@ -30,6 +36,7 @@ impl Aurora {
             Action::ResizeSplit(dir, px) => self.resize_split(dir, px),
             Action::Overview => self.toggle_overview(),
             Action::ReloadConfig => self.reload_config(),
+            Action::Lock => self.lock_action(),
             Action::RevokeInhibit => self.revoke_shortcuts_inhibit(),
             Action::Quit => {
                 tracing::warn!("quitting: quit action");
@@ -78,8 +85,15 @@ impl Aurora {
 
     /// Asks the focused window to close; the client decides.
     fn close_focused(&mut self) {
-        let Some(win) = self.wm.focused.and_then(|id| self.wm.windows.get(&id)) else {
-            return;
+        if let Some(id) = self.wm.focused {
+            self.close_window(id);
+        }
+    }
+
+    /// Asks window `id` to close; the client decides. False when there is no such window.
+    pub fn close_window(&mut self, id: WinId) -> bool {
+        let Some(win) = self.wm.windows.get(&id) else {
+            return false;
         };
         match win.element.underlying_surface() {
             WindowSurface::Wayland(toplevel) => toplevel.send_close(),
@@ -89,6 +103,7 @@ impl Aurora {
                 }
             }
         }
+        true
     }
 
     pub(crate) fn focused_with_ws(&self) -> Option<(WinId, u32)> {

@@ -17,7 +17,8 @@ use smithay::{
         utils::{
             OutputPresentationFeedback, send_frames_surface_tree,
             surface_presentation_feedback_flags_from_states, surface_primary_scanout_output,
-            update_surface_primary_scanout_output, with_surfaces_surface_tree,
+            take_presentation_feedback_surface_tree, update_surface_primary_scanout_output,
+            with_surfaces_surface_tree,
         },
     },
     input::{
@@ -74,6 +75,15 @@ pub struct Aurora {
     /// QA outputs made by `debug-add-output`, by name.
     pub headless: std::collections::HashMap<String, crate::backend::headless::HeadlessOutput>,
     pub layer_focus: crate::layers::LayerFocus,
+    /// The session lock, from the request until the owner unlocks.
+    pub lock: Option<crate::lock::LockState>,
+    /// Supervised `[services]` processes.
+    pub services: crate::services::Services,
+    /// The IPC server, `None` when it could not start.
+    pub ipc: Option<crate::ipc::Ipc>,
+    /// The live theme and where it is loaded from.
+    pub theme: aurora_theme::ThemeSnapshot,
+    pub theme_path: PathBuf,
     pub space: Space<WindowElement>,
     pub xwayland: crate::xwayland::XWaylandState,
     pub popups: PopupManager,
@@ -132,6 +142,10 @@ impl Aurora {
         let pointer = seat.add_pointer();
 
         let socket_name = Self::init_wayland_listener(display, event_loop)?;
+        let theme_path = crate::ipc::theme::path_for(&config_path);
+        let theme = crate::ipc::theme::load_initial(&theme_path);
+        let (services, service_exits) = crate::services::Services::new();
+        Self::services_source(&event_loop.handle(), service_exits);
 
         Ok(Self {
             backend,
@@ -150,6 +164,11 @@ impl Aurora {
             overview: None,
             headless: Default::default(),
             layer_focus: Default::default(),
+            lock: None,
+            services,
+            ipc: None,
+            theme,
+            theme_path,
             space: Space::default(),
             xwayland: Default::default(),
             popups: PopupManager::default(),
@@ -210,6 +229,7 @@ impl Aurora {
     ) -> Option<(FocusTarget, Point<f64, Logical>)> {
         match self.hit_test(pos) {
             Hit::Layer(hit) => Some((FocusTarget::Wl(hit.surface), hit.loc)),
+            Hit::Lock { surface, loc } => Some((FocusTarget::Wl(surface), loc)),
             Hit::Window(window, location) => window_focus(&window, pos, location),
             Hit::Unmanaged(window, location) => window_focus(&window, pos, location),
             Hit::Nothing => None,
@@ -228,6 +248,30 @@ impl Aurora {
     ) {
         let throttle = Some(Duration::from_secs(1));
         self.send_output_scale(output);
+
+        // Locked: only the lock surface (and the cursor) is on screen; everything else is
+        // hidden and waits for the next frame after the unlock.
+        if crate::lock::engaged() {
+            if let Some(surface) = crate::lock::surface_of(output) {
+                send_frames_surface_tree(
+                    &surface,
+                    output,
+                    time,
+                    throttle,
+                    surface_primary_scanout_output,
+                );
+            }
+            if let CursorImageStatus::Surface(surface) = &self.cursor_status {
+                send_frames_surface_tree(
+                    surface,
+                    output,
+                    time,
+                    throttle,
+                    surface_primary_scanout_output,
+                );
+            }
+            return;
+        }
 
         for window in self.space.elements() {
             if self.space.outputs_for_element(window).contains(output) {
@@ -337,6 +381,9 @@ pub fn update_primary_scanout_output(
     for layer in layer_map_for_output(output).layers() {
         layer.with_surfaces(update);
     }
+    if let Some(surface) = crate::lock::surface_of(output) {
+        with_surfaces_surface_tree(&surface, update);
+    }
     if let CursorImageStatus::Surface(surface) = cursor_status {
         with_surfaces_surface_tree(surface, update);
     }
@@ -366,6 +413,14 @@ pub fn take_presentation_feedback(
     }
     for layer in layer_map_for_output(output).layers() {
         layer.take_presentation_feedback(&mut feedback, surface_primary_scanout_output, flags);
+    }
+    if let Some(surface) = crate::lock::surface_of(output) {
+        take_presentation_feedback_surface_tree(
+            &surface,
+            &mut feedback,
+            surface_primary_scanout_output,
+            flags,
+        );
     }
     feedback
 }

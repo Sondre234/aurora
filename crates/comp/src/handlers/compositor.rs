@@ -50,6 +50,9 @@ impl CompositorHandler for Aurora {
     fn commit(&mut self, surface: &WlSurface) {
         on_commit_buffer_handler::<Self>(surface);
         self.backend.early_import(surface);
+        if self.is_locked() && self.lock_commit(&root_surface(surface)) {
+            return;
+        }
         // A sync subsurface shows nothing until its parent commits.
         let sync_subsurface = is_sync_subsurface(surface);
         let mut outputs = Vec::new();

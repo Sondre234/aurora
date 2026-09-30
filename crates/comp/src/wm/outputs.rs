@@ -186,12 +186,28 @@ impl Aurora {
         for layer in layer_map_for_output(output).layers() {
             layer.with_surfaces(update);
         }
+        if let Some(surface) = crate::lock::surface_of(output) {
+            smithay::desktop::utils::with_surfaces_surface_tree(&surface, update);
+        }
     }
 
     /// Frame callbacks for the backends that have no vblank of their own (nested, headless).
     pub fn send_nested_frames(&mut self, output: &Output) {
         let time = Duration::from(self.clock.now());
         self.send_output_scale(output);
+        if crate::lock::engaged() {
+            if let Some(surface) = crate::lock::surface_of(output) {
+                smithay::desktop::utils::send_frames_surface_tree(
+                    &surface,
+                    output,
+                    time,
+                    Some(Duration::ZERO),
+                    |_, _| Some(output.clone()),
+                );
+            }
+            let _ = self.display_handle.flush_clients();
+            return;
+        }
         let mut sent = Vec::new();
         for window in self.space.elements() {
             if self.space.outputs_for_element(window).contains(output) {

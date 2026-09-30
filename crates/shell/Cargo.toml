@@ -1,0 +1,18 @@
+[package]
+name = "aurora-shell"
+description = "Aurora status bar: workspaces, focused window and clock on a layer-shell surface per output"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "aurora-shell"
+path = "src/main.rs"
+
+[dependencies]
+aurora-ui = { path = "../ui" }
+aurora-ipc.workspace = true
+aurora-theme.workspace = true
+libc.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

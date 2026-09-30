@@ -56,6 +56,14 @@ impl XdgShellHandler for Aurora {
         self.queue_redraw_all();
     }
 
+    fn title_changed(&mut self, surface: ToplevelSurface) {
+        self.xdg_title_changed(surface.wl_surface());
+    }
+
+    fn app_id_changed(&mut self, surface: ToplevelSurface) {
+        self.xdg_app_id_changed(surface.wl_surface());
+    }
+
     fn popup_destroyed(&mut self, _surface: PopupSurface) {
         self.queue_redraw_all();
     }
@@ -96,6 +104,9 @@ impl XdgShellHandler for Aurora {
     }
 
     fn grab(&mut self, surface: PopupSurface, wl_seat: wl_seat::WlSeat, serial: Serial) {
+        if self.is_locked() {
+            return surface.send_popup_done();
+        }
         let Some(seat) = Seat::<Aurora>::from_resource(&wl_seat) else {
             return surface.send_popup_done();
         };
