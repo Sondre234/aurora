@@ -870,6 +870,7 @@ require() {
     return 0
 }
 ctl() { env -u DISPLAY AURORA_IPC_SOCK="$IPC" "$BINDIR/auroractl" "$@"; }
+# Never background `ctl` (a function): $! would be a subshell, so kill/STOP would miss auroractl.
 # Runs a service binary as a Wayland client with the scenario's socket and IPC path.
 svc() { local b=$1; shift; client "$BINDIR/$b" "$@"; }
 
@@ -906,6 +907,8 @@ waitfor() {
     done
     return 1
 }
+# started_ge NAME N: the service was started at least N times since the mark (re-evaluated per poll).
+started_ge() { [ "$(count_log "service: started name=$1 ")" -ge "$2" ]; }
 pid_dead() { ! kill -0 "$1" 2>/dev/null; }
 # pid_from_log NAME: pid of the last `service: started name=NAME pid=N` since the last mark.
 pid_from_log() { newlog | grep -a "service: started name=$1 " | tail -1 | sed -E 's/.* pid=([0-9]+).*/\1/'; }
@@ -929,7 +932,7 @@ sc_ipc() {
     client foot -a ipcw -T qa-title sh -c "sleep 2; printf '\\033]2;retitled\\007'; sleep 1000"
     need ':ipcw:' 10
     mark
-    ctl events >"$SDIR/events.log" 2>&1 &
+    env -u DISPLAY AURORA_IPC_SOCK="$IPC" "$BINDIR/auroractl" events >"$SDIR/events.log" 2>&1 &
     local evpid=$!
     CPIDS+=("$evpid")
     need 'ipc: client connected name=auroractl proto=[0-9]+' 5
@@ -961,7 +964,7 @@ sc_ipc() {
     if matches '^dump: ipc clients=[1-9]' "$(dumpline ipc)"; then pass "dump: ipc clients"; else fail "MISSING log contract line: dump: ipc clients=<n> ('$(dumpline ipc)')"; fi
 
     # A stopped subscriber must not stall the compositor or other clients.
-    ctl events >/dev/null 2>&1 &
+    env -u DISPLAY AURORA_IPC_SOCK="$IPC" "$BINDIR/auroractl" events >/dev/null 2>&1 &
     local slow=$!
     CPIDS+=("$slow")
     sleep 0.3
@@ -1036,7 +1039,7 @@ EOF
     need 'service: started name=fake pid=[0-9]+' 5
     need 'service: started name=steady pid=[0-9]+' 5
     # A service that keeps exiting is restarted with growing delays, capped by max_backoff_ms.
-    if waitfor 10 test "$(count_log 'service: started name=fake ')" -ge 4; then pass "fake restarted 3 times"; else fail "fake started only $(count_log 'service: started name=fake ') times"; fi
+    if waitfor 10 started_ge fake 4; then pass "fake restarted 3 times"; else fail "fake started only $(count_log 'service: started name=fake ') times"; fi
     need 'service: exited name=fake code=3 restart=[0-9]+' 3
     local delays d1 d2 d3
     delays=$(newlog | grep -a 'service: exited name=fake' | sed -E 's/.* restart=([0-9a-z]+).*/\1/' | head -4 | tr '\n' ' ')
@@ -1110,7 +1113,7 @@ sc_theme() {
     printf '[palette]\naccent = "#010203"\n' >"$TH"
     launch || { end_scenario; return; }
     need_boot 'theme: loaded path=.* warnings=0' 5
-    ctl events theme >"$SDIR/events.log" 2>&1 &
+    env -u DISPLAY AURORA_IPC_SOCK="$IPC" "$BINDIR/auroractl" events theme >"$SDIR/events.log" 2>&1 &
     local evpid=$!
     CPIDS+=("$evpid")
     need 'ipc: client connected name=auroractl' 5
