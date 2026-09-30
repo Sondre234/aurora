@@ -1358,6 +1358,7 @@ EOF
 
 [services.lock]
 command = "$cmd"
+autostart = false
 restart = "always"
 backoff_ms = 100
 max_backoff_ms = 400
