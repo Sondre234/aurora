@@ -250,7 +250,9 @@ impl Aurora {
         };
         surface.render.damaged = false;
         // Advance animations to the moment this frame is built; outputs share one clock.
-        surface.render.animating = self.wm.tick(Duration::from(self.clock.now()));
+        let now = Duration::from(self.clock.now());
+        surface.render.animating = self.wm.tick(now)
+            | crate::overview::Overview::tick(&mut self.overview, &self.wm, now);
         let output = surface.output.clone();
         let _span = tracing::debug_span!("render_surface", output = %output.name()).entered();
 
@@ -259,7 +261,8 @@ impl Aurora {
         self.popups.cleanup();
 
         let now = Duration::from(self.clock.now());
-        let fx = SceneFx::new(renderer, &self.config.decoration, now);
+        let fx = SceneFx::new(renderer, &self.config.decoration, now)
+            .with_overview(self.overview.as_ref());
         let mut result = None;
         for attempt in 0..2 {
             let attempted = render_output(

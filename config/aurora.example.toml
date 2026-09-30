@@ -86,6 +86,9 @@ scale = 1.0
 "Mod+w" = "toggle-floating"
 "Mod+f" = "fullscreen"
 "Mod+j" = "toggle-split"
+# Live workspace overview: Escape closes, arrows/Tab select, Enter or a click focuses,
+# dropping a thumbnail on another workspace panel moves the window there.
+"Mod+Tab" = "overview"
 "Mod+Shift+r" = "reload-config"
 "Mod+Shift+Escape" = { action = "revoke-inhibit", bypass_inhibit = true }
 

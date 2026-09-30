@@ -17,6 +17,7 @@ mod layers;
 mod libinput;
 mod log;
 mod outputs;
+mod overview;
 mod protocols;
 mod safety;
 mod scene;

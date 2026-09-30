@@ -64,6 +64,7 @@ Default binds (`Mod` is Super):
 | Mod+w | toggle floating |
 | Mod+f | fullscreen |
 | Mod+j | toggle split direction |
+| Mod+Tab | live workspace overview (Escape closes, click focuses, drag a thumbnail to another workspace to move it) |
 | Mod+Left/Right/Up/Down | focus in direction |
 | Mod+Shift+arrows | move window in direction |
 | Mod+Ctrl+arrows | resize the split (repeats) |

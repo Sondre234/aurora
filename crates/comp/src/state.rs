@@ -69,6 +69,8 @@ pub struct Aurora {
     pub handle: LoopHandle<'static, Aurora>,
 
     pub wm: Wm,
+    /// The live workspace overview, from the `overview` action until its close animation ends.
+    pub overview: Option<crate::overview::Overview>,
     /// QA outputs made by `debug-add-output`, by name.
     pub headless: std::collections::HashMap<String, crate::backend::headless::HeadlessOutput>,
     pub layer_focus: crate::layers::LayerFocus,
@@ -145,6 +147,7 @@ impl Aurora {
             loop_signal: event_loop.get_signal(),
             handle: event_loop.handle(),
             wm: Wm::default(),
+            overview: None,
             headless: Default::default(),
             layer_focus: Default::default(),
             space: Space::default(),

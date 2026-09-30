@@ -131,8 +131,12 @@ impl Aurora {
     }
 
     /// The topmost thing at `pos`: Overlay, Top (not over a fullscreen window), windows,
-    /// Bottom, Background.
+    /// Bottom, Background. Nothing while the overview owns the pointer, which keeps hover,
+    /// click-to-focus and every pointer focus path away from the windows behind it.
     pub fn hit_test(&self, pos: Point<f64, Logical>) -> Hit {
+        if self.overview_grabs_input() {
+            return Hit::Nothing;
+        }
         let output = self.output_at(pos);
         let hide_top = output
             .as_ref()

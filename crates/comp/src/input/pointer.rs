@@ -101,6 +101,10 @@ impl Aurora {
     ) {
         let pointer = self.pointer.clone();
         let old = pointer.current_location();
+        if self.overview_grabs_input() {
+            self.overview_motion(old + delta, time);
+            return;
+        }
         let constraint = self.current_constraint().filter(|c| c.active);
         let mut pos = self.clamp_pointer(old + delta);
         let locked = constraint.as_ref().is_some_and(|c| c.locked);
@@ -141,6 +145,10 @@ impl Aurora {
     pub fn on_pointer_motion_absolute(&mut self, pos: Point<f64, Logical>, time: InputTime) {
         let pointer = self.pointer.clone();
         let old = pointer.current_location();
+        if self.overview_grabs_input() {
+            self.overview_motion(pos, time);
+            return;
+        }
         let constraint = self.current_constraint().filter(|c| c.active);
         if constraint.as_ref().is_some_and(|c| c.locked) {
             return;
@@ -181,7 +189,12 @@ impl Aurora {
                 held.swap_remove(i);
                 return;
             }
-        } else {
+        }
+        if self.overview_grabs_input() {
+            self.overview_button(button, state);
+            return;
+        }
+        if state == ButtonState::Pressed {
             if !pointer.is_grabbed() {
                 self.focus_under_pointer();
             }
@@ -225,6 +238,10 @@ impl Aurora {
     }
 
     pub fn on_axis(&mut self, input: AxisInput) {
+        // The overview swallows scrolling.
+        if self.overview_grabs_input() {
+            return;
+        }
         if input.source == AxisSource::Wheel
             && let Some(v120) = input.vertical.v120.filter(|v| *v != 0.0)
             && self.wheel_bind(v120)

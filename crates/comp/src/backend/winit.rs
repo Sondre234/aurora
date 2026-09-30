@@ -15,6 +15,7 @@ use crate::{
     backend::BACKGROUND,
     capture::{self, Captures},
     config::Decoration,
+    overview::Overview,
     scene::{SceneFx, output_elements},
     state::Aurora,
     wm::outputs::rule_scale,
@@ -76,7 +77,9 @@ pub fn init(
             WinitEvent::Redraw => {
                 let size = backend.window_size();
                 // The nested window redraws every frame, so the result needs no keep-alive.
-                state.wm.tick(Duration::from(state.clock.now()));
+                let now = Duration::from(state.clock.now());
+                state.wm.tick(now);
+                crate::overview::Overview::tick(&mut state.overview, &state.wm, now);
                 if let Err(err) = draw(
                     &mut backend,
                     &mut damage_tracker,
@@ -84,6 +87,7 @@ pub fn init(
                     &state.xwayland.unmanaged,
                     &mut state.captures,
                     &state.config.decoration,
+                    state.overview.as_ref(),
                     Duration::from(state.clock.now()),
                     &output,
                 ) {
@@ -111,11 +115,12 @@ fn draw(
     unmanaged: &Space<Window>,
     captures: &mut Captures,
     decoration: &Decoration,
+    overview: Option<&Overview>,
     now: Duration,
     output: &Output,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (renderer, mut framebuffer) = backend.bind()?;
-    let fx = SceneFx::new(renderer, decoration, now);
+    let fx = SceneFx::new(renderer, decoration, now).with_overview(overview);
     let elements =
         output_elements(space, unmanaged, renderer, output, &fx).ok_or("output is not mapped")?;
     // The nested window draws no pointer; the host does.

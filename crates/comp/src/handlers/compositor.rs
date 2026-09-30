@@ -63,6 +63,12 @@ impl CompositorHandler for Aurora {
                 window.on_commit();
                 outputs = self.space.outputs_for_element(&window);
                 offscreen = self.space.element_location(&window).is_none();
+                // The overview's thumbnail repaints on the commit only; it also shows windows
+                // on hidden workspaces, which repaint no output of their own.
+                if let Some(overview) = self.overview.as_mut() {
+                    overview.mark_dirty(window.id());
+                    self.queue_redraw_all();
+                }
             } else if let Some(window) = self
                 .xwayland
                 .unmanaged

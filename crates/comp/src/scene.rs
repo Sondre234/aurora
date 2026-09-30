@@ -43,6 +43,7 @@ render_elements! {
     Layer=Wrap<WaylandSurfaceRenderElement<GlesRenderer>>,
     Shadow=PixelShaderElement,
     Blur=BlurElement,
+    Overview=crate::overview::OverviewElement,
 }
 
 /// Per-frame inputs of the effects, built once per render and passed down to the builder.
@@ -55,6 +56,8 @@ pub struct SceneFx<'a> {
     pub programs: Option<Programs>,
     /// Frame time on the animation clock.
     pub now: Duration,
+    /// The live overview, when one is open or closing.
+    pub overview: Option<&'a crate::overview::Overview>,
 }
 
 impl<'a> SceneFx<'a> {
@@ -63,7 +66,13 @@ impl<'a> SceneFx<'a> {
             decoration,
             programs: effects::programs(renderer),
             now,
+            overview: None,
         }
+    }
+
+    pub fn with_overview(mut self, overview: Option<&'a crate::overview::Overview>) -> Self {
+        self.overview = overview;
+        self
     }
 
     /// Whether effects may draw on `output`: not over a fullscreen window, which must stay
@@ -154,6 +163,12 @@ pub fn output_elements(
             scale,
             blurring.then_some(&mut requests),
         );
+    }
+
+    // The overview covers the windows and everything below them; Overlay and Top layers
+    // (launcher, bar) stay on top of it.
+    if let Some(overview) = fx.overview {
+        crate::overview::push(&mut out, renderer, overview, output, geo, scale, fx.now);
     }
 
     // Menus and tooltips belong to no workspace: they stay above every window.

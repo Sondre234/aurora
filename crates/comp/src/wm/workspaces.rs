@@ -158,7 +158,7 @@ impl Aurora {
         self.normalize();
     }
 
-    pub(super) fn relocate_with_children(&mut self, id: WinId, dst: u32) {
+    pub(crate) fn relocate_with_children(&mut self, id: WinId, dst: u32) {
         let Some(src) = self.wm.windows.get(&id).map(|w| w.ws) else {
             return;
         };
