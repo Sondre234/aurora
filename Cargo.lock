@@ -104,6 +104,18 @@ name = "aurora-layout"
 version = "0.1.0"
 
 [[package]]
+name = "aurora-shell"
+version = "0.1.0"
+dependencies = [
+ "aurora-ipc",
+ "aurora-theme",
+ "aurora-ui",
+ "libc",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "aurora-theme"
 version = "0.1.0"
 dependencies = [
