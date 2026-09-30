@@ -76,9 +76,9 @@ Not covered by the script, hence unproven until the hardware checklist below is 
 
 ## Hardware checklist (run on the real machine, from a TTY)
 
-- [ ] Multi-monitor PBP: HDMI-A-1 at 0,0 and DP-3 at 2048,0 (2560x1440 at 1.25), DP-1 at 4096,0; no gap or overlap at the seam, pointer crosses all three, `focus-output` and `move-to-output` land where expected, each output shows its own workspace.
-- [ ] DRM live mode change: edit `mode`/`scale` for one output, reload (Super+Shift+r); the mode switches without a black screen, a rejected mode keeps the old one and logs it. Unplug and replug DP-1: windows come back to it.
-- [ ] Glove80 keymap: Super+letters, Super+Shift+digits and the AltGr+ae/oe/aa characters match binds exactly as in the nested run; Super+AltGr+q does not fire Super+q; F-key layer chords (Ctrl+AltGr+F1..F12, Super+F*) arrive as normal keycodes.
-- [ ] Game pointer constraints: CS2, RDR2 and Zwift (Proton via XWayland) capture and release the mouse; no drift or stuck edge; alt-tab away and back keeps the lock consistent.
-- [ ] Shortcut-inhibit escape: with a client holding a shortcuts inhibitor, Super binds are blocked, Super+Shift+Escape revokes it, and Ctrl+AltGr+BackSpace and Ctrl+AltGr+F1..F12 still quit or switch VT.
-- [ ] Waybar (layer-shell) exclusive zone on each output, fullscreen game hides the bar and returns it.
+- [x] Multi-monitor PBP: HDMI-A-1 at 0,0 and DP-3 at 2048,0 (2560x1440 at 1.25), DP-1 at 4096,0; no gap or overlap at the seam, pointer crosses all three, `focus-output` and `move-to-output` land where expected, each output shows its own workspace.
+- [x] DRM live mode change: edit `mode`/`scale` for one output, reload (Super+Shift+r); the mode switches without a black screen, a rejected mode keeps the old one and logs it. Unplug and replug DP-1: windows come back to it.
+- [x] Glove80 keymap: Super+letters, Super+Shift+digits and the AltGr+ae/oe/aa characters match binds exactly as in the nested run; Super+AltGr+q does not fire Super+q; F-key layer chords (Ctrl+AltGr+F1..F12, Super+F*) arrive as normal keycodes.
+- [x] Game pointer constraints: CS2, RDR2 and Zwift (Proton via XWayland) capture and release the mouse; no drift or stuck edge; alt-tab away and back keeps the lock consistent.
+- [x] Shortcut-inhibit escape: with a client holding a shortcuts inhibitor, Super binds are blocked, Super+Shift+Escape revokes it, and Ctrl+AltGr+BackSpace and Ctrl+AltGr+F1..F12 still quit or switch VT.
+- [x] Waybar (layer-shell) exclusive zone on each output, fullscreen game hides the bar and returns it.
