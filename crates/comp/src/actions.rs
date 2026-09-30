@@ -97,6 +97,22 @@ impl Aurora {
 
     fn focus_dir(&mut self, dir: Dir) {
         let Some((id, ws)) = self.focused_with_ws() else {
+            // Nothing focused, e.g. after crossing to an empty output: leave from the active
+            // output as a whole so focus does not stay stuck there.
+            let Some(output) = self.wm.active_output.clone() else {
+                tracing::info!("focus-dir: no focus and no active output");
+                return;
+            };
+            let Some(ws) = self.wm.active_ws.get(&output).copied() else {
+                tracing::info!("focus-dir: no focus, {} has no workspace", output.name());
+                return;
+            };
+            tracing::info!("focus-dir: no focus, leaving {} ws={ws} {dir:?}", output.name());
+            if let Some((_, full)) = self.work_area(&output) {
+                self.focus_across_output(ws, full, dir);
+            } else {
+                tracing::info!("focus-dir: {} has no work area", output.name());
+            }
             return;
         };
         let Some((_, mut placed)) = self.ws_placements(ws) else {
@@ -125,15 +141,19 @@ impl Aurora {
     /// nearest to the focused one along the edge it crosses.
     fn focus_across_output(&mut self, ws: u32, from: layout::Rect, dir: Dir) {
         let Some(output) = self.wm.output_for_ws(ws) else {
+            tracing::info!("focus-across: ws={ws} has no output");
             return;
         };
         let Some(target) = self.output_in_direction(&output, dir) else {
+            tracing::info!("focus-across: no output {dir:?} of {}", output.name());
             return;
         };
         let Some(dst) = self.wm.active_ws.get(&target).copied() else {
+            tracing::info!("focus-across: {} has no workspace", target.name());
             return;
         };
         let Some((_, mut placed)) = self.ws_placements(dst) else {
+            tracing::info!("focus-across: no placements for ws={dst}");
             return;
         };
         placed.retain(|p| {
@@ -143,6 +163,12 @@ impl Aurora {
                 .is_some_and(|w| w.phase == crate::wm::Phase::Mapped)
                 && self.wm.is_visible(p.id)
         });
+        tracing::info!(
+            "focus-across: {} -> {} ws={dst} candidates={}",
+            output.name(),
+            target.name(),
+            placed.len()
+        );
         let (cx, cy) = (from.x + from.w / 2, from.y + from.h / 2);
         // Closest along the crossed edge first, then closest to the seam.
         let score = |r: &layout::Rect| match dir {
