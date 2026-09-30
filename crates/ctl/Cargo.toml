@@ -1,0 +1,10 @@
+[package]
+name = "auroractl"
+description = "Debug and scripting client for the Aurora compositor IPC"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+aurora-ipc = { path = "../ipc" }
+serde_json = "1"
