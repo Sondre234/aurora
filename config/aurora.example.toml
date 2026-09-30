@@ -210,9 +210,26 @@ scale = 1
 # The service named "lock" is what the `lock` action starts (bind it in [keybinds]); it should
 # not autostart. A lock client that dies while the session is locked is started again (the
 # session stays locked meanwhile); after an unlock it is not.
+# Nothing runs unless you uncomment it. Do not start aurora-notifd while dunst owns the
+# notification name on your session bus (it only takes over when asked to). Colors and
+# fonts of all services come from theme.toml next to this file, live on reload.
 # [services.shell]
 # command = "aurora-shell"
+# restart = "always"
+#
+# [services.launcher]
+# command = "aurora-launcher"
+# restart = "always"
+#
+# [services.notifd]
+# command = "aurora-notifd"
 #
 # [services.lock]
 # command = "aurora-lock"
 # autostart = false
+# restart = "always"
+#
+# Suggested binds for the services (put them in [keybinds] above; left out so that the
+# built-in defaults stay as they are):
+#   "Mod+space" = "spawn aurora-launcher toggle"
+#   "Mod+l" = "lock"
