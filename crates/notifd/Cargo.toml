@@ -9,6 +9,10 @@ license.workspace = true
 name = "aurora_notifd"
 path = "src/lib.rs"
 
+[[bin]]
+name = "aurora-notifd"
+path = "src/main.rs"
+
 [dependencies]
 aurora-ui = { path = "../ui" }
 aurora-ipc = { path = "../ipc" }

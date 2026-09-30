@@ -6,6 +6,9 @@
 //! widget tree), [`icon`] (PNG lookup and decode), [`ipc_client`] (theme and focus link).
 //! Effectful glue: [`dbus`] (zbus server) and [`app`] (ui runtime).
 
+pub mod app;
+pub mod cli;
+pub mod dbus;
 pub mod hints;
 pub mod icon;
 pub mod ipc_client;
