@@ -47,6 +47,13 @@ pub struct LayerHit {
 pub enum Hit {
     Layer(LayerHit),
     Window(WindowElement, Point<i32, Logical>),
+    /// A lock surface (or a subsurface of one) while the session is locked; the only thing
+    /// the pointer can reach then.
+    Lock {
+        surface: WlSurface,
+        /// Global position of `surface`.
+        loc: Point<f64, Logical>,
+    },
     /// An override-redirect X11 window (menu, tooltip): it takes the pointer, never focus.
     Unmanaged(Window, Point<i32, Logical>),
     Nothing,
@@ -134,6 +141,9 @@ impl Aurora {
     /// Bottom, Background. Nothing while the overview owns the pointer, which keeps hover,
     /// click-to-focus and every pointer focus path away from the windows behind it.
     pub fn hit_test(&self, pos: Point<f64, Logical>) -> Hit {
+        if self.is_locked() {
+            return self.lock_hit(pos);
+        }
         if self.overview_grabs_input() {
             return Hit::Nothing;
         }
@@ -230,6 +240,11 @@ impl Aurora {
     /// Recomputes the fullscreen rule and the exclusive keyboard owner. Call after anything
     /// that can change either: layer commit, unmap, new layer, fullscreen or workspace change.
     pub fn refresh_layer_focus(&mut self) {
+        // The lock surface owns the keyboard, and hidden Top layers mean nothing meanwhile.
+        if self.is_locked() {
+            self.lock_update();
+            return;
+        }
         self.sync_top_hidden();
         self.layer_focus
             .demoted
@@ -296,7 +311,20 @@ impl Aurora {
         }
     }
 
+    /// The session just unlocked: the keyboard goes back to the exclusive layer or the focused
+    /// window, as if the lock had never happened.
+    pub fn restore_focus_after_lock(&mut self) {
+        self.layer_focus.exclusive = None;
+        self.layer_focus.restore = None;
+        let target = self.window_focus_target();
+        self.set_keyboard_focus(target);
+        self.refresh_layer_focus();
+    }
+
     fn set_keyboard_focus(&mut self, target: Option<FocusTarget>) {
+        if self.is_locked() {
+            return;
+        }
         let keyboard = self.keyboard.clone();
         self.end_popup_grab_for(target.as_ref());
         keyboard.set_focus(self, target, SERIAL_COUNTER.next_serial());
@@ -374,7 +402,8 @@ impl Aurora {
 
     /// A click on a layer that accepts keyboard focus on demand gives it the keyboard.
     pub fn focus_layer_on_click(&mut self, layer: &LayerSurface) {
-        if self.layer_focus.exclusive.is_some()
+        if self.is_locked()
+            || self.layer_focus.exclusive.is_some()
             || interactivity(layer) != KeyboardInteractivity::OnDemand
         {
             return;

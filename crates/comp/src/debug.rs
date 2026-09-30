@@ -211,6 +211,7 @@ impl Aurora {
         let grab = self.wm.drag.unwrap_or("none");
         tracing::info!("dump: focus kbd={kbd} pointer={ptr} grab={grab}");
         self.dump_overview();
+        self.dump_lock();
         tracing::info!("dump: end {seq}");
     }
 
