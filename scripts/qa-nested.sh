@@ -241,13 +241,16 @@ shot() {
     local out=$SDIR/$1.png
     rm -f "$out"
     wl grim "${@:2}" "$out" 2>>"$SDIR/clients.log"
-    [ -s "$out" ] || { fail "screenshot $1"; return 1; }
+    # shot runs in $(...): a fail here would be lost with its subshell, so leave a marker for
+    # end_scenario to count.
+    [ -s "$out" ] || { echo "screenshot $1" >>"$SDIR/shotfail"; return 1; }
     echo "$out"
 }
 # pixel FILE X Y -> RRGGBB
 pixel() { magick "$1" -format "%[hex:p{$2,$3}]" info: 2>/dev/null | cut -c1-6; }
 
 end_scenario() {
+    [ -s "$SDIR/shotfail" ] && fail "$(head -1 "$SDIR/shotfail") failed (no frame from the host?)"
     if grep -qaiE 'panicked' "$LOG" "$SDIR/stdout.log" 2>/dev/null; then
         fail "no panic in logs"
     else
@@ -495,8 +498,31 @@ sc_workspaces() {
     end_scenario
 }
 
+# start_pbus: private session bus in $SDIR/run/bus (never the user's bus); exports it.
+start_pbus() {
+    PBUS="unix:path=$SDIR/run/bus"
+    env -u DBUS_SESSION_BUS_ADDRESS dbus-daemon --session --nofork --address="$PBUS" \
+        >"$SDIR/dbus.log" 2>&1 &
+    PBPID=$!
+    if ! waitfor 5 test -S "$SDIR/run/bus"; then
+        fail "private dbus-daemon did not start: $(head -c 200 "$SDIR/dbus.log")"
+        stop_pbus
+        return 1
+    fi
+    export DBUS_SESSION_BUS_ADDRESS="$PBUS"
+}
+
+# waybar needs a working session bus (it aborts with "Could not connect" without one).
 sc_layer() {
     begin layer
+    command -v dbus-daemon >/dev/null || { skip "dbus-daemon is not installed"; return; }
+    start_pbus || return
+    layer_body
+    stop_pbus
+    export DBUS_SESSION_BUS_ADDRESS="unix:path=$SCRATCH/no-such-bus"
+}
+
+layer_body() {
     launch || { end_scenario; return; }
     client waybar -c "$ROOT/scripts/qa/waybar.jsonc" -s "$ROOT/scripts/qa/waybar.css"
     need 'layer: out=winit usable=0,30' 10
