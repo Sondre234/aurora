@@ -29,6 +29,38 @@ allow_virtual_keyboard = true
 # xdg-activation (an app asking to be raised): focus the window, or only mark it urgent.
 focus_on_activate = false
 
+# Animations. Render-only: windows get their final size at once and only the drawing
+# moves. `enabled = false` snaps everything exactly like before. Reload applies live.
+#   curve: linear | ease-out | ease-in-out | spring [damping ratio 0.1..1] |
+#          bezier x1 y1 x2 y2 (x in 0..1)
+# Each kind may override enabled / duration_ms / curve; it inherits the rest from here:
+#   window_move window_open window_close workspace fade
+[animations]
+enabled = true
+duration_ms = 200         # 0..=10000
+curve = "ease-out"
+# window_move = { duration_ms = 250, curve = "spring 0.8" }
+# workspace = { enabled = false }
+
+# Window look. Corners, shadows and blur are skipped for fullscreen windows.
+[decoration]
+rounding = 10             # corner radius in px, 0 = square (0..=100)
+shadow = true
+shadow_radius = 20        # px (0..=200)
+shadow_color = "#00000073"    # #rrggbb or #rrggbbaa
+blur = true               # blur behind translucent windows and layer surfaces
+blur_passes = 3           # dual-Kawase passes (1..=8)
+blur_radius = 6           # px offset per pass (1..=64)
+inactive_opacity = 1.0    # 0..=1, 1 leaves unfocused windows untouched
+
+# X11 (XWayland) clients, e.g. Proton games. `scale` is X pixels per logical pixel: 1 leaves
+# them unscaled (the compositor resamples them on scaled outputs, which is blurry). Set it to
+# the scale of the output they run on (1.25 on a 1.25 output) and they render 1:1 on its
+# pixels: sharp, the native resolution, but UI that ignores Xft.dpi looks smaller. Range
+# 1..=4. Read when XWayland starts (login); a reload does not apply it.
+[xwayland]
+scale = 1.0
+
 # Binds: "<Mods>+<key>" = "<action>", or a table { action = "..", repeat = false,
 # bypass_inhibit = false }. Modifiers: Mod, Super (Logo, Win), Ctrl, Shift, Alt, AltGr.
 # The key is an xkb keysym name naming the UNSHIFTED key (write Shift+1, not exclam);
@@ -54,6 +86,9 @@ focus_on_activate = false
 "Mod+w" = "toggle-floating"
 "Mod+f" = "fullscreen"
 "Mod+j" = "toggle-split"
+# Live workspace overview: Escape closes, arrows/Tab select, Enter or a click focuses,
+# dropping a thumbnail on another workspace panel moves the window there.
+"Mod+Tab" = "overview"
 "Mod+Shift+r" = "reload-config"
 "Mod+Shift+Escape" = { action = "revoke-inhibit", bypass_inhibit = true }
 

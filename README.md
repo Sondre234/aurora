@@ -44,7 +44,7 @@ Crates are added as their milestone is reached.
 - [x] **M0** Nested compositor under an existing desktop (winit backend), one client shows
 - [x] **M1** Real session: DRM backend on the 4090, libinput, launch from a TTY
 - [x] **M2** Usable: tiling, workspaces, XWayland, layer-shell, config, multi-monitor. Verified on hardware
-- [ ] **M3** The look: animation engine, blur/shadows, live overview
+- [x] **M3** The look: animation engine, rounded corners, shadows, blur, live overview, X11 scaling. Verified on hardware
 - [ ] **M4+** Services: `ipc`, shell, launcher, notifd, lock, then `term` and `files`
 
 ## Using it (M2)
@@ -64,6 +64,7 @@ Default binds (`Mod` is Super):
 | Mod+w | toggle floating |
 | Mod+f | fullscreen |
 | Mod+j | toggle split direction |
+| Mod+Tab | live workspace overview (Escape closes, click focuses, drag a thumbnail to another workspace to move it) |
 | Mod+Left/Right/Up/Down | focus in direction |
 | Mod+Shift+arrows | move window in direction |
 | Mod+Ctrl+arrows | resize the split (repeats) |
@@ -80,10 +81,27 @@ Emergency chords are hardcoded and cannot be rebound or removed: Ctrl+Alt+BackSp
 Ctrl+AltGr+BackSpace quits, Ctrl+Alt+F1..F12 or Ctrl+AltGr+F1..F12 switches VT.
 
 Known limits: there is no ext-workspace or foreign-toplevel protocol yet, so a bar's
-workspace widget waits for the M4 IPC. X11 apps are never scaled (M3 item), so keep the monitor you run Proton games on at scale 1. wlr-screencopy
-is not offered (ext-image-copy-capture is, which is what grim uses). Aurora owns
+workspace widget waits for the M4 IPC. X11 apps are unscaled by default, so they look
+blurry on a scaled output; set `[xwayland] scale` to that output's scale (read when
+XWayland starts, see the example config) for sharp native-resolution X11 windows (not yet
+verified on hardware). wlr-screencopy is not offered (ext-image-copy-capture is, which is what grim uses). Aurora owns
 `zwp_virtual_keyboard_v1` and routes its keys through the bind table, so any client can
 inject key presses and trigger binds; set `allow_virtual_keyboard = false` to turn that off.
+
+## Using it (M3)
+
+Placeholder, filled in when the M3 streams are merged. The new config sections, all
+documented in [config/aurora.example.toml](config/aurora.example.toml) and applied live on
+reload:
+
+- `[animations]`: `enabled`, `duration_ms` (0..=10000), `curve` (`linear`, `ease-out`,
+  `ease-in-out`, `spring [damping]`, `bezier x1 y1 x2 y2`), and per-kind overrides
+  `window_move`, `window_open`, `window_close`, `workspace`, `fade` (each may set
+  `enabled`, `duration_ms`, `curve`). `enabled = false` snaps like M2.
+- `[decoration]`: `rounding` (px), `shadow`, `shadow_radius`, `shadow_color`
+  (`#rrggbb[aa]`), `blur`, `blur_passes`, `blur_radius`, `inactive_opacity`. Skipped for
+  fullscreen windows.
+- Overview bind and `xwayland.scale`: to be documented when they land.
 
 Scripted checks: run `scripts/qa-nested.sh` with `WAYLAND_DISPLAY` set to a headless host
 (never your live session). See [docs/m2-plan.md](docs/m2-plan.md).

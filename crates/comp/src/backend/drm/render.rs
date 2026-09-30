@@ -43,7 +43,7 @@ use super::{
 use crate::{
     backend::{BACKGROUND, Backend},
     capture::{self, Captures},
-    scene::{OutputElement, output_elements},
+    scene::{OutputElement, SceneFx, output_elements},
     state::{Aurora, take_presentation_feedback, update_primary_scanout_output},
     wm::window::WindowElement,
 };
@@ -62,6 +62,10 @@ enum Scheduled {
 pub struct RenderState {
     /// Something changed since the last render started.
     damaged: bool,
+    /// The last render advanced animations that are still running: the next vblank keeps the
+    /// output damaged so it renders again. Clear once they end, so an idle desktop schedules
+    /// nothing.
+    animating: bool,
     /// A frame was queued and its vblank has not arrived yet.
     frame_pending: bool,
     /// The repaint that is queued on the event loop, if any.
@@ -245,6 +249,10 @@ impl Aurora {
             return;
         };
         surface.render.damaged = false;
+        // Advance animations to the moment this frame is built; outputs share one clock.
+        let now = Duration::from(self.clock.now());
+        surface.render.animating =
+            self.wm.tick(now) | crate::overview::Overview::tick(&mut self.overview, &self.wm, now);
         let output = surface.output.clone();
         let _span = tracing::debug_span!("render_surface", output = %output.name()).entered();
 
@@ -252,11 +260,15 @@ impl Aurora {
         self.xwayland.unmanaged.refresh();
         self.popups.cleanup();
 
+        let now = Duration::from(self.clock.now());
+        let fx = SceneFx::new(renderer, &self.config.decoration, now)
+            .with_overview(self.overview.as_ref());
         let mut result = None;
         for attempt in 0..2 {
             let attempted = render_output(
                 surface,
                 renderer,
+                &fx,
                 &self.space,
                 &self.xwayland.unmanaged,
                 &mut self.captures,
@@ -404,6 +416,9 @@ impl Aurora {
             return;
         }
         surface.render.last_frame_callback = Some(self.clock.now());
+        if surface.render.animating {
+            surface.render.damage(&self.handle, node, crtc);
+        }
         let output = surface.output.clone();
         let feedback = surface.dmabuf_feedback.clone();
         self.post_repaint(
@@ -524,6 +539,10 @@ impl Aurora {
         }
         let _ = self.display_handle.flush_clients();
 
+        // Animations are still running: keep painting until the last frame has landed.
+        if render_again && surface.render.animating {
+            surface.render.damaged = true;
+        }
         if render_again && surface.render.damaged {
             // Clients paint off the frame callbacks sent at repaint; waiting part of the
             // frame first lets them land a buffer in this very repaint, which is about a
@@ -542,6 +561,7 @@ impl Aurora {
 fn render_output(
     surface: &mut super::device::Surface,
     renderer: &mut GlesRenderer,
+    fx: &SceneFx,
     space: &Space<WindowElement>,
     unmanaged: &Space<Window>,
     captures: &mut Captures,
@@ -566,7 +586,7 @@ fn render_output(
         output.current_scale().integer_scale(),
     );
     let n_cursor = elements.len();
-    match output_elements(space, unmanaged, renderer, &output) {
+    match output_elements(space, unmanaged, renderer, &output, fx) {
         Some(scene) => elements.extend(scene),
         None => return Ok(None),
     }

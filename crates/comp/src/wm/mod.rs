@@ -8,15 +8,19 @@ use smithay::{
     reexports::wayland_server::{backend::ObjectId, protocol::wl_surface::WlSurface},
 };
 
+use crate::anim::{Animated, RectF};
 use crate::config::Config;
 use window::WindowElement;
 
 pub mod apply;
 pub mod focus;
+pub mod ghost;
 pub mod grabs;
 pub mod modes;
+pub mod motion;
 pub mod outputs;
 pub mod rules;
+pub mod visual;
 pub mod window;
 pub mod workspaces;
 pub mod x11;
@@ -38,10 +42,16 @@ pub struct WinData {
     pub phase: Phase,
     /// Whether the window was inserted into a workspace layout yet.
     pub placed: bool,
-    /// Content rectangle (border excluded) from the last layout. M3 animates `current`
-    /// toward `target`; for now they are equal.
+    /// Content rectangle (border excluded) from the last layout.
     pub target: Rect,
+    /// The rectangle drawn: `motion` sampled by `Wm::tick`, rounded. Equals `target` when
+    /// animations are off.
     pub current: Rect,
+    pub motion: Animated<RectF>,
+    /// Open animation progress, 0 just mapped to 1 done; drives scale and fade.
+    pub open: Animated<f32>,
+    /// Opacity from focus: 1.0 for the focused window, `inactive_opacity` for the rest.
+    pub opacity: Animated<f32>,
     pub sent_size: Option<(i32, i32)>,
     pub sent_flags: (bool, bool, bool),
     pub constraints: Constraints,
@@ -75,6 +85,9 @@ impl WinData {
             placed: false,
             target: Rect::default(),
             current: Rect::default(),
+            motion: Animated::new(RectF::default()),
+            open: Animated::new(1.0),
+            opacity: Animated::new(1.0),
             sent_size: None,
             sent_flags: (false, false, false),
             constraints: Constraints::default(),
@@ -138,6 +151,11 @@ pub struct Wm {
     /// The running interactive grab, if any. Layout logging is quiet and configures wait
     /// for acks while it runs.
     pub drag: Option<&'static str>,
+    /// Workspace slides in flight, at most one per output.
+    pub slides: Vec<motion::Slide>,
+    /// A slide ended and its outgoing workspace still has to leave the Space.
+    pub slides_done: bool,
+    clock: motion::Clock,
     next_id: u64,
 }
 

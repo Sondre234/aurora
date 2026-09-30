@@ -14,7 +14,9 @@ use std::time::Duration;
 use crate::{
     backend::BACKGROUND,
     capture::{self, Captures},
-    scene::output_elements,
+    config::Decoration,
+    overview::Overview,
+    scene::{SceneFx, output_elements},
     state::Aurora,
     wm::outputs::rule_scale,
     wm::window::WindowElement,
@@ -26,6 +28,8 @@ pub fn init(
     state: &mut Aurora,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (mut backend, winit) = winit::init()?;
+
+    crate::effects::init(backend.renderer());
 
     let mode = Mode {
         size: backend.window_size(),
@@ -72,12 +76,18 @@ pub fn init(
             WinitEvent::Input(event) => state.process_input_event(event),
             WinitEvent::Redraw => {
                 let size = backend.window_size();
+                // The nested window redraws every frame, so the result needs no keep-alive.
+                let now = Duration::from(state.clock.now());
+                state.wm.tick(now);
+                crate::overview::Overview::tick(&mut state.overview, &state.wm, now);
                 if let Err(err) = draw(
                     &mut backend,
                     &mut damage_tracker,
                     &state.space,
                     &state.xwayland.unmanaged,
                     &mut state.captures,
+                    &state.config.decoration,
+                    state.overview.as_ref(),
                     Duration::from(state.clock.now()),
                     &output,
                 ) {
@@ -97,18 +107,22 @@ pub fn init(
 }
 
 /// Renders the scene of `output` into the window's back buffer.
+#[allow(clippy::too_many_arguments)]
 fn draw(
     backend: &mut WinitGraphicsBackend<GlesRenderer>,
     damage_tracker: &mut OutputDamageTracker,
     space: &Space<WindowElement>,
     unmanaged: &Space<Window>,
     captures: &mut Captures,
+    decoration: &Decoration,
+    overview: Option<&Overview>,
     now: Duration,
     output: &Output,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (renderer, mut framebuffer) = backend.bind()?;
+    let fx = SceneFx::new(renderer, decoration, now).with_overview(overview);
     let elements =
-        output_elements(space, unmanaged, renderer, output).ok_or("output is not mapped")?;
+        output_elements(space, unmanaged, renderer, output, &fx).ok_or("output is not mapped")?;
     // The nested window draws no pointer; the host does.
     capture::serve(captures, renderer, output, &elements, 0, now);
     damage_tracker

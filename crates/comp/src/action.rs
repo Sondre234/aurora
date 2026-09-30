@@ -60,6 +60,8 @@ pub enum Action {
     Fullscreen,
     Maximize,
     ToggleSplit,
+    /// Opens or closes the live workspace overview.
+    Overview,
     ReloadConfig,
     RevokeInhibit,
     Quit,
@@ -278,6 +280,7 @@ impl FromStr for Action {
             "fullscreen" => Self::Fullscreen,
             "maximize" => Self::Maximize,
             "toggle-split" => Self::ToggleSplit,
+            "overview" => Self::Overview,
             "reload-config" => Self::ReloadConfig,
             "revoke-inhibit" => Self::RevokeInhibit,
             "quit" => Self::Quit,
@@ -317,6 +320,7 @@ impl fmt::Display for Action {
             Self::Fullscreen => f.write_str("fullscreen"),
             Self::Maximize => f.write_str("maximize"),
             Self::ToggleSplit => f.write_str("toggle-split"),
+            Self::Overview => f.write_str("overview"),
             Self::ReloadConfig => f.write_str("reload-config"),
             Self::RevokeInhibit => f.write_str("revoke-inhibit"),
             Self::Quit => f.write_str("quit"),
@@ -366,6 +370,7 @@ mod tests {
             "fullscreen",
             "maximize",
             "toggle-split",
+            "overview",
             "reload-config",
             "revoke-inhibit",
             "quit",
@@ -401,6 +406,7 @@ mod tests {
             "resize-split left",
             "resize-split left 0",
             "close now",
+            "overview now",
             "teleport",
         ];
         for text in bad {

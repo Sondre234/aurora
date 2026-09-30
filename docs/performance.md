@@ -52,3 +52,33 @@ cache must declare:
 | VRAM for caches | up to ~6 GB (of 24) |
 | RAM for caches, all services | up to ~6 GB (of 32) |
 | Input-to-photon | as low as the display pipeline allows; measured, not assumed |
+
+## M3 cache budgets and metrics
+
+Each M3 cache declares owner, invalidation, budget and a tracing metric (target `perf`,
+emitted at info on state change or every 5 s while active, never per frame when idle).
+Budgets are initial; the sum stays inside the ~6 GB VRAM cache budget above.
+
+| Cache | Owner | Invalidated by | Budget / eviction | Metric |
+|---|---|---|---|---|
+| Shader programs (`effects::Programs`) | renderer user data | never (compiled at startup) | fixed, ~a dozen programs | `effects: programs compiled=<n>` at startup |
+| Shadow textures / elements | `effects/shadow.rs`, per window | window size, `shadow_radius`, `shadow_color` | 1 per window, dropped with the window | shadow cache size and rebuilds |
+| Rounded corner masks | `effects/corners.rs` | `rounding`, window size | per size, reused | mask rebuilds |
+| Blur backdrop | `effects/blur.rs`, per output | damage of whatever is behind the blurred region, `blur_*` keys | LRU, up to ~2 GB VRAM | hit rate, bytes, evictions |
+| Overview live thumbnails | `overview/`, per window | that window's commit only | `TextureRenderBuffer` per window, bounded by window count, dropped on close | thumbnails updated per second |
+| Close ghosts | `Wm` ghost list | fade end | one texture per closing window, freed when the fade ends | live ghost count |
+| Animation state | `Wm` timeline | settle | O(windows), no GPU | `anim: start`/`anim: idle` lines |
+
+Frame-time rules for M3:
+
+- An idle desktop schedules no redraws: after `anim: idle` no frame is requested until
+  input or a client commit arrives.
+- Animated frames stay under 50% of the refresh interval at p99 (3.5 ms at 144 Hz), with
+  blur, shadows and rounding enabled on all three outputs.
+- Effects are skipped for fullscreen windows and while `top_hidden`, so direct scanout
+  of a fullscreen game is unaffected.
+- Blur never recomputes on a frame where nothing behind it changed.
+
+QA proves the log contract lines (`scripts/qa-nested.sh anim effects overview xscale`);
+frame pacing, VRAM use and scanout are on the hardware checklist in
+[m3-plan.md](m3-plan.md).

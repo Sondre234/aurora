@@ -120,10 +120,12 @@ impl Aurora {
                 ),
             };
             let mut line = String::new();
-            let r = win.current;
+            let r = win.target;
+            let c = win.current;
+            let anim = win.is_animating(self.wm.frame_time());
             let _ = write!(
                 line,
-                "dump: win {} app_id={} title={} kind={kind} ws={} rect={},{} {}x{} float={} fs={} frames_sent={} urgent={} mapped={}",
+                "dump: win {} app_id={} title={} kind={kind} ws={} rect={},{} {}x{} current={},{} {}x{} anim={} float={} fs={} frames_sent={} urgent={} mapped={}",
                 win.id.0,
                 quote(&win.app_id),
                 quote(&title),
@@ -132,6 +134,11 @@ impl Aurora {
                 r.y,
                 r.w,
                 r.h,
+                c.x,
+                c.y,
+                c.w,
+                c.h,
+                anim as u8,
                 win.floating as u8,
                 win.fs as u8,
                 win.frames_sent,
@@ -203,6 +210,7 @@ impl Aurora {
         let ptr = describe(self.pointer.current_focus());
         let grab = self.wm.drag.unwrap_or("none");
         tracing::info!("dump: focus kbd={kbd} pointer={ptr} grab={grab}");
+        self.dump_overview();
         tracing::info!("dump: end {seq}");
     }
 

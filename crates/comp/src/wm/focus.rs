@@ -107,6 +107,7 @@ impl Aurora {
                 }
             }
         }
+        self.sync_opacity();
     }
 
     fn app_id(&self, id: WinId) -> &str {

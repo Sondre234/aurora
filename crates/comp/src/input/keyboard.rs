@@ -15,6 +15,7 @@ use crate::{
     action::Action,
     config::keybind::{Bind, Chord, Mods, Trigger},
     emergency::{self, Emergency},
+    overview::input::{OverviewKey, key_for},
     state::{Aurora, REPEAT_DELAY, REPEAT_RATE},
 };
 
@@ -22,6 +23,8 @@ use crate::{
 enum KeyOutcome {
     Emergency(Emergency),
     Bound(Bind),
+    /// A key the overview acts on.
+    Overview(OverviewKey),
     /// The release of a key whose press a bind took.
     Swallowed,
 }
@@ -84,6 +87,7 @@ impl Aurora {
                     self.start_repeat(keycode, bind.action.clone());
                 }
             }
+            Some(KeyOutcome::Overview(key)) => self.overview_key(*key),
             Some(KeyOutcome::Swallowed) | None => {}
         }
         if matches!(outcome, Some(KeyOutcome::Emergency(_))) {
@@ -137,6 +141,26 @@ impl Aurora {
         // Raw level-0 syms, so the bind does not depend on the layout's shifted symbols and
         // AltGr (its own modifier bit) never turns Super+AltGr+q into Super+q.
         let allowed = self.binds_allowed();
+        // The overview takes every key except the chord that toggles it.
+        if allowed && self.overview_grabs_input() {
+            let toggles = raw.iter().any(|sym| {
+                let chord = Chord {
+                    mods,
+                    trigger: Trigger::Key(sym.raw()),
+                };
+                self.config
+                    .binds
+                    .get(&chord)
+                    .is_some_and(|b| b.action == Action::Overview)
+            });
+            if !toggles {
+                self.suppress(keycode);
+                return FilterResult::Intercept(match key_for(&raw, modifiers.shift) {
+                    Some(key) => KeyOutcome::Overview(key),
+                    None => KeyOutcome::Swallowed,
+                });
+            }
+        }
         let bind = raw.iter().find_map(|sym| {
             let chord = Chord {
                 mods,

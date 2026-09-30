@@ -28,6 +28,7 @@ impl Aurora {
             Action::Swap(dir) => self.move_dir(dir, true),
             Action::ToggleSplit => self.edit_focused_tiled(|ws, id| ws.tiling.toggle_split(id)),
             Action::ResizeSplit(dir, px) => self.resize_split(dir, px),
+            Action::Overview => self.toggle_overview(),
             Action::ReloadConfig => self.reload_config(),
             Action::RevokeInhibit => self.revoke_shortcuts_inhibit(),
             Action::Quit => {
@@ -107,7 +108,10 @@ impl Aurora {
                 tracing::info!("focus-dir: no focus, {} has no workspace", output.name());
                 return;
             };
-            tracing::info!("focus-dir: no focus, leaving {} ws={ws} {dir:?}", output.name());
+            tracing::info!(
+                "focus-dir: no focus, leaving {} ws={ws} {dir:?}",
+                output.name()
+            );
             if let Some((_, full)) = self.work_area(&output) {
                 self.focus_across_output(ws, full, dir);
             } else {
