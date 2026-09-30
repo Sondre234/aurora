@@ -751,14 +751,14 @@ EOF
     term ov2; need ':ov2:' 10
     sleep 0.3
     dump
-    if [ -z "$(dumpline overview)" ] || matches 'open=0' "$(dumpline overview)"; then pass "no open overview in the dump before opening"; else fail "overview listed while closed: $(dumpline overview)"; fi
+    if [ -z "$(dumpline overview)" ] || matches 'state=closed|open=0' "$(dumpline overview)"; then pass "no open overview in the dump before opening"; else fail "overview listed while closed: $(dumpline overview)"; fi
 
     mark
     key logo F3
     need 'overview: open' 3
     sleep 0.3
     dump
-    if [ -n "$(dumpline overview)" ] && ! matches 'open=0' "$(dumpline overview)"; then
+    if matches 'state=open' "$(dumpline overview)"; then
         pass "dump: overview while open"
     else
         fail "MISSING log contract line: dump: overview (while open): '$(dumpline overview)'"
@@ -769,7 +769,7 @@ EOF
     need 'overview: close' 3
     sleep 0.5
     dump
-    if [ -z "$(dumpline overview)" ] || matches 'open=0' "$(dumpline overview)"; then pass "Escape closed the overview"; else fail "overview still open: $(dumpline overview)"; fi
+    if [ -z "$(dumpline overview)" ] || matches 'state=closed|open=0' "$(dumpline overview)"; then pass "Escape closed the overview"; else fail "overview still open: $(dumpline overview)"; fi
 
     # The bind toggles it.
     mark
