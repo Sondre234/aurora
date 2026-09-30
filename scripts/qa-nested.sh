@@ -2,6 +2,12 @@
 # Scripted QA for the nested backend: one hermetic Aurora per scenario.
 #   scripts/qa-nested.sh [scenario ...]     default: all
 # Scenarios: keys emergency reload tiling workspaces layer xwayland multi robust
+#            anim effects overview xscale   (M3; written against the log contract in
+#            docs/m3-plan.md, a missing line fails as MISSING log contract line)
+#   anim      animation start/idle lines, dump current=/anim=, settles onto the target, off = snap
+#   effects   shader programs compiled at startup, rounded corner and shadow pixels (grim+magick)
+#   overview  open/close logs, dump: overview, Escape closes, emergency chords work while open
+#   xscale    the xwayland scale key loads without warnings, an X11 client still maps
 #
 # Needs a Wayland host to nest in (WAYLAND_DISPLAY), which must NOT be your real session:
 # the nested window appears there. Use a headless compositor. Never runs --drm. Only ever
@@ -102,6 +108,13 @@ absent() {
         pass "$2"
     fi
 }
+# need_boot REGEX [SECS]: like need, but searches the whole log (startup lines precede the mark).
+need_boot() {
+    local keep=$OFF
+    OFF=0
+    need "$@"
+    OFF=$keep
+}
 count_log() { newlog | grep -acE -- "$1"; }
 
 begin() {
@@ -183,6 +196,7 @@ dumpwin() {
     line=$(grep -a "^dump: win .* app_id=\"$1\"" <<<"$DUMP" | head -1)
     case "$2" in
         rect) sed -nE 's/.* rect=(-?[0-9]+,-?[0-9]+ [0-9]+x[0-9]+).*/\1/p' <<<"$line" ;;
+        current) sed -nE 's/.* current=(-?[0-9]+,-?[0-9]+ [0-9]+x[0-9]+) anim=.*/\1/p' <<<"$line" ;;
         *) sed -nE "s/.* $2=([^ ]+).*/\1/p" <<<"$line" ;;
     esac
 }
@@ -597,7 +611,216 @@ sc_robust() {
     QA_TIMEOUT=40
 }
 
-ALL=(keys emergency reload tiling workspaces layer xwayland multi robust)
+# Appends a config section (stdin) to the scenario config.
+append_cfg() { cat >>"$CFG"; }
+
+# boot_no_warning WHAT: no `config: warning` in the whole log since launch.
+boot_no_warning() {
+    if grep -qaE 'config: warning' "$LOG"; then
+        fail "$1 (config warning: $(grep -aE -m1 'config: warning' "$LOG" | cut -c1-160))"
+    else
+        pass "$1"
+    fi
+}
+
+# settled APP: in the last dump the drawn rect equals the layout rect and anim=0.
+settled() {
+    local r c a
+    r=$(dumpwin "$1" rect)
+    c=$(dumpwin "$1" current)
+    a=$(dumpwin "$1" anim)
+    if [ -z "$c" ] || [ -z "$a" ]; then
+        fail "MISSING log contract line: dump: win $1 current=<x>,<y> <w>x<h> anim=0|1"
+    elif [ "$c" = "$r" ] && [ "$a" = 0 ]; then
+        pass "$1 settled on its target ($r)"
+    else
+        fail "$1 not settled: rect=$r current=$c anim=$a"
+    fi
+}
+
+sc_anim() {
+    begin anim
+    append_cfg <<EOF
+
+[animations]
+enabled = true
+duration_ms = 1500
+curve = "ease-out"
+EOF
+    launch || { end_scenario; return; }
+    term an1; need ':an1:' 10
+    term an2; need ':an2:' 10
+    # Let the open animations finish; then the desktop must be idle.
+    need 'anim: idle' 8
+    sleep 0.3
+    dump
+    settled an1
+    settled an2
+    mark
+    absent 'anim: start' "idle desktop starts no animation" 1.2
+
+    # A layout change moves windows: start line, mid-flight dump, then idle and settled.
+    mark
+    key logo j
+    need 'anim: start kind=[a-z_]+ win=[0-9]+' 3
+    dump
+    if grep -qaE '^dump: win .* anim=1' <<<"$DUMP"; then
+        pass "a window reports anim=1 mid-flight"
+    else
+        fail "no window with anim=1 right after the start line: $(grep -a '^dump: win' <<<"$DUMP" | cut -c1-200 | head -2)"
+    fi
+    mark
+    need 'anim: idle' 6
+    sleep 0.3
+    dump
+    settled an1
+    settled an2
+
+    # enabled = false snaps exactly like M2: no animation lines, current == rect at once.
+    sed -i 's/^enabled = true/enabled = false/' "$CFG"
+    mark
+    kill -USR1 "$APID"
+    need 'config: loaded .*warnings=0' 3
+    mark
+    key logo j
+    sleep 0.3
+    dump
+    settled an1
+    settled an2
+    absent 'anim: start' "no animation starts when disabled"
+    end_scenario
+}
+
+sc_effects() {
+    begin effects
+    append_cfg <<EOF
+
+[animations]
+enabled = false
+
+[decoration]
+rounding = 24
+shadow = true
+shadow_radius = 30
+shadow_color = "#000000ff"
+blur = false
+EOF
+    launch || { end_scenario; return; }
+    need_boot 'effects: programs compiled=[1-9]' 5
+    term fx; need ':fx:' 10
+    sleep 0.6
+    dump
+    local x y w h png1 png2 gx gy
+    read -r x y w h <<<"$(rect4 "$(dumpwin fx rect)")"
+    if [ -z "${x:-}" ]; then fail "no rect for fx"; end_scenario; return; fi
+    settled fx
+    # A gap pixel beside the window: outside the 4 px border, inside the 10 px outer gap.
+    gx=$((x - 8))
+    gy=$((y + h / 2))
+    png1=$(shot fx-on -o winit) || { end_scenario; return; }
+    local c_on e_on s_on c_off e_off s_off
+    c_on=$(pixel "$png1" $((x + 1)) $((y + 1)))
+    e_on=$(pixel "$png1" $((x + w / 2)) $((y - 2)))
+    s_on=$(pixel "$png1" "$gx" "$gy")
+
+    # Square and shadowless for comparison, through a live reload.
+    sed -i 's/^rounding = .*/rounding = 0/; s/^shadow = .*/shadow = false/' "$CFG"
+    mark
+    kill -USR1 "$APID"
+    need 'config: loaded .*warnings=0' 3
+    sleep 0.6
+    png2=$(shot fx-off -o winit) || { end_scenario; return; }
+    c_off=$(pixel "$png2" $((x + 1)) $((y + 1)))
+    e_off=$(pixel "$png2" $((x + w / 2)) $((y - 2)))
+    s_off=$(pixel "$png2" "$gx" "$gy")
+
+    if [ "$c_on" != "$c_off" ]; then pass "rounding 24 changes the corner pixel ($c_off -> $c_on)"; else fail "corner pixel unchanged by rounding: $c_on"; fi
+    if [ "$e_on" = "$e_off" ]; then pass "top edge middle is untouched by rounding ($e_on)"; else fail "top edge pixel moved: $e_off -> $e_on"; fi
+    if [ "$s_on" != "$s_off" ]; then pass "shadow darkens the gap beside the window ($s_off -> $s_on)"; else fail "no shadow at $gx,$gy: $s_on"; fi
+    end_scenario
+}
+
+sc_overview() {
+    begin overview
+    add_binds <<EOF
+"Mod+F3" = "overview"
+EOF
+    launch || { end_scenario; return; }
+    boot_no_warning "the overview action and bind are accepted"
+    term ov1; need ':ov1:' 10
+    term ov2; need ':ov2:' 10
+    sleep 0.3
+    dump
+    if [ -z "$(dumpline overview)" ] || matches 'open=0' "$(dumpline overview)"; then pass "no open overview in the dump before opening"; else fail "overview listed while closed: $(dumpline overview)"; fi
+
+    mark
+    key logo F3
+    need 'overview: open' 3
+    sleep 0.3
+    dump
+    if [ -n "$(dumpline overview)" ] && ! matches 'open=0' "$(dumpline overview)"; then
+        pass "dump: overview while open"
+    else
+        fail "MISSING log contract line: dump: overview (while open): '$(dumpline overview)'"
+    fi
+
+    mark
+    key "" Escape
+    need 'overview: close' 3
+    sleep 0.5
+    dump
+    if [ -z "$(dumpline overview)" ] || matches 'open=0' "$(dumpline overview)"; then pass "Escape closed the overview"; else fail "overview still open: $(dumpline overview)"; fi
+
+    # The bind toggles it.
+    mark
+    key logo F3
+    need 'overview: open' 3
+    mark
+    key logo F3
+    need 'overview: close' 3
+
+    # Emergency chords are not intercepted while it is open.
+    mark
+    key logo F3
+    need 'overview: open' 3
+    mark
+    key ctrl+altgr F1
+    need 'VT switch requested' 3
+    sleep 0.3
+    if alive; then pass "survives Ctrl+AltGr+F1 with the overview open"; else fail "died on the VT chord in the overview"; fi
+    mark
+    key ctrl+altgr BackSpace
+    need 'quitting: quit chord' 3
+    local i
+    for i in $(seq 50); do alive || break; sleep 0.1; done
+    if alive; then fail "quit chord ignored while the overview is open"; else pass "quit chord works with the overview open"; fi
+    end_scenario
+}
+
+sc_xscale() {
+    begin xscale
+    append_cfg <<EOF
+
+[xwayland]
+scale = 1.25
+EOF
+    launch || { end_scenario; return; }
+    need_boot 'config: loaded .*warnings=0' 5
+    boot_no_warning "the xwayland scale key is accepted"
+    wait_x
+    [ -n "$XD" ] || { end_scenario; return; }
+    xclient kitty --class xs -o linux_display_server=x11 sleep 1000
+    need ':xs:' 15
+    sleep 0.5
+    dump
+    if contains "$(grep -a '^dump: win .*app_id="xs"' <<<"$DUMP" | head -1)" 'kind=x11'; then pass "X11 window maps with the scale key set"; else fail "no kind=x11 window xs"; fi
+    mark
+    kill -USR1 "$APID"
+    need 'config: loaded .*warnings=0' 3
+    end_scenario
+}
+
+ALL=(keys emergency reload tiling workspaces layer xwayland multi robust anim effects overview xscale)
 if [ $# -eq 0 ]; then set -- "${ALL[@]}"; fi
 for s in "$@"; do
     declare -F "sc_$s" >/dev/null || { echo "unknown scenario $s" >&2; exit 2; }
