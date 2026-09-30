@@ -59,7 +59,7 @@ pub fn key_for(syms: &[Keysym], shift: bool) -> Option<OverviewKey> {
 impl Aurora {
     /// Whether the overview currently owns keyboard and pointer.
     pub fn overview_grabs_input(&self) -> bool {
-        self.overview.as_ref().is_some_and(Overview::grabs_input)
+        !self.is_locked() && self.overview.as_ref().is_some_and(Overview::grabs_input)
     }
 
     fn now_duration(&self) -> Duration {
@@ -76,6 +76,9 @@ impl Aurora {
     }
 
     fn open_overview(&mut self) {
+        if self.is_locked() {
+            return;
+        }
         if self.pointer.is_grabbed() {
             tracing::info!("overview: not opening during a pointer grab");
             return;

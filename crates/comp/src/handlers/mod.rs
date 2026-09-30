@@ -1,6 +1,7 @@
 mod compositor;
 mod layer_shell;
 mod protocols;
+mod session_lock;
 mod xdg_shell;
 mod xwm;
 

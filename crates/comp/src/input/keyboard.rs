@@ -40,7 +40,8 @@ impl Aurora {
     /// a client holds a keyboard-shortcuts inhibitor); binds marked `bypass_inhibit` ignore
     /// this. The emergency chords never consult it.
     pub fn binds_allowed(&self) -> bool {
-        self.layer_focus.exclusive.is_none()
+        !self.is_locked()
+            && self.layer_focus.exclusive.is_none()
             && !self
                 .protocols
                 .active_inhibitor
@@ -169,7 +170,8 @@ impl Aurora {
             self.config
                 .binds
                 .get(&chord)
-                .filter(|b| allowed || b.bypass_inhibit)
+                // Nothing is bound while locked, not even `bypass_inhibit` binds.
+                .filter(|b| !self.is_locked() && (allowed || b.bypass_inhibit))
                 .cloned()
         });
         match bind {

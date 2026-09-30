@@ -20,6 +20,12 @@ fn layout_dir(dir: Dir) -> layout::Dir {
 impl Aurora {
     pub fn dispatch(&mut self, action: Action) {
         tracing::info!("action: {action}");
+        // Whatever the source (bind, repeat, mouse bind), a locked session runs nothing but
+        // quitting and introspection.
+        if self.is_locked() && !matches!(action, Action::Quit | Action::DebugDump | Action::None) {
+            tracing::info!("action: ignored while locked");
+            return;
+        }
         match action {
             Action::Spawn(cmd) => self.spawn(&cmd),
             Action::Close => self.close_focused(),

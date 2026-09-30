@@ -15,6 +15,7 @@ mod input;
 mod keymap;
 mod layers;
 mod libinput;
+mod lock;
 mod log;
 mod outputs;
 mod overview;
@@ -105,6 +106,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         let _ = state.display_handle.flush_clients();
         // A workspace slide that ended has its outgoing windows to take out of the Space.
         state.finish_slides();
+        // A lock client that vanished, or an output that changed, while locked.
+        state.lock_update();
     });
     // Every exit path: the window manager must go before the state drops, and the server
     // with it, so no Xwayland outlives the compositor.
