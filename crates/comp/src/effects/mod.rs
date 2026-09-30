@@ -5,12 +5,19 @@
 //! `blur`).
 #![allow(dead_code)] // filled in by the M3 step 2 streams
 
-use smithay::backend::renderer::gles::GlesRenderer;
+use smithay::backend::renderer::gles::{GlesError, GlesPixelProgram, GlesRenderer, GlesTexProgram};
+
+pub mod corners;
+pub mod shadow;
 
 /// Every compiled program. Cheap to clone (programs are reference counted), so a frame copies
 /// it out of the renderer and keeps using the renderer mutably.
 #[derive(Clone, Default)]
 pub struct Programs {
+    /// Rounded corner clip for window surfaces.
+    pub corners: Option<GlesTexProgram>,
+    pub shadow: Option<GlesPixelProgram>,
+    pub border: Option<GlesPixelProgram>,
     /// How many programs `compile` built, for the startup log line.
     compiled: usize,
 }
@@ -18,16 +25,37 @@ pub struct Programs {
 impl Programs {
     /// Compiles every program, logging and skipping any that fails so a driver quirk costs
     /// one effect and not the session.
-    fn compile(_renderer: &mut GlesRenderer) -> Self {
-        let programs = Self::default();
-        // Streams: compile here, e.g.
-        //   programs.corners = compile("corners", || renderer.compile_custom_texture_shader(..));
-        //   programs.compiled += 1;
+    fn compile(renderer: &mut GlesRenderer) -> Self {
+        let mut programs = Self::default();
+        programs.corners = compile("corners", || {
+            renderer.compile_custom_texture_shader(corners::SHADER, &corners::uniform_names())
+        });
+        programs.shadow = compile("shadow", || {
+            renderer
+                .compile_custom_pixel_shader(shadow::SHADOW_SHADER, &shadow::shadow_uniform_names())
+        });
+        programs.border = compile("border", || {
+            renderer
+                .compile_custom_pixel_shader(shadow::BORDER_SHADER, &shadow::border_uniform_names())
+        });
+        programs.compiled = usize::from(programs.corners.is_some())
+            + usize::from(programs.shadow.is_some())
+            + usize::from(programs.border.is_some());
         programs
     }
 
     pub fn compiled(&self) -> usize {
         self.compiled
+    }
+}
+
+fn compile<P>(name: &str, build: impl FnOnce() -> Result<P, GlesError>) -> Option<P> {
+    match build() {
+        Ok(program) => Some(program),
+        Err(err) => {
+            tracing::warn!("effects: shader {name} failed to compile: {err}");
+            None
+        }
     }
 }
 
