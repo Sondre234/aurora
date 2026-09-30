@@ -212,6 +212,7 @@ impl Aurora {
         tracing::info!("dump: focus kbd={kbd} pointer={ptr} grab={grab}");
         self.dump_overview();
         self.dump_lock();
+        self.dump_services();
         tracing::info!("dump: end {seq}");
     }
 

@@ -1,17 +1,22 @@
 use std::{
     ffi::{OsStr, OsString},
     os::unix::process::CommandExt,
-    process::{Command, Stdio},
+    process::{Child, Command, Stdio},
 };
 
 use crate::state::Aurora;
 
-/// Runs `cmd` through `sh -c` in its own session. `env` is set on the child only; the
+/// A `sh -c` command line, in its own session. `env` is set on the child only; the
 /// compositor's own environment is never modified.
-pub fn spawn(cmd: &str, env: &[(&str, &OsStr)]) {
-    tracing::info!("spawn: {cmd}");
+fn shell_command(cmd: &str, env: &[(&str, &OsStr)]) -> Command {
     let mut command = Command::new("sh");
-    command.arg("-c").arg(cmd).stdin(Stdio::null());
+    command.arg("-c").arg(cmd);
+    prepare(&mut command, env);
+    command
+}
+
+fn prepare(command: &mut Command, env: &[(&str, &OsStr)]) {
+    command.stdin(Stdio::null());
     for (key, value) in env {
         command.env(key, value);
     }
@@ -28,11 +33,10 @@ pub fn spawn(cmd: &str, env: &[(&str, &OsStr)]) {
             Ok(())
         });
     }
-    let mut child = match command.spawn() {
-        Ok(child) => child,
-        Err(err) => return tracing::warn!("spawn: failed to start {cmd:?}: {err}"),
-    };
-    // One waiting thread per child keeps zombies from piling up without touching the loop.
+}
+
+/// One waiting thread per child keeps zombies from piling up without touching the loop.
+fn reap(mut child: Child) {
     let reaper = std::thread::Builder::new()
         .name("reaper".into())
         .spawn(move || {
@@ -43,24 +47,48 @@ pub fn spawn(cmd: &str, env: &[(&str, &OsStr)]) {
     }
 }
 
+fn launch(mut command: Command, what: &str) {
+    match command.spawn() {
+        Ok(child) => reap(child),
+        Err(err) => tracing::warn!("spawn: failed to start {what:?}: {err}"),
+    }
+}
+
+/// Runs `cmd` through `sh -c` in its own session.
+pub fn spawn(cmd: &str, env: &[(&str, &OsStr)]) {
+    tracing::info!("spawn: {cmd}");
+    launch(shell_command(cmd, env), cmd);
+}
+
+/// Starts `cmd` (through `sh -c`, own session) for the service supervisor, which reaps the
+/// child itself so it can learn how it ended.
+pub fn spawn_service(cmd: &str, env: &[(&str, &OsStr)]) -> std::io::Result<Child> {
+    shell_command(cmd, env).spawn()
+}
+
 impl Aurora {
-    /// What every child sees: how to reach this compositor and its X server. Set on the
-    /// Command only; the compositor's own environment stays as it was.
-    pub fn spawn_env(&mut self) -> Vec<(&'static str, OsString)> {
+    /// What every child sees: how to reach this compositor and its X server. Set on the Command only; the compositor's own environment stays as it was.
+    pub fn base_env(&self) -> Vec<(&'static str, OsString)> {
         let mut env: Vec<(&'static str, OsString)> = vec![
             ("WAYLAND_DISPLAY", self.socket_name.clone()),
             ("XDG_SESSION_TYPE", "wayland".into()),
             ("XDG_CURRENT_DESKTOP", "Aurora".into()),
         ];
-        // A token for the app to present when it maps, so a launched app takes focus.
+        if let Some(display) = self.xwayland.display {
+            env.push(("DISPLAY", format!(":{display}").into()));
+        }
+        env
+    }
+
+    /// `base_env` plus a token for the app to present when it maps, so a launched app
+    /// takes focus.
+    pub fn spawn_env(&mut self) -> Vec<(&'static str, OsString)> {
+        let mut env = self.base_env();
         let activation = &mut self.protocols.activation;
         activation.retain_tokens(|_, d| d.timestamp.elapsed().as_secs() < 10);
         let (token, _) = activation.create_external_token(None);
         env.push(("XDG_ACTIVATION_TOKEN", token.as_str().into()));
         env.push(("DESKTOP_STARTUP_ID", token.as_str().into()));
-        if let Some(display) = self.xwayland.display {
-            env.push(("DISPLAY", format!(":{display}").into()));
-        }
         env
     }
 

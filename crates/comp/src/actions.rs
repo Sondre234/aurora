@@ -36,6 +36,7 @@ impl Aurora {
             Action::ResizeSplit(dir, px) => self.resize_split(dir, px),
             Action::Overview => self.toggle_overview(),
             Action::ReloadConfig => self.reload_config(),
+            Action::Lock => self.lock_action(),
             Action::RevokeInhibit => self.revoke_shortcuts_inhibit(),
             Action::Quit => {
                 tracing::warn!("quitting: quit action");

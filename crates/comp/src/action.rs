@@ -64,6 +64,8 @@ pub enum Action {
     Overview,
     ReloadConfig,
     RevokeInhibit,
+    /// Starts the `lock` service (its client takes the session lock).
+    Lock,
     Quit,
     /// Placeholder in a user config that removes a default bind.
     None,
@@ -283,6 +285,7 @@ impl FromStr for Action {
             "overview" => Self::Overview,
             "reload-config" => Self::ReloadConfig,
             "revoke-inhibit" => Self::RevokeInhibit,
+            "lock" => Self::Lock,
             "quit" => Self::Quit,
             "none" => Self::None,
             "drag-move" => Self::DragMove,
@@ -323,6 +326,7 @@ impl fmt::Display for Action {
             Self::Overview => f.write_str("overview"),
             Self::ReloadConfig => f.write_str("reload-config"),
             Self::RevokeInhibit => f.write_str("revoke-inhibit"),
+            Self::Lock => f.write_str("lock"),
             Self::Quit => f.write_str("quit"),
             Self::None => f.write_str("none"),
             Self::DragMove => f.write_str("drag-move"),
@@ -373,6 +377,7 @@ mod tests {
             "overview",
             "reload-config",
             "revoke-inhibit",
+            "lock",
             "quit",
             "none",
             "drag-move",
@@ -407,6 +412,7 @@ mod tests {
             "resize-split left 0",
             "close now",
             "overview now",
+            "lock now",
             "teleport",
         ];
         for text in bad {

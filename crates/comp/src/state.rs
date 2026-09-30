@@ -77,6 +77,8 @@ pub struct Aurora {
     pub layer_focus: crate::layers::LayerFocus,
     /// The session lock, from the request until the owner unlocks.
     pub lock: Option<crate::lock::LockState>,
+    /// Supervised `[services]` processes.
+    pub services: crate::services::Services,
     pub space: Space<WindowElement>,
     pub xwayland: crate::xwayland::XWaylandState,
     pub popups: PopupManager,
@@ -135,6 +137,8 @@ impl Aurora {
         let pointer = seat.add_pointer();
 
         let socket_name = Self::init_wayland_listener(display, event_loop)?;
+        let (services, service_exits) = crate::services::Services::new();
+        Self::services_source(&event_loop.handle(), service_exits);
 
         Ok(Self {
             backend,
@@ -154,6 +158,7 @@ impl Aurora {
             headless: Default::default(),
             layer_focus: Default::default(),
             lock: None,
+            services,
             space: Space::default(),
             xwayland: Default::default(),
             popups: PopupManager::default(),

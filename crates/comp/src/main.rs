@@ -22,6 +22,7 @@ mod overview;
 mod protocols;
 mod safety;
 mod scene;
+mod services;
 mod session;
 mod spawn;
 mod state;
@@ -100,6 +101,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     for cmd in state.config.autostart.clone() {
         state.spawn(&cmd);
     }
+    state.services_init();
 
     let result = event_loop.run(None, &mut state, |state| {
         // Input and request handlers only queue events; nothing else flushes them.
@@ -111,6 +113,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     });
     // Every exit path: the window manager must go before the state drops, and the server
     // with it, so no Xwayland outlives the compositor.
+    state.services_shutdown();
     state.shutdown_xwayland();
     result?;
     safety::arm_exit_deadline();
