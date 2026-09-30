@@ -36,6 +36,7 @@ render_elements! {
     CursorSurface=WaylandSurfaceRenderElement<GlesRenderer>,
     Window=WindowRenderElement<GlesRenderer>,
     Layer=Wrap<WaylandSurfaceRenderElement<GlesRenderer>>,
+    Overview=crate::overview::OverviewElement,
 }
 
 /// Per-frame inputs of the effects, built once per render and passed down to the builder.
@@ -48,6 +49,8 @@ pub struct SceneFx<'a> {
     pub programs: Option<Programs>,
     /// Frame time on the animation clock.
     pub now: Duration,
+    /// The live overview, when one is open or closing.
+    pub overview: Option<&'a crate::overview::Overview>,
 }
 
 impl<'a> SceneFx<'a> {
@@ -56,7 +59,13 @@ impl<'a> SceneFx<'a> {
             decoration,
             programs: effects::programs(renderer),
             now,
+            overview: None,
         }
+    }
+
+    pub fn with_overview(mut self, overview: Option<&'a crate::overview::Overview>) -> Self {
+        self.overview = overview;
+        self
     }
 
     /// Whether effects may draw on `output`: not over a fullscreen window, which must stay
@@ -110,7 +119,7 @@ pub fn output_elements(
     unmanaged: &Space<Window>,
     renderer: &mut GlesRenderer,
     output: &Output,
-    _fx: &SceneFx,
+    fx: &SceneFx,
 ) -> Option<Vec<OutputElement>> {
     let geo = space.output_geometry(output)?;
     let scale = Scale::from(output.current_scale().fractional_scale());
@@ -119,6 +128,12 @@ pub fn output_elements(
     push_layers(&mut out, renderer, output, Layer::Overlay, scale);
     if !top_hidden(output) {
         push_layers(&mut out, renderer, output, Layer::Top, scale);
+    }
+
+    // The overview covers the windows and everything below them; Overlay and Top layers
+    // (launcher, bar) stay on top of it.
+    if let Some(overview) = fx.overview {
+        crate::overview::push(&mut out, renderer, overview, output, geo, scale, fx.now);
     }
 
     // Menus and tooltips belong to no workspace: they stay above every window.
