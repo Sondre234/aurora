@@ -1,0 +1,11 @@
+[package]
+name = "aurora-ipc"
+description = "Typed IPC protocol between the Aurora compositor and its services"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+postcard = { version = "1.1", default-features = false, features = ["use-std"] }
+aurora-theme = { path = "../theme", default-features = false }
