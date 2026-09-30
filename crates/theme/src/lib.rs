@@ -104,7 +104,7 @@ pub struct Motion {
     pub fade_curve: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Theme {
     pub palette: Palette,
     pub fonts: Fonts,
@@ -114,7 +114,7 @@ pub struct Theme {
 
 /// What `Event::Theme` carries: the whole theme plus a revision that grows on every
 /// change, so a service can drop a stale or duplicate push.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ThemeSnapshot {
     pub rev: u64,
     pub theme: Theme,
@@ -172,17 +172,6 @@ impl Default for Motion {
             duration_ms: 200,
             curve: "ease-out".into(),
             fade_curve: "linear".into(),
-        }
-    }
-}
-
-impl Default for Theme {
-    fn default() -> Self {
-        Self {
-            palette: Palette::default(),
-            fonts: Fonts::default(),
-            shape: Shape::default(),
-            motion: Motion::default(),
         }
     }
 }
