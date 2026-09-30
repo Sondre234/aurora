@@ -77,7 +77,8 @@ impl Aurora {
             .is_transient_for()
             .and_then(|p| self.wm.by_x11.get(&p).copied());
         let mut win = WinData::new(id, element);
-        win.app_id = x11.class();
+        win.app_id = super::titles::bounded(x11.class());
+        win.title = super::titles::bounded(x11.title());
         win.constraints = constraints(&x11);
         win.parent = parent;
         win.want_mode = if x11.is_fullscreen() {

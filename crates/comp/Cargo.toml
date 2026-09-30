@@ -18,6 +18,8 @@ tracing-subscriber.workspace = true
 serde.workspace = true
 toml.workspace = true
 aurora-layout.workspace = true
+aurora-ipc.workspace = true
+aurora-theme.workspace = true
 # Not used directly: enables the signals source in the calloop smithay re-exports.
 calloop = { version = "0.14", features = ["signals"] }
 

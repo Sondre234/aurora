@@ -454,6 +454,10 @@ impl Aurora {
         let ws = win.ws;
         win.phase = Phase::Pending;
         win.placed = false;
+        self.foreign_close(id);
+        let Some(win) = self.wm.windows.get_mut(&id) else {
+            return;
+        };
         win.sent_size = None;
         win.sent_flags = (false, false, false);
         win.resize_anchor = None;
@@ -479,7 +483,7 @@ impl Aurora {
     }
 
     fn read_metadata(&mut self, id: WinId, surface: &WlSurface) {
-        let (app_id, _) = read_strings(surface);
+        let (app_id, title) = read_strings(surface);
         let constraints = read_constraints(surface);
         let parent = self
             .wm
@@ -490,6 +494,7 @@ impl Aurora {
             .and_then(|p| self.wm.id_of(&p));
         if let Some(win) = self.wm.windows.get_mut(&id) {
             win.app_id = app_id;
+            win.title = title;
             win.constraints = constraints;
             win.parent = parent;
         }
@@ -508,6 +513,7 @@ impl Aurora {
         let parent = parent_surface.as_ref().and_then(|p| self.wm.id_of(p));
         if let Some(win) = self.wm.windows.get_mut(&id) {
             win.app_id = app_id;
+            win.title.clone_from(&title);
             win.constraints = constraints;
             win.parent = parent;
         }
@@ -628,6 +634,10 @@ impl Aurora {
             return;
         };
         win.phase = Phase::Mapped;
+        self.foreign_announce(id);
+        let Some(win) = self.wm.windows.get_mut(&id) else {
+            return;
+        };
         if win.placed {
             let ws = win.ws;
             self.relayout_ws(ws);
@@ -714,9 +724,12 @@ impl Aurora {
         self.wm.by_x11.retain(|_, v| *v != id);
         // The ghost needs the window's state, so it is made before the window is forgotten.
         self.leave_ghost(id);
-        let Some(win) = self.wm.windows.remove(&id) else {
+        let Some(mut win) = self.wm.windows.remove(&id) else {
             return;
         };
+        if let Some(handle) = win.foreign.take() {
+            self.protocols.foreign_toplevel.remove_toplevel(&handle);
+        }
         self.space.unmap_elem(&win.element);
         if self.wm.hover == Some(id) {
             self.wm.hover = None;

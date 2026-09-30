@@ -9,6 +9,7 @@ use smithay::{
     },
     wayland::{
         cursor_shape::CursorShapeManagerState,
+        foreign_toplevel_list::ForeignToplevelListState,
         fractional_scale::FractionalScaleManagerState,
         idle_inhibit::IdleInhibitManagerState,
         idle_notify::IdleNotifierState,
@@ -47,6 +48,7 @@ pub struct Protocols {
     pub shortcuts_inhibit: KeyboardShortcutsInhibitState,
     pub virtual_keyboard: VirtualKeyboardGlobal,
     pub session_lock: SessionLockManagerState,
+    pub foreign_toplevel: ForeignToplevelListState,
     /// Surfaces holding an idle inhibitor; pruned by `alive()` whenever the set changes.
     pub idle_inhibitors: HashSet<WlSurface>,
     /// The inhibitor currently taking the shortcuts from the focused surface.
@@ -83,6 +85,7 @@ impl Protocols {
             shortcuts_inhibit: KeyboardShortcutsInhibitState::new::<Aurora>(dh),
             virtual_keyboard: VirtualKeyboardGlobal::new(dh, allow_virtual_keyboard),
             session_lock: SessionLockManagerState::new::<Aurora, _>(dh, |_| true),
+            foreign_toplevel: ForeignToplevelListState::new::<Aurora>(dh),
             idle_inhibitors: HashSet::new(),
             active_inhibitor: None,
         }

@@ -10,6 +10,7 @@ use smithay::{
     utils::IsAlive,
     wayland::{
         compositor::get_parent,
+        foreign_toplevel_list::{ForeignToplevelListHandler, ForeignToplevelListState},
         idle_inhibit::IdleInhibitHandler,
         idle_notify::{IdleNotifierHandler, IdleNotifierState},
         keyboard_shortcuts_inhibit::{
@@ -108,6 +109,12 @@ impl XdgActivationHandler for Aurora {
             win.urgent = true;
             tracing::info!("activation: urgent {}:{}", id.0, win.app_id);
         }
+    }
+}
+
+impl ForeignToplevelListHandler for Aurora {
+    fn foreign_toplevel_list_state(&mut self) -> &mut ForeignToplevelListState {
+        &mut self.protocols.foreign_toplevel
     }
 }
 

@@ -6,6 +6,7 @@ use aurora_layout::{self as layout, Constraints, Edges, FsMode, Gaps, LayoutPara
 use smithay::{
     output::Output,
     reexports::wayland_server::{backend::ObjectId, protocol::wl_surface::WlSurface},
+    wayland::foreign_toplevel_list::ForeignToplevelHandle,
 };
 
 use crate::anim::{Animated, RectF};
@@ -20,6 +21,7 @@ pub mod modes;
 pub mod motion;
 pub mod outputs;
 pub mod rules;
+pub mod titles;
 pub mod visual;
 pub mod window;
 pub mod workspaces;
@@ -56,6 +58,10 @@ pub struct WinData {
     pub sent_flags: (bool, bool, bool),
     pub constraints: Constraints,
     pub app_id: String,
+    /// The window title, kept current by the title handlers (xdg and X11).
+    pub title: String,
+    /// The ext-foreign-toplevel-list handle, from the first buffer until the window goes.
+    pub foreign: Option<ForeignToplevelHandle>,
     /// Outer rectangle it had when last floating and the output frame it was in, restored by
     /// toggle-floating.
     pub float_rect: Option<(Rect, Rect)>,
@@ -92,6 +98,8 @@ impl WinData {
             sent_flags: (false, false, false),
             constraints: Constraints::default(),
             app_id: String::new(),
+            title: String::new(),
+            foreign: None,
             float_rect: None,
             resize_anchor: None,
             want_mode: None,
