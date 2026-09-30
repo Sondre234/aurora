@@ -4,13 +4,19 @@
 use serde::Deserialize;
 use toml::{Table, Value};
 
-use super::{Color, General, Glob, ModKey, ModeSpec, OutputRule, WindowRule, WorkspaceRule};
+use super::{
+    AnimSpec, Animations, Color, Decoration, General, Glob, ModKey, ModeSpec, OutputRule,
+    WindowRule, WorkspaceRule,
+};
+use crate::anim::Curve;
 
 /// Sections stay untyped `Value`s so a wrongly typed section cannot fail the whole parse.
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct RawConfig {
     pub general: Option<Value>,
+    pub animations: Option<Value>,
+    pub decoration: Option<Value>,
     pub keybinds: Option<Value>,
     pub mousebinds: Option<Value>,
     pub output: Option<Value>,
@@ -196,6 +202,162 @@ pub fn general(section: Option<&Value>, warnings: &mut Vec<String>) -> General {
         }
     }
     g
+}
+
+const ANIMATION_KINDS: &[&str] = &[
+    "window_move",
+    "window_open",
+    "window_close",
+    "workspace",
+    "fade",
+];
+
+/// A section that must be a table; anything else is reported and gives `None`.
+fn table_of<'a>(
+    ctx: &str,
+    section: Option<&'a Value>,
+    warnings: &mut Vec<String>,
+) -> Option<&'a Table> {
+    let section = section?;
+    let table = section.as_table();
+    if table.is_none() {
+        warnings.push(format!(
+            "{ctx}: expected a table, got {}",
+            section.type_str()
+        ));
+    }
+    table
+}
+
+fn curve(ctx: &str, table: &Table, warnings: &mut Vec<String>) -> Option<Curve> {
+    let text = soft(get_str(ctx, table, "curve"), warnings)?;
+    let parsed = Curve::parse(text);
+    if parsed.is_none() {
+        warnings.push(format!(
+            "{ctx}.curve: unknown {text:?} (linear, ease-out, ease-in-out, spring [ratio], bezier x1 y1 x2 y2)"
+        ));
+    }
+    parsed
+}
+
+fn duration_ms(ctx: &str, table: &Table, warnings: &mut Vec<String>) -> Option<u32> {
+    ranged(ctx, "duration_ms", table, 0..=10_000, warnings).map(|n| n as u32)
+}
+
+/// `[animations]`: `enabled`, `duration_ms`, `curve` and one inline table per kind that
+/// overrides any of `enabled`, `duration_ms`, `curve` for that kind.
+pub fn animations(section: Option<&Value>, warnings: &mut Vec<String>) -> Animations {
+    let mut a = Animations::default();
+    let Some(table) = table_of("animations", section, warnings) else {
+        return a;
+    };
+    let ctx = "animations";
+    let known: Vec<&str> = ["enabled", "duration_ms", "curve"]
+        .into_iter()
+        .chain(ANIMATION_KINDS.iter().copied())
+        .collect();
+    check_keys(ctx, table, &known, warnings);
+    if let Some(b) = soft(get_bool(ctx, table, "enabled"), warnings) {
+        a.enabled = b;
+    }
+    if let Some(ms) = duration_ms(ctx, table, warnings) {
+        a.duration_ms = ms;
+    }
+    if let Some(c) = curve(ctx, table, warnings) {
+        a.curve = c;
+    }
+    let base = AnimSpec {
+        enabled: true,
+        duration_ms: a.duration_ms,
+        curve: a.curve,
+    };
+    let mut kind = |key: &str| -> AnimSpec {
+        let mut spec = base;
+        let Some(value) = table.get(key) else {
+            return spec;
+        };
+        let kctx = format!("{ctx}.{key}");
+        let Some(t) = table_of(&kctx, Some(value), warnings) else {
+            return spec;
+        };
+        check_keys(&kctx, t, &["enabled", "duration_ms", "curve"], warnings);
+        if let Some(b) = soft(get_bool(&kctx, t, "enabled"), warnings) {
+            spec.enabled = b;
+        }
+        if let Some(ms) = duration_ms(&kctx, t, warnings) {
+            spec.duration_ms = ms;
+        }
+        if let Some(c) = curve(&kctx, t, warnings) {
+            spec.curve = c;
+        }
+        spec
+    };
+    a.window_move = kind("window_move");
+    a.window_open = kind("window_open");
+    a.window_close = kind("window_close");
+    a.workspace = kind("workspace");
+    a.fade = kind("fade");
+    a
+}
+
+/// `[decoration]`: per-key fallback like `[general]`.
+pub fn decoration(section: Option<&Value>, warnings: &mut Vec<String>) -> Decoration {
+    let mut d = Decoration::default();
+    let Some(table) = table_of("decoration", section, warnings) else {
+        return d;
+    };
+    let ctx = "decoration";
+    check_keys(
+        ctx,
+        table,
+        &[
+            "rounding",
+            "shadow",
+            "shadow_radius",
+            "shadow_color",
+            "blur",
+            "blur_passes",
+            "blur_radius",
+            "inactive_opacity",
+        ],
+        warnings,
+    );
+    if let Some(n) = ranged(ctx, "rounding", table, 0..=100, warnings) {
+        d.rounding = n as i32;
+    }
+    if let Some(b) = soft(get_bool(ctx, table, "shadow"), warnings) {
+        d.shadow = b;
+    }
+    if let Some(n) = ranged(ctx, "shadow_radius", table, 0..=200, warnings) {
+        d.shadow_radius = n as i32;
+    }
+    if let Some(text) = soft(get_str(ctx, table, "shadow_color"), warnings) {
+        match Color::parse(text) {
+            Some(color) => d.shadow_color = color,
+            None => warnings.push(format!(
+                "{ctx}.shadow_color: invalid color {text:?} (#rrggbb or #rrggbbaa)"
+            )),
+        }
+    }
+    if let Some(b) = soft(get_bool(ctx, table, "blur"), warnings) {
+        d.blur = b;
+    }
+    if let Some(n) = ranged(ctx, "blur_passes", table, 1..=8, warnings) {
+        d.blur_passes = n as u32;
+    }
+    if let Some(n) = ranged(ctx, "blur_radius", table, 1..=64, warnings) {
+        d.blur_radius = n as u32;
+    }
+    if let Some(f) = soft(get_float(ctx, table, "inactive_opacity"), warnings) {
+        if (0.0..=1.0).contains(&f) {
+            d.inactive_opacity = f as f32;
+        } else {
+            warnings.push(format!(
+                "{ctx}.inactive_opacity: {f} is out of range (0..=1)"
+            ));
+        }
+    }
+    d
 }
 
 /// Items of a `[[list]]` section; `convert` errors drop only that item.

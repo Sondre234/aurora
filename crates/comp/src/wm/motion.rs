@@ -83,6 +83,14 @@ impl Wm {
         busy
     }
 
+    /// Ends every running animation where it is headed: used when animations get disabled.
+    pub fn snap_animations(&mut self) {
+        for win in self.windows.values_mut() {
+            win.set_target(win.target, None);
+        }
+        self.clock.busy = false;
+    }
+
     /// Time of the last `tick`, the moment new animations should start from.
     pub fn frame_time(&self) -> Duration {
         self.clock.now

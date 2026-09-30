@@ -9,8 +9,10 @@
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
+    time::Duration,
 };
 
+use crate::anim::Curve;
 use crate::state::Aurora;
 use keybind::{BindTable, Mods};
 
@@ -118,6 +120,110 @@ impl Default for General {
     }
 }
 
+/// What an animation of one kind does.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AnimSpec {
+    pub enabled: bool,
+    pub duration_ms: u32,
+    pub curve: Curve,
+}
+
+impl AnimSpec {
+    pub fn duration(&self) -> Duration {
+        Duration::from_millis(u64::from(self.duration_ms))
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AnimKind {
+    WindowMove,
+    WindowOpen,
+    WindowClose,
+    Workspace,
+    Fade,
+}
+
+/// `[animations]`. Each kind starts from the section-wide duration and curve.
+#[derive(Clone, Debug)]
+pub struct Animations {
+    pub enabled: bool,
+    pub duration_ms: u32,
+    pub curve: Curve,
+    pub window_move: AnimSpec,
+    pub window_open: AnimSpec,
+    pub window_close: AnimSpec,
+    pub workspace: AnimSpec,
+    pub fade: AnimSpec,
+}
+
+impl Default for Animations {
+    fn default() -> Self {
+        let spec = AnimSpec {
+            enabled: true,
+            duration_ms: 200,
+            curve: Curve::EASE_OUT,
+        };
+        Self {
+            enabled: true,
+            duration_ms: spec.duration_ms,
+            curve: spec.curve,
+            window_move: spec,
+            window_open: spec,
+            window_close: spec,
+            workspace: spec,
+            fade: spec,
+        }
+    }
+}
+
+impl Animations {
+    /// The settings for `kind`, or `None` when animations are off, the kind is off or its
+    /// duration is zero. Callers then snap instead of animating.
+    pub fn spec(&self, kind: AnimKind) -> Option<AnimSpec> {
+        if !self.enabled {
+            return None;
+        }
+        let spec = match kind {
+            AnimKind::WindowMove => self.window_move,
+            AnimKind::WindowOpen => self.window_open,
+            AnimKind::WindowClose => self.window_close,
+            AnimKind::Workspace => self.workspace,
+            AnimKind::Fade => self.fade,
+        };
+        (spec.enabled && spec.duration_ms > 0).then_some(spec)
+    }
+}
+
+/// `[decoration]`: corners, shadows, blur and inactive dimming.
+#[derive(Clone, Debug)]
+pub struct Decoration {
+    /// Corner radius in logical pixels, 0 for square corners.
+    pub rounding: i32,
+    pub shadow: bool,
+    pub shadow_radius: i32,
+    pub shadow_color: Color,
+    pub blur: bool,
+    pub blur_passes: u32,
+    pub blur_radius: u32,
+    /// Opacity of unfocused windows, 1.0 leaves them untouched.
+    pub inactive_opacity: f32,
+}
+
+impl Default for Decoration {
+    fn default() -> Self {
+        Self {
+            rounding: 10,
+            shadow: true,
+            shadow_radius: 20,
+            shadow_color: Color([0.0, 0.0, 0.0, 115.0 / 255.0]),
+            blur: true,
+            blur_passes: 3,
+            blur_radius: 6,
+            inactive_opacity: 1.0,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ModeSpec {
     pub width: i32,
@@ -220,6 +326,8 @@ pub struct WindowRule {
 #[derive(Debug, Default)]
 pub struct Config {
     pub general: General,
+    pub animations: Animations,
+    pub decoration: Decoration,
     pub binds: BindTable,
     pub outputs: Vec<OutputRule>,
     pub workspace_rules: Vec<WorkspaceRule>,
@@ -237,6 +345,8 @@ impl Config {
             w.push(format!("unknown section {key:?}"));
         }
         let general = raw::general(raw.general.as_ref(), &mut w);
+        let animations = raw::animations(raw.animations.as_ref(), &mut w);
+        let decoration = raw::decoration(raw.decoration.as_ref(), &mut w);
         let binds = BindTable::build(
             general.mod_key.mods(),
             general.workspaces,
@@ -245,6 +355,8 @@ impl Config {
             &mut w,
         );
         let config = Self {
+            animations,
+            decoration,
             binds,
             outputs: raw::outputs(raw.output.as_ref(), &mut w),
             workspace_rules: raw::workspace_rules(
@@ -375,6 +487,82 @@ mod tests {
             config.outputs[1].mode.map(|m| m.refresh_mhz),
             Some(Some(200_000))
         );
+    }
+
+    #[test]
+    fn shipped_example_matches_the_defaults() {
+        let (config, _) = resolve(EXAMPLE);
+        let (a, d) = (Animations::default(), Decoration::default());
+        assert_eq!(config.animations.enabled, a.enabled);
+        assert_eq!(config.animations.duration_ms, a.duration_ms);
+        assert_eq!(config.animations.curve, a.curve);
+        assert_eq!(config.decoration.rounding, d.rounding);
+        assert_eq!(config.decoration.shadow_radius, d.shadow_radius);
+        assert_eq!(config.decoration.shadow_color, d.shadow_color);
+        assert_eq!(config.decoration.blur_passes, d.blur_passes);
+        assert_eq!(config.decoration.blur_radius, d.blur_radius);
+        assert_eq!(config.decoration.inactive_opacity, d.inactive_opacity);
+    }
+
+    #[test]
+    fn animation_overrides_inherit_and_disable() {
+        let (config, warnings) = resolve(
+            r#"
+            [animations]
+            duration_ms = 100
+            curve = "linear"
+            window_move = { duration_ms = 300, curve = "spring 0.5" }
+            workspace = { enabled = false }
+            fade = { duration_ms = 0 }
+            window_open = { curve = "wobble" }
+            "#,
+        );
+        let a = &config.animations;
+        let mv = a.spec(AnimKind::WindowMove).expect("move on");
+        assert_eq!(mv.duration_ms, 300);
+        assert_eq!(mv.curve, Curve::Spring { damping_ratio: 0.5 });
+        let close = a.spec(AnimKind::WindowClose).expect("close on");
+        assert_eq!((close.duration_ms, close.curve), (100, Curve::Linear));
+        assert!(a.spec(AnimKind::Workspace).is_none());
+        assert!(a.spec(AnimKind::Fade).is_none());
+        // A bad curve keeps the inherited one.
+        let open = a.spec(AnimKind::WindowOpen).expect("open on");
+        assert_eq!(open.curve, Curve::Linear);
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(warnings[0].contains("window_open.curve"));
+    }
+
+    #[test]
+    fn disabled_animations_give_no_specs() {
+        let (config, _) = resolve("[animations]\nenabled = false\n");
+        assert!(config.animations.spec(AnimKind::WindowMove).is_none());
+    }
+
+    #[test]
+    fn decoration_bad_values_fall_back_per_key() {
+        let (config, warnings) = resolve(
+            r#"
+            [decoration]
+            rounding = 14
+            blur_passes = 99
+            shadow_color = "red"
+            inactive_opacity = 1.5
+            blur = false
+            sparkle = true
+            "#,
+        );
+        let d = &config.decoration;
+        assert_eq!(d.rounding, 14);
+        assert_eq!(d.blur_passes, Decoration::default().blur_passes);
+        assert_eq!(d.shadow_color, Decoration::default().shadow_color);
+        assert_eq!(d.inactive_opacity, 1.0);
+        assert!(!d.blur);
+        for needle in ["blur_passes", "shadow_color", "inactive_opacity", "sparkle"] {
+            assert!(
+                warnings.iter().any(|w| w.contains(needle)),
+                "{needle}: {warnings:?}"
+            );
+        }
     }
 
     #[test]

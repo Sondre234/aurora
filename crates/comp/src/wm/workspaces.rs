@@ -338,6 +338,9 @@ impl Aurora {
             let pointer = self.pointer.clone();
             pointer.unset_grab(self, SERIAL_COUNTER.next_serial(), InputTime::now());
         }
+        if !self.config.animations.enabled {
+            self.wm.snap_animations();
+        }
         self.relayout_all();
     }
 }
