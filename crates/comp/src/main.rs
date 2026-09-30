@@ -1,12 +1,13 @@
 mod action;
-mod anim;
 mod actions;
+mod anim;
 mod backend;
 mod capture;
 mod cli;
 mod config;
 mod debug;
 mod dmabuf;
+mod effects;
 mod emergency;
 mod focus;
 mod handlers;

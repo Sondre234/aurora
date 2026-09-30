@@ -2,6 +2,7 @@
 use std::{
     cmp::Reverse,
     sync::atomic::{AtomicBool, Ordering},
+    time::Duration,
 };
 
 use smithay::{
@@ -19,18 +20,51 @@ use smithay::{
 };
 
 use crate::{
+    config::Decoration,
+    effects::{self, Programs},
     layers::layers_front_to_back,
     wm::window::{WindowElement, WindowRenderElement},
 };
 
 render_elements! {
     /// Everything one output draws. The cursor is first so DrmCompositor can put it on the
-    /// cursor plane.
+    /// cursor plane. Effect streams add one variant each here (`Shadow`, `Blur`, `Overview`,
+    /// `Ghost`), with the element type defined in their own module, and push it from the
+    /// matching hook in `output_elements`.
     pub OutputElement<=GlesRenderer>;
     Cursor=MemoryRenderBufferRenderElement<GlesRenderer>,
     CursorSurface=WaylandSurfaceRenderElement<GlesRenderer>,
     Window=WindowRenderElement<GlesRenderer>,
     Layer=Wrap<WaylandSurfaceRenderElement<GlesRenderer>>,
+}
+
+/// Per-frame inputs of the effects, built once per render and passed down to the builder.
+/// Shadows, corners, blur and animated elements read their settings here instead of reaching
+/// into the config or the renderer.
+#[allow(dead_code)] // read by the M3 step 2 streams
+pub struct SceneFx<'a> {
+    pub decoration: &'a Decoration,
+    /// Compiled shader programs; `None` only before `effects::init` ran.
+    pub programs: Option<Programs>,
+    /// Frame time on the animation clock.
+    pub now: Duration,
+}
+
+impl<'a> SceneFx<'a> {
+    pub fn new(renderer: &GlesRenderer, decoration: &'a Decoration, now: Duration) -> Self {
+        Self {
+            decoration,
+            programs: effects::programs(renderer),
+            now,
+        }
+    }
+
+    /// Whether effects may draw on `output`: not over a fullscreen window, which must stay
+    /// eligible for direct scanout.
+    #[allow(dead_code)]
+    pub fn enabled_on(&self, output: &Output) -> bool {
+        !top_hidden(output)
+    }
 }
 
 /// Retained per output: set by the layer code when a fullscreen window covers the output, so
@@ -76,6 +110,7 @@ pub fn output_elements(
     unmanaged: &Space<Window>,
     renderer: &mut GlesRenderer,
     output: &Output,
+    _fx: &SceneFx,
 ) -> Option<Vec<OutputElement>> {
     let geo = space.output_geometry(output)?;
     let scale = Scale::from(output.current_scale().fractional_scale());
@@ -119,6 +154,9 @@ pub fn output_elements(
             continue;
         }
         let at: Point<i32, Logical> = loc - SpaceElement::geometry(window).loc - geo.loc;
+        // Hooks, in front-to-back order for this window: (1) the window's own elements below
+        // (the corner program and `current - target` offset/scale apply there), (2) its
+        // shadow, (3) blur of what is behind it. Streams push their variants here.
         out.extend(window.render_elements::<OutputElement>(
             renderer,
             at.to_physical_precise_round(scale),

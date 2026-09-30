@@ -8,7 +8,9 @@ pub enum Curve {
     CubicBezier(f32, f32, f32, f32),
     /// Damped spring released at 0 toward 1, time-scaled so it has settled at `t = 1`.
     /// `damping_ratio` is clamped to 0.1..=1.0 (1.0 is critically damped, no overshoot).
-    Spring { damping_ratio: f32 },
+    Spring {
+        damping_ratio: f32,
+    },
 }
 
 impl Curve {

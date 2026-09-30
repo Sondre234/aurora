@@ -43,7 +43,7 @@ use super::{
 use crate::{
     backend::{BACKGROUND, Backend},
     capture::{self, Captures},
-    scene::{OutputElement, output_elements},
+    scene::{OutputElement, SceneFx, output_elements},
     state::{Aurora, take_presentation_feedback, update_primary_scanout_output},
     wm::window::WindowElement,
 };
@@ -258,11 +258,14 @@ impl Aurora {
         self.xwayland.unmanaged.refresh();
         self.popups.cleanup();
 
+        let now = Duration::from(self.clock.now());
+        let fx = SceneFx::new(renderer, &self.config.decoration, now);
         let mut result = None;
         for attempt in 0..2 {
             let attempted = render_output(
                 surface,
                 renderer,
+                &fx,
                 &self.space,
                 &self.xwayland.unmanaged,
                 &mut self.captures,
@@ -555,6 +558,7 @@ impl Aurora {
 fn render_output(
     surface: &mut super::device::Surface,
     renderer: &mut GlesRenderer,
+    fx: &SceneFx,
     space: &Space<WindowElement>,
     unmanaged: &Space<Window>,
     captures: &mut Captures,
@@ -579,7 +583,7 @@ fn render_output(
         output.current_scale().integer_scale(),
     );
     let n_cursor = elements.len();
-    match output_elements(space, unmanaged, renderer, &output) {
+    match output_elements(space, unmanaged, renderer, &output, fx) {
         Some(scene) => elements.extend(scene),
         None => return Ok(None),
     }

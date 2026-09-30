@@ -149,7 +149,7 @@ impl Aurora {
         let context = EGLContext::new_with_priority(&egl_display, ContextPriority::High)
             .map_err(|err| format!("egl context init: {err}"))?;
         // Safety: the context was just created for this display and is moved into the renderer.
-        let renderer = unsafe {
+        let mut renderer = unsafe {
             GlesRenderer::supported_capabilities(&context)
                 .and_then(|caps| GlesRenderer::with_capabilities(context, caps))
         }
@@ -166,6 +166,7 @@ impl Aurora {
             render_formats = render_formats.iter().count(),
             "gpu renderer ready"
         );
+        crate::effects::init(&mut renderer);
 
         let allocator = GbmAllocator::new(
             gbm.clone(),
