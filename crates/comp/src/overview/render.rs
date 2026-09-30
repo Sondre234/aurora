@@ -178,8 +178,8 @@ impl Thumbs {
         };
         let scale = Scale::from(scale);
         // The window's geometry origin goes to the texture's corner.
-        let at: Point<i32, Physical> = Point::<i32, Logical>::from((-origin.x, -origin.y))
-            .to_physical_precise_round(scale);
+        let at: Point<i32, Physical> =
+            Point::<i32, Logical>::from((-origin.x, -origin.y)).to_physical_precise_round(scale);
         let window: &Window = element;
         let elements: Vec<WaylandSurfaceRenderElement<GlesRenderer>> =
             window.render_elements(renderer, at, scale, 1.0);
@@ -260,7 +260,12 @@ pub fn push(
     }
     let name = output.name();
     let global = area(output, geo);
-    let local = Rect::new(global.x - geo.loc.x, global.y - geo.loc.y, global.w, global.h);
+    let local = Rect::new(
+        global.x - geo.loc.x,
+        global.y - geo.loc.y,
+        global.w,
+        global.h,
+    );
     let panels = overview.panels_for(&name, local);
     let shown = overview.shown_on(&name);
 
@@ -303,9 +308,7 @@ pub fn push(
             if rect.is_empty() {
                 continue;
             }
-            let ready = state
-                .thumbs
-                .refresh(renderer, id, &entry.element, scale.x);
+            let ready = state.thumbs.refresh(renderer, id, &entry.element, scale.x);
             match state.thumbs.map.get(&id).filter(|_| ready) {
                 Some(thumb) => {
                     let at = Point::<f64, Logical>::from((f64::from(rect.x), f64::from(rect.y)))

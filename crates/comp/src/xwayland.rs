@@ -121,7 +121,8 @@ impl Aurora {
         // set before the window manager starts, which reads it once. Scale 1 is the default
         // identity mapping.
         let scale = self.xwayland.scale;
-        self.client_compositor_state(&client).set_client_scale(scale);
+        self.client_compositor_state(&client)
+            .set_client_scale(scale);
         let mut wm =
             match X11Wm::start_wm(self.handle.clone(), &self.display_handle, socket, client) {
                 Ok(wm) => wm,

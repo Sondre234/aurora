@@ -251,8 +251,8 @@ impl Aurora {
         surface.render.damaged = false;
         // Advance animations to the moment this frame is built; outputs share one clock.
         let now = Duration::from(self.clock.now());
-        surface.render.animating = self.wm.tick(now)
-            | crate::overview::Overview::tick(&mut self.overview, &self.wm, now);
+        surface.render.animating =
+            self.wm.tick(now) | crate::overview::Overview::tick(&mut self.overview, &self.wm, now);
         let output = surface.output.clone();
         let _span = tracing::debug_span!("render_surface", output = %output.name()).entered();
 

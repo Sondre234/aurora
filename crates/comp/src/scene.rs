@@ -9,9 +9,9 @@ use smithay::{
     backend::renderer::{
         element::{
             AsRenderElements, Wrap, memory::MemoryRenderBufferRenderElement, render_elements,
-            surface::WaylandSurfaceRenderElement,
+            surface::WaylandSurfaceRenderElement, texture::TextureRenderElement,
         },
-        gles::{GlesRenderer, element::PixelShaderElement},
+        gles::{GlesRenderer, GlesTexture, element::PixelShaderElement},
     },
     desktop::{Space, Window, space::SpaceElement},
     output::Output,
@@ -28,7 +28,10 @@ use crate::{
         shadow,
     },
     layers::layers_front_to_back,
-    wm::window::{WindowElement, WindowRenderElement},
+    wm::{
+        ghost,
+        window::{WindowElement, WindowRenderElement},
+    },
 };
 
 render_elements! {
@@ -44,6 +47,7 @@ render_elements! {
     Shadow=PixelShaderElement,
     Blur=BlurElement,
     Overview=crate::overview::OverviewElement,
+    Ghost=TextureRenderElement<GlesTexture>,
 }
 
 /// Per-frame inputs of the effects, built once per render and passed down to the builder.
@@ -199,7 +203,16 @@ pub fn output_elements(
         .map_or(0, |f| shadow::shadow_reach(f.decoration.shadow_radius));
     let mut windows: Vec<&WindowElement> = space.elements().rev().collect();
     windows.sort_by_key(|w| Reverse(SpaceElement::z_index(*w)));
+    // Closing windows fade out at the stacking of the window they were: each one goes in
+    // front of the first window that is not above it.
+    let mut ghosts = ghost::elements(renderer, output, geo, scale, fx.now);
+    ghosts.sort_by_key(|(z, _)| Reverse(*z));
+    let mut ghosts = ghosts.into_iter().peekable();
     for window in windows {
+        let z = SpaceElement::z_index(window);
+        while let Some((_, element)) = ghosts.next_if(|(gz, _)| *gz >= z) {
+            out.push(OutputElement::Ghost(element));
+        }
         let (Some(bbox), Some(loc)) = (space.element_bbox(window), space.element_location(window))
         else {
             continue;
@@ -223,7 +236,7 @@ pub fn output_elements(
                 .map(OutputElement::Window),
         );
         if blurring {
-            let rect = Rectangle::new(loc - geo.loc, SpaceElement::geometry(window).size);
+            let rect = window.drawn_geometry(at).0;
             requests.extend(blur::want(
                 &out,
                 start,
@@ -236,6 +249,8 @@ pub fn output_elements(
             out.push(OutputElement::Shadow(shadow));
         }
     }
+
+    out.extend(ghosts.map(|(_, element)| OutputElement::Ghost(element)));
 
     push_layers(&mut out, renderer, output, Layer::Bottom, scale, None);
     push_layers(&mut out, renderer, output, Layer::Background, scale, None);

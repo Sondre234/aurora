@@ -12,17 +12,18 @@ use smithay::{
     },
     utils::{Logical, Rectangle},
     wayland::{
-        compositor::with_states,
+        compositor::{BufferAssignment, SurfaceAttributes, add_pre_commit_hook, with_states},
         shell::xdg::{SurfaceCachedState, ToplevelSurface, XdgToplevelSurfaceData},
     },
 };
 
+use super::ghost::{self, Closing};
 use super::{
     Phase, WinData, layout_params, rules,
     window::{WindowElement, Z_FLOATING, Z_FULLSCREEN, Z_TILED},
     workspaces::carry_rect,
 };
-use crate::Aurora;
+use crate::{Aurora, backend::Backend, config::AnimKind};
 
 pub(super) fn rect_of(r: Rectangle<i32, Logical>) -> Rect {
     Rect::new(r.loc.x, r.loc.y, r.size.w, r.size.h)
@@ -179,6 +180,9 @@ impl Aurora {
         let dragging = self.wm.drag.is_some();
         let frame = self.wm.last_full.get(&ws).copied().unwrap_or_default();
         let over_fs = placed.iter().any(|p| p.kind == Kind::Fullscreen);
+        // Windows glide to their new place, except while the pointer drags one (it must follow
+        // the pointer exactly).
+        let glide = self.motion_for(AnimKind::WindowMove).filter(|_| !dragging);
 
         let mut line = String::new();
         for p in placed {
@@ -206,7 +210,14 @@ impl Aurora {
                     }
                 }
             }
-            win.set_target(content, None);
+            // Only a window that is on screen glides, and only within the output it was
+            // on: a new or returning window appears where it belongs.
+            let on_screen = win.phase == Phase::Mapped
+                && self.space.element_location(&win.element).is_some()
+                && intersects(win.target, frame);
+            if win.set_target(content, glide.filter(|_| on_screen)) {
+                tracing::info!("anim: start kind=move win={}", p.id.0);
+            }
             win.floating = p.kind == Kind::Floating;
             win.fs = p.kind == Kind::Fullscreen;
             win.ws = ws;
@@ -305,6 +316,7 @@ impl Aurora {
             // Windows moved under a still pointer: focus and constraints must follow.
             self.resend_pointer_focus();
         }
+        self.sync_opacity();
         self.queue_redraw_output(output);
         // Fullscreen decides whether Top layers show and who may hold the keyboard.
         self.refresh_layer_focus();
@@ -318,6 +330,64 @@ impl Aurora {
             WindowElement::new(id, smithay::desktop::Window::new_wayland_window(toplevel));
         self.wm.by_surface.insert(surface.id(), id);
         self.wm.windows.insert(id, WinData::new(id, element));
+        // A null-buffer commit unmaps the window; its last frame is still attached until the
+        // commit applies, which is the moment to snapshot it for the close ghost.
+        add_pre_commit_hook::<Aurora, _>(&surface, |state, _dh, surface| {
+            let unmapping = with_states(surface, |states| {
+                matches!(
+                    states
+                        .cached_state
+                        .get::<SurfaceAttributes>()
+                        .pending()
+                        .buffer,
+                    Some(BufferAssignment::Removed)
+                )
+            });
+            if unmapping && let Some(id) = state.wm.id_of(surface) {
+                state.leave_ghost(id);
+            }
+        });
+    }
+
+    /// Leaves a fading snapshot of window `id` where it is, if close animations are on and
+    /// the window is on screen. Only the DRM backend can do this: the nested one keeps its
+    /// renderer out of reach, so windows there just vanish.
+    pub(super) fn leave_ghost(&mut self, id: WinId) {
+        let Some(m) = self.motion_for(AnimKind::WindowClose) else {
+            return;
+        };
+        let Some(win) = self.wm.windows.get(&id) else {
+            return;
+        };
+        if win.phase != Phase::Mapped || win.fs || !self.wm.is_visible(id) {
+            return;
+        }
+        let Some(output) = self.wm.output_for_ws(win.ws) else {
+            return;
+        };
+        if self.wm.sliding_out(win.ws) || self.space.element_location(&win.element).is_none() {
+            return;
+        }
+        let t = win.target;
+        let closing = Closing {
+            window: &win.element,
+            target: Rectangle::new((t.x, t.y).into(), (t.w, t.h).into()),
+            visual: win.element.deco().visual(),
+            z: SpaceElement::z_index(&win.element),
+            start: m.now,
+            dur: m.dur,
+            curve: m.curve,
+        };
+        let Backend::Drm(drm) = &mut self.backend else {
+            return;
+        };
+        let Some(renderer) = drm.renderer.as_mut() else {
+            return;
+        };
+        if ghost::leave(renderer, &output, closing) {
+            tracing::info!("anim: start kind=close win={}", id.0);
+            self.queue_redraw_output(&output);
+        }
     }
 
     /// Handles a toplevel's commit: the initial one runs the rules and places the window,
@@ -571,6 +641,14 @@ impl Aurora {
         }
         // A window opened on a workspace that is not the focused one stays in the background.
         let ws = self.wm.windows.get(&id).map_or(0, |w| w.ws);
+        if let Some(m) = self.motion_for(AnimKind::WindowOpen)
+            && self.wm.ws_output.contains_key(&ws)
+            && let Some(win) = self.wm.windows.get_mut(&id)
+            && !win.fs
+        {
+            win.start_open(m.now, m.dur, m.curve);
+            tracing::info!("anim: start kind=open win={}", id.0);
+        }
         let shown_here = self
             .wm
             .active_output
@@ -634,6 +712,8 @@ impl Aurora {
     pub(super) fn wm_remove_window(&mut self, id: WinId) {
         self.wm.by_surface.retain(|_, v| *v != id);
         self.wm.by_x11.retain(|_, v| *v != id);
+        // The ghost needs the window's state, so it is made before the window is forgotten.
+        self.leave_ghost(id);
         let Some(win) = self.wm.windows.remove(&id) else {
             return;
         };
@@ -652,6 +732,11 @@ impl Aurora {
             self.focus_window(next, true);
         }
     }
+}
+
+/// Whether two rectangles share any area.
+fn intersects(a: Rect, b: Rect) -> bool {
+    a.x < b.right() && b.x < a.right() && a.y < b.bottom() && b.y < a.bottom()
 }
 
 /// Where a new floating window goes: centred on its parent or on the work area, sized

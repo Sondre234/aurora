@@ -108,7 +108,10 @@ impl Aurora {
                 tracing::info!("focus-dir: no focus, {} has no workspace", output.name());
                 return;
             };
-            tracing::info!("focus-dir: no focus, leaving {} ws={ws} {dir:?}", output.name());
+            tracing::info!(
+                "focus-dir: no focus, leaving {} ws={ws} {dir:?}",
+                output.name()
+            );
             if let Some((_, full)) = self.work_area(&output) {
                 self.focus_across_output(ws, full, dir);
             } else {

@@ -75,7 +75,11 @@ pub fn grid(n: usize, bounds: Rect, aspect: (i32, i32), gap: i32) -> Vec<Rect> {
     (0..n)
         .map(|i| {
             let (row, col) = (i / cols, i % cols);
-            let in_row = if row == rows - 1 { n - row * cols } else { cols };
+            let in_row = if row == rows - 1 {
+                n - row * cols
+            } else {
+                cols
+            };
             let row_w = in_row as i32 * w + (in_row as i32 - 1) * gap;
             let left = bounds.x + (bounds.w - row_w) / 2;
             Rect::new(
@@ -91,12 +95,15 @@ pub fn grid(n: usize, bounds: Rect, aspect: (i32, i32), gap: i32) -> Vec<Rect> {
 /// `size` scaled down to fit `cell` (never up), centred in it.
 pub fn fit(size: (i32, i32), cell: Rect) -> Rect {
     let (w, h) = (size.0.max(1) as f64, size.1.max(1) as f64);
-    let scale = (f64::from(cell.w) / w)
-        .min(f64::from(cell.h) / h)
-        .min(1.0);
+    let scale = (f64::from(cell.w) / w).min(f64::from(cell.h) / h).min(1.0);
     let fw = ((w * scale).round() as i32).clamp(1, cell.w.max(1));
     let fh = ((h * scale).round() as i32).clamp(1, cell.h.max(1));
-    Rect::new(cell.x + (cell.w - fw) / 2, cell.y + (cell.h - fh) / 2, fw, fh)
+    Rect::new(
+        cell.x + (cell.w - fw) / 2,
+        cell.y + (cell.h - fh) / 2,
+        fw,
+        fh,
+    )
 }
 
 /// Panels for `inputs` inside `area`, each holding its window thumbnails.
@@ -243,10 +250,7 @@ mod tests {
             &[input(1, &[7]), input(2, &[])],
         );
         let tile = panels[0].tiles[0].1;
-        assert_eq!(
-            hit(&panels, tile.center()),
-            Some(Target::Tile(1, WinId(7)))
-        );
+        assert_eq!(hit(&panels, tile.center()), Some(Target::Tile(1, WinId(7))));
         let corner = Point {
             x: panels[0].rect.x + 1,
             y: panels[0].rect.y + 1,

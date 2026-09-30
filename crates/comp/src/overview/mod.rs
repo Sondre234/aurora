@@ -160,7 +160,10 @@ impl Overview {
 
     /// The workspace `output` shows.
     pub fn shown_on(&self, output: &str) -> Option<u32> {
-        self.shown.iter().find(|(n, _)| n == output).map(|(_, w)| *w)
+        self.shown
+            .iter()
+            .find(|(n, _)| n == output)
+            .map(|(_, w)| *w)
     }
 
     /// Workspaces drawn on `output`: the home output shows every workspace no other output

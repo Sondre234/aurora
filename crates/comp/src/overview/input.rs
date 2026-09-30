@@ -18,12 +18,7 @@ use super::{
     Overview,
     layout::{self, PanelLayout, Target},
 };
-use crate::{
-    action::WsTarget,
-    config::AnimKind,
-    layers::Hit,
-    state::Aurora,
-};
+use crate::{action::WsTarget, config::AnimKind, layers::Hit, state::Aurora};
 
 /// evdev BTN_LEFT / BTN_RIGHT.
 const BTN_LEFT: u32 = 272;
@@ -102,10 +97,7 @@ impl Aurora {
                 return;
             };
             let mut overview = Overview::new(&self.wm, home, self.config.general.workspaces);
-            overview.selected = self
-                .wm
-                .focused
-                .filter(|f| overview.entry(*f).is_some());
+            overview.selected = self.wm.focused.filter(|f| overview.entry(*f).is_some());
             overview.set_open(true, now, spec);
             self.overview = Some(overview);
         }
@@ -201,13 +193,20 @@ impl Aurora {
                     self.overview_activate(id, output);
                 }
             }
-            OverviewKey::Nav(dir) => self.overview_select(|tiles, from| {
-                neighbor(tiles, from, dir, &[]).or(Some(from))
-            }),
+            OverviewKey::Nav(dir) => {
+                self.overview_select(|tiles, from| neighbor(tiles, from, dir, &[]).or(Some(from)))
+            }
             OverviewKey::Cycle(forward) => self.overview_select(|tiles, from| {
                 let i = tiles.iter().position(|(id, _)| *id == from)?;
                 let n = tiles.len();
-                Some(tiles[if forward { (i + 1) % n } else { (i + n - 1) % n }].0)
+                Some(
+                    tiles[if forward {
+                        (i + 1) % n
+                    } else {
+                        (i + n - 1) % n
+                    }]
+                    .0,
+                )
             }),
         }
     }
@@ -287,13 +286,14 @@ impl Aurora {
             (BTN_LEFT, ButtonState::Released) => {
                 let press = self.overview.as_mut().and_then(|o| o.press.take());
                 match (press, hit) {
-                    (Some(Press::Tile(id)), Some((output, Target::Tile(_, over)))) if over == id => {
+                    (Some(Press::Tile(id)), Some((output, Target::Tile(_, over))))
+                        if over == id =>
+                    {
                         self.overview_activate(id, Some(output));
                     }
-                    (
-                        Some(Press::Tile(id)),
-                        Some((_, Target::Tile(ws, _) | Target::Panel(ws))),
-                    ) => self.overview_move(id, ws),
+                    (Some(Press::Tile(id)), Some((_, Target::Tile(ws, _) | Target::Panel(ws)))) => {
+                        self.overview_move(id, ws)
+                    }
                     (Some(Press::Panel(ws)), Some((output, Target::Panel(over)))) if over == ws => {
                         self.overview_show(ws, Some(output));
                         self.close_overview(true);
