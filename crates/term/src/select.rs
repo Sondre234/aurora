@@ -48,6 +48,20 @@ impl ClickTracker {
     }
 }
 
+/// Whether a hyperlink target may be handed to `xdg-open`. Programs choose the URI, so
+/// only plain document and web schemes are allowed (no `javascript:`, no custom
+/// handlers that run commands).
+pub fn link_openable(uri: &str) -> bool {
+    let Some((scheme, rest)) = uri.split_once(':') else {
+        return false;
+    };
+    let ok_scheme = matches!(
+        scheme.to_ascii_lowercase().as_str(),
+        "http" | "https" | "ftp" | "mailto" | "file"
+    );
+    ok_scheme && !rest.is_empty() && !uri.chars().any(char::is_control)
+}
+
 /// Modifier state for pointer events. The toolkit reports modifiers only on key events
 /// and never key releases, so the last report is trusted for a short while only.
 #[derive(Debug, Default)]
@@ -115,6 +129,20 @@ mod tests {
         assert_eq!(ClickTracker::kind(1), SelKind::Simple);
         assert_eq!(ClickTracker::kind(2), SelKind::Word);
         assert_eq!(ClickTracker::kind(3), SelKind::Line);
+    }
+
+    #[test]
+    fn only_plain_schemes_are_opened() {
+        assert!(link_openable("https://example.org/a?b=c"));
+        assert!(link_openable("HTTP://example.org"));
+        assert!(link_openable("mailto:me@example.org"));
+        assert!(link_openable("file:///tmp/x.txt"));
+        assert!(!link_openable("javascript:alert(1)"));
+        assert!(!link_openable("ssh://host"));
+        assert!(!link_openable("https:"));
+        assert!(!link_openable("no scheme"));
+        assert!(!link_openable("https://a\u{7}b"));
+        assert!(!link_openable("https://a\nb"));
     }
 
     #[test]
