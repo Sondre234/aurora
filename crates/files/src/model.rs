@@ -177,7 +177,7 @@ pub fn cmp_entries(a: &Entry, b: &Entry, sort: Sort) -> Ordering {
         (false, true) => return Ordering::Greater,
         _ => {}
     }
-    let by_name = || natural_cmp(&a.display_name(), &b.display_name());
+    let by_name = || natural_cmp(&a.name.to_string_lossy(), &b.name.to_string_lossy());
     let ord = match sort.key {
         SortKey::Name => by_name(),
         SortKey::Size if a.is_dir => by_name(),
@@ -553,19 +553,28 @@ impl Browser {
 
     // Selection gestures on visible rows.
 
+    /// Runs `f` on the selection with a name lookup of the visible rows. The selection is
+    /// moved out for the duration so the lookup can borrow the entries.
+    fn with_selection<R>(&mut self, f: impl FnOnce(&mut Selection, NameAt) -> R) -> R {
+        let mut sel = std::mem::take(&mut self.selection);
+        let out = f(&mut sel, &|i| self.name_at(i));
+        self.selection = sel;
+        out
+    }
+
     pub fn click(&mut self, row: usize, ctrl: bool, shift: bool) {
         if row >= self.len() {
             return;
         }
-        let names = self.visible_names();
-        let at = |i: usize| names[i].clone();
-        if shift {
-            self.selection.extend(row, ctrl, &at);
-        } else if ctrl {
-            self.selection.toggle(row, at(row));
-        } else {
-            self.selection.select_only(row, at(row));
-        }
+        self.with_selection(|sel, at| {
+            if shift {
+                sel.extend(row, ctrl, at);
+            } else if ctrl {
+                sel.toggle(row, at(row));
+            } else {
+                sel.select_only(row, at(row));
+            }
+        });
     }
 
     /// Moves the cursor by `delta` rows (clamped). With `shift` the range from the anchor
@@ -586,24 +595,23 @@ impl Browser {
         if row >= self.len() {
             return;
         }
-        let names = self.visible_names();
-        let at = |i: usize| names[i].clone();
-        if shift {
-            self.selection.extend(row, false, &at);
-        } else {
-            self.selection.select_only(row, at(row));
-        }
+        self.with_selection(|sel, at| {
+            if shift {
+                sel.extend(row, false, at);
+            } else {
+                sel.select_only(row, at(row));
+            }
+        });
     }
 
     pub fn select_all(&mut self) {
-        let names = self.visible_names();
-        self.selection
-            .select_all(names.len(), &|i| names[i].clone());
+        let len = self.len();
+        self.with_selection(|sel, at| sel.select_all(len, at));
     }
 
     pub fn invert_selection(&mut self) {
-        let names = self.visible_names();
-        self.selection.invert(names.len(), &|i| names[i].clone());
+        let len = self.len();
+        self.with_selection(|sel, at| sel.invert(len, at));
     }
 }
 

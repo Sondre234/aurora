@@ -86,6 +86,8 @@ pub struct Files {
     pub generation: u64,
     /// The newest listing request nobody answered yet.
     pub awaiting: Option<u64>,
+    /// The directory changed while a read was in flight: read again when it lands.
+    pub stale: bool,
     pub sorting: bool,
     pub requested_sort: Sort,
     pub announce: bool,
@@ -165,6 +167,7 @@ impl Files {
             theme_rev: None,
             generation: 0,
             awaiting: None,
+            stale: false,
             sorting: false,
             requested_sort: Sort::default(),
             announce: false,
@@ -424,6 +427,9 @@ impl Files {
         }
         self.log_selection();
         self.damage_all(rt);
+        if std::mem::take(&mut self.stale) {
+            self.refresh(rt);
+        }
     }
 
     /// Re-sorts after a header click or Ctrl+1..4. Big directories go to the worker.
@@ -530,6 +536,8 @@ impl Files {
             Msg::DirChanged => {
                 if self.awaiting.is_none() {
                     self.refresh(rt);
+                } else {
+                    self.stale = true;
                 }
             }
             Msg::Mounts(text) => {
