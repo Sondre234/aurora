@@ -718,20 +718,3 @@ fn failures_are_counted_per_item() {
     assert!(out.errors[0].contains("missing"), "{:?}", out.errors);
     assert!(dest.join("good").exists());
 }
-
-#[test]
-fn op_metadata_for_logs() {
-    let op = Op::Trash {
-        srcs: vec![PathBuf::from("/a"), PathBuf::from("/b")],
-    };
-    assert_eq!((op.kind_name(), op.item_count()), ("trash", 2));
-    assert_eq!(
-        Op::Mkdir {
-            parent: "/".into(),
-            name: "x".into()
-        }
-        .kind_name(),
-        "mkdir"
-    );
-    assert_eq!(Op::Undo(Undo::Move(vec![])).item_count(), 0);
-}

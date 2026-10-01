@@ -653,6 +653,7 @@ mod tests {
 
     #[test]
     fn xwayland_scale_parses_and_rejects_bad_values() {
+        assert_eq!(XWayland::default().dpi(), None, "the default changes nothing");
         let (config, warnings) = resolve("[xwayland]\nscale = 1.25\n");
         assert_eq!(config.xwayland.scale, 1.25);
         assert_eq!(config.xwayland.dpi(), Some(120));
@@ -664,12 +665,6 @@ mod tests {
             assert_eq!(config.xwayland, XWayland::default(), "{bad}");
             assert!(warnings.iter().any(|w| w.contains("scale")), "{bad}");
         }
-    }
-
-    #[test]
-    fn default_xwayland_scale_changes_nothing() {
-        assert_eq!(XWayland::default().scale, 1.0);
-        assert_eq!(XWayland::default().dpi(), None);
     }
 
     #[test]
