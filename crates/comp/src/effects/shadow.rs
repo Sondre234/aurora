@@ -133,6 +133,7 @@ pub fn shadow_reach(blur: i32) -> i32 {
 }
 
 /// CPU twin of the shadow falloff for signed distance `d` (negative inside).
+#[cfg(test)]
 pub fn shadow_falloff(d: f32, sigma: f32) -> f32 {
     let t = ((d + sigma) / (2.0 * sigma)).clamp(0.0, 1.0);
     1.0 - t * t * (3.0 - 2.0 * t)

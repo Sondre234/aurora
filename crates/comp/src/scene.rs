@@ -57,7 +57,6 @@ render_elements! {
 /// Per-frame inputs of the effects, built once per render and passed down to the builder.
 /// Shadows, corners, blur and animated elements read their settings here instead of reaching
 /// into the config or the renderer.
-#[allow(dead_code)] // read by the M3 step 2 streams
 pub struct SceneFx<'a> {
     pub decoration: &'a Decoration,
     /// Compiled shader programs; `None` only before `effects::init` ran.
@@ -85,7 +84,6 @@ impl<'a> SceneFx<'a> {
 
     /// Whether effects may draw on `output`: not over a fullscreen window, which must stay
     /// eligible for direct scanout.
-    #[allow(dead_code)]
     pub fn enabled_on(&self, output: &Output) -> bool {
         !top_hidden(output)
     }

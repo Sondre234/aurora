@@ -4,7 +4,6 @@
 //! warnings. The ladder: a missing file gives defaults, a TOML syntax error keeps the
 //! previous config (defaults at first start), a bad value or list item is dropped alone,
 //! an unknown key is only a warning. Nothing here can fail startup or a reload.
-#![allow(dead_code)] // most settings are consumed by later M2 steps
 
 use std::{
     path::{Path, PathBuf},

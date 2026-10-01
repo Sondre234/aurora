@@ -13,18 +13,21 @@ impl Lerp for f32 {
     }
 }
 
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct PointF {
     pub x: f32,
     pub y: f32,
 }
 
+#[cfg(test)]
 impl PointF {
     pub fn new(x: f32, y: f32) -> Self {
         Self { x, y }
     }
 }
 
+#[cfg(test)]
 impl Lerp for PointF {
     fn lerp(self, to: Self, t: f32) -> Self {
         Self::new(self.x.lerp(to.x, t), self.y.lerp(to.y, t))
@@ -130,12 +133,14 @@ impl<T: Lerp + PartialEq> Animated<T> {
 
 /// One frame's view of time. `begin` at the start of a frame, read animated values through
 /// `sample` (which notes whether any is still moving), and ask `busy` at the end.
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Timeline {
     now: Duration,
     busy: bool,
 }
 
+#[cfg(test)]
 impl Timeline {
     pub fn begin(&mut self, now: Duration) {
         self.now = now;

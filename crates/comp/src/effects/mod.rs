@@ -3,7 +3,6 @@
 //! no frame ever pays for compilation. Streams add their programs to `Programs` and one
 //! `compile` line each; the element code lives in sibling modules (`corners`, `shadow`,
 //! `blur`).
-#![allow(dead_code)] // filled in by the M3 step 2 streams
 
 use smithay::backend::renderer::gles::{GlesError, GlesPixelProgram, GlesRenderer, GlesTexProgram};
 

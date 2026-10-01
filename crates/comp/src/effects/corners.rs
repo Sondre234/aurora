@@ -104,6 +104,7 @@ pub fn corner_squares<K>(rect: Rectangle<i32, K>, r: i32) -> [Rectangle<i32, K>;
 
 /// Signed distance from `p` to a rounded rectangle at `loc` with `size` and corner `radius`:
 /// negative inside. The shaders compute the same thing.
+#[cfg(test)]
 pub fn rounded_distance(p: (f32, f32), loc: (f32, f32), size: (f32, f32), radius: f32) -> f32 {
     let (hx, hy) = (size.0 * 0.5, size.1 * 0.5);
     let qx = (p.0 - loc.0 - hx).abs() - (hx - radius);
@@ -113,6 +114,7 @@ pub fn rounded_distance(p: (f32, f32), loc: (f32, f32), size: (f32, f32), radius
 }
 
 /// Pixel coverage for a signed distance, one pixel wide antialiasing.
+#[cfg(test)]
 pub fn coverage(distance: f32) -> f32 {
     (0.5 - distance).clamp(0.0, 1.0)
 }
