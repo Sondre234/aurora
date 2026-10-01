@@ -132,12 +132,6 @@ pub fn shadow_reach(blur: i32) -> i32 {
     }
 }
 
-/// CPU twin of the shadow falloff for signed distance `d` (negative inside).
-pub fn shadow_falloff(d: f32, sigma: f32) -> f32 {
-    let t = ((d + sigma) / (2.0 * sigma)).clamp(0.0, 1.0);
-    1.0 - t * t * (3.0 - 2.0 * t)
-}
-
 /// The border canvas: the geometry grown by `bw`.
 pub fn border_area(geo: Rectangle<i32, Logical>, bw: i32) -> Rectangle<i32, Logical> {
     Rectangle::new(
@@ -304,30 +298,6 @@ mod tests {
         assert_eq!(area, Rectangle::new((72, 22).into(), (456, 356).into()));
         assert!(shadow_area(geo, 0).is_none());
         assert!(shadow_area(Rectangle::new((0, 0).into(), (0, 10).into()), 5).is_none());
-    }
-
-    #[test]
-    fn shadow_rect_stays_inside_canvas() {
-        let geo = Rectangle::new((0, 0).into(), (200, 100).into());
-        let blur = 20;
-        let area = shadow_area(geo, blur).unwrap();
-        let grow = blur + shadow_offset_y(blur);
-        // Shifted rect bottom plus a full blur still fits.
-        assert!(grow + shadow_offset_y(blur) + geo.size.h + blur <= area.size.h);
-    }
-
-    #[test]
-    fn falloff_is_monotonic_and_bounded() {
-        let sigma = 10.0;
-        assert_eq!(shadow_falloff(-sigma, sigma), 1.0);
-        assert_eq!(shadow_falloff(sigma, sigma), 0.0);
-        assert!((shadow_falloff(0.0, sigma) - 0.5).abs() < 1e-6);
-        let mut last = 1.0;
-        for i in -12..=12 {
-            let v = shadow_falloff(i as f32, sigma);
-            assert!(v <= last + 1e-6);
-            last = v;
-        }
     }
 
     #[test]

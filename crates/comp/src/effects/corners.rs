@@ -102,21 +102,6 @@ pub fn corner_squares<K>(rect: Rectangle<i32, K>, r: i32) -> [Rectangle<i32, K>;
     ]
 }
 
-/// Signed distance from `p` to a rounded rectangle at `loc` with `size` and corner `radius`:
-/// negative inside. The shaders compute the same thing.
-pub fn rounded_distance(p: (f32, f32), loc: (f32, f32), size: (f32, f32), radius: f32) -> f32 {
-    let (hx, hy) = (size.0 * 0.5, size.1 * 0.5);
-    let qx = (p.0 - loc.0 - hx).abs() - (hx - radius);
-    let qy = (p.1 - loc.1 - hy).abs() - (hy - radius);
-    let outside = (qx.max(0.0).powi(2) + qy.max(0.0).powi(2)).sqrt();
-    outside + qx.max(qy).min(0.0) - radius
-}
-
-/// Pixel coverage for a signed distance, one pixel wide antialiasing.
-pub fn coverage(distance: f32) -> f32 {
-    (0.5 - distance).clamp(0.0, 1.0)
-}
-
 /// A window surface clipped to `geo` (output-space physical pixels) with rounded corners.
 pub struct RoundedSurface {
     inner: WaylandSurfaceRenderElement<GlesRenderer>,
@@ -274,21 +259,5 @@ mod tests {
         let c = corner_squares(r, 8);
         assert_eq!(c[0], Rectangle::new((10, 20).into(), (8, 8).into()));
         assert_eq!(c[3], Rectangle::new((102, 62).into(), (8, 8).into()));
-    }
-
-    #[test]
-    fn distance_is_negative_inside_and_clips_corners() {
-        let d = |p| rounded_distance(p, (0.0, 0.0), (100.0, 50.0), 10.0);
-        assert!(d((50.0, 25.0)) < -20.0);
-        assert!(d((-1.0, 25.0)) > 0.0);
-        assert_eq!(coverage(d((0.5, 0.5))), 0.0);
-        assert_eq!(coverage(d((50.0, 0.5))), 1.0);
-        assert_eq!(coverage(d((0.5, 25.0))), 1.0);
-    }
-
-    #[test]
-    fn square_corners_when_radius_zero() {
-        let d = rounded_distance((0.5, 0.5), (0.0, 0.0), (100.0, 50.0), 0.0);
-        assert_eq!(coverage(d), 1.0);
     }
 }

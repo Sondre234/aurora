@@ -3,7 +3,7 @@
 //! Lookup goes through the icon theme (`freedesktop-icons`), decoding happens on a worker
 //! thread ([`IconLoader`]) so a cold icon never stalls a keystroke, and the result is a
 //! small pre-rasterized RGBA image (PNG decoded, SVG rendered with resvg, both resampled
-//! to `px` pixels). The main thread keeps them in [`IconCache`]: owner the launcher,
+//! to `px` pixels). The main thread keeps them in [`IconCache`]: owned by each client,
 //! invalidated when the icon theme or the app index changes, LRU under a byte budget,
 //! with a `perf` tracing metric (see `aurora_ui::cache`).
 

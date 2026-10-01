@@ -603,3 +603,31 @@ fn resize_and_scale_change_damage_everything() {
     assert_eq!(ui.take_damage(), vec![Rect::new(0.0, 0.0, 60.0, 40.0)]);
     assert!(!ui.needs_redraw());
 }
+
+#[test]
+fn canvas_paints_only_the_damaged_part_of_its_rect() {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    let seen: Rc<RefCell<Vec<(Rect, Rect)>>> = Rc::default();
+    let log = seen.clone();
+    let canvas = Node::canvas(move |p, node, region| {
+        log.borrow_mut().push((node, region));
+        p.fill_rect(region, RED);
+    })
+    .size(Dim::Fill(1.0), Dim::Fill(1.0));
+    let mut ui = ui_of(canvas, 100.0, 50.0);
+    let mut caches = PaintCaches::new(ui.text().clone());
+    let mut buf = PixelBuffer::new(100, 50);
+    ui.draw(&mut buf.painter(1.0, &mut caches));
+    assert_eq!(seen.borrow().len(), 1);
+    assert_eq!(seen.borrow()[0].1, Rect::new(0.0, 0.0, 100.0, 50.0));
+
+    seen.borrow_mut().clear();
+    ui.damage(Rect::new(10.0, 10.0, 20.0, 5.0));
+    assert!(ui.needs_redraw());
+    ui.draw(&mut buf.painter(1.0, &mut caches));
+    let seen = seen.borrow();
+    assert_eq!(seen.len(), 1);
+    assert_eq!(seen[0].0, Rect::new(0.0, 0.0, 100.0, 50.0));
+    assert_eq!(seen[0].1, Rect::new(10.0, 10.0, 20.0, 5.0));
+}

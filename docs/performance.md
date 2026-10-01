@@ -106,3 +106,31 @@ blocks on a client. Targets below are initial and get measured on the hardware c
 
 QA proves the log contract (`scripts/qa-nested.sh ipc services theme shell launcher
 notifd lock`); memory, idle CPU and toggle latency are on the hardware checklist.
+
+## M5 cache budgets
+
+`term` and `files` are ordinary windows (one process each), so their cost never lands on the
+compositor's paint path. Same cache rules as above: owner, invalidation, byte budget, metric.
+Metrics are `perf:` lines (info, on change or every 5 s while active, never while idle).
+Budgets are initial and measured on the hardware checklist in [m5-plan.md](m5-plan.md).
+
+| Cache / item | Owner | Invalidated by | Budget / eviction | Metric |
+|---|---|---|---|---|
+| Term glyph cache (coverage masks per char, bold, italic; fg applied at blit) | `term` render | theme change (fonts/scale), never by color | per process, byte budget (initial 16 MB), LRU | hit rate, bytes, evictions |
+| Term scrollback | `term` backend | `--scrollback`, resize reflow | 10 000 lines default, hard cap 200 000; steady-state RSS under 150 MB | `dump: term cols= rows= scrollback=` |
+| Term pty reads | `term` pty | n/a | at most 64 KiB per loop wakeup, so floods never starve input or painting | n/a |
+| Term repaint | `term` app | emulator line damage | at most one repaint per frame callback, shm damage rects only; idle costs zero frames; cursor blink repaints one cell and stops when unfocused | `term: frame ms=<n>` (debug) |
+| Files listing | `files` model | directory change (debounced `notify`), navigation | generation-tagged worker reads, stale results dropped; 100 000 entries virtualized (only visible rows laid out and painted) | `files: navigate path= entries=` |
+| Files icons | `files` view | theme change, scale change | pre-rasterized at the display scale, byte-budgeted LRU (initial 16 MB) | hit rate, bytes, evictions |
+| Files operations | `files` ops worker | n/a | one worker, progress and cancel, never on the UI thread | `files: op start/done` |
+
+Frame-time and resource targets for M5:
+
+- Idle terminal and idle file manager schedule no frames and no timers except the focused
+  cursor blink; an idle `term` logs no repaints.
+- Full 200x60 screen paint in `term` under 4 ms in release.
+- `cat` of a 100 MB file leaves compositor frame time unaffected.
+- Theme change invalidates the glyph cache and repaints once, no restart.
+
+QA proves the log contract and the flood case (`scripts/qa-nested.sh term files`); paint
+time, RSS, idle CPU, 100k-entry scrolling and 144 Hz behavior are on the hardware checklist.

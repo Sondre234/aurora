@@ -85,6 +85,12 @@ impl Ui {
         self.full_damage = true;
     }
 
+    /// Repaint a logical rect at the next frame without touching the tree (what a
+    /// [`crate::widget::Canvas`] needs when its app state changed).
+    pub fn damage(&mut self, r: Rect) {
+        self.damage.add(r);
+    }
+
     /// True when a frame would change pixels. An idle UI answers false forever.
     pub fn needs_redraw(&self) -> bool {
         self.layout_dirty || self.full_damage || !self.damage.is_empty()

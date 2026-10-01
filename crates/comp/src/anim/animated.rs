@@ -1,4 +1,4 @@
-//! Values that move toward a target over time, and the timeline that drives them.
+//! Values that move toward a target over time.
 use std::time::Duration;
 
 use super::Curve;
@@ -10,24 +10,6 @@ pub trait Lerp: Copy {
 impl Lerp for f32 {
     fn lerp(self, to: f32, t: f32) -> f32 {
         self + (to - self) * t
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct PointF {
-    pub x: f32,
-    pub y: f32,
-}
-
-impl PointF {
-    pub fn new(x: f32, y: f32) -> Self {
-        Self { x, y }
-    }
-}
-
-impl Lerp for PointF {
-    fn lerp(self, to: Self, t: f32) -> Self {
-        Self::new(self.x.lerp(to.x, t), self.y.lerp(to.y, t))
     }
 }
 
@@ -128,35 +110,6 @@ impl<T: Lerp + PartialEq> Animated<T> {
     }
 }
 
-/// One frame's view of time. `begin` at the start of a frame, read animated values through
-/// `sample` (which notes whether any is still moving), and ask `busy` at the end.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct Timeline {
-    now: Duration,
-    busy: bool,
-}
-
-impl Timeline {
-    pub fn begin(&mut self, now: Duration) {
-        self.now = now;
-        self.busy = false;
-    }
-
-    pub fn now(&self) -> Duration {
-        self.now
-    }
-
-    pub fn sample<T: Lerp + PartialEq>(&mut self, a: &Animated<T>) -> T {
-        self.busy |= a.is_active(self.now);
-        a.value(self.now)
-    }
-
-    /// Whether any sampled value is still moving, so another frame is needed.
-    pub fn busy(&self) -> bool {
-        self.busy
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -204,15 +157,10 @@ mod tests {
 
     #[test]
     fn zero_duration_snaps() {
-        let mut a = Animated::new(PointF::new(1.0, 2.0));
-        a.retarget(
-            PointF::new(5.0, 6.0),
-            ms(10),
-            Duration::ZERO,
-            Curve::EASE_OUT,
-        );
+        let mut a = Animated::new(1.0f32);
+        a.retarget(5.0, ms(10), Duration::ZERO, Curve::EASE_OUT);
         assert!(!a.is_active(ms(10)));
-        assert_eq!(a.value(ms(10)), PointF::new(5.0, 6.0));
+        assert_eq!(a.value(ms(10)), 5.0);
     }
 
     #[test]
@@ -227,21 +175,5 @@ mod tests {
         let r = a.value(ms(50));
         assert!((r.x - 5.0).abs() < 1e-4 && (r.y - 10.0).abs() < 1e-4);
         assert!((r.w - 150.0).abs() < 1e-4 && (r.h - 200.0).abs() < 1e-4);
-    }
-
-    #[test]
-    fn timeline_reports_busy_only_while_moving() {
-        let mut a = Animated::new(0.0f32);
-        let rest = Animated::new(1.0f32);
-        a.retarget(1.0, ms(0), ms(100), Curve::Linear);
-        let mut tl = Timeline::default();
-        tl.begin(ms(50));
-        tl.sample(&rest);
-        assert!(!tl.busy());
-        tl.sample(&a);
-        assert!(tl.busy());
-        tl.begin(ms(100));
-        tl.sample(&a);
-        assert!(!tl.busy());
     }
 }

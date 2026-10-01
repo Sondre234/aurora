@@ -220,6 +220,55 @@ impl ShapedText {
     }
 }
 
+/// Size of one cell of a monospace grid, in whole device pixels so rows and columns of
+/// cells tile without seams or blurry edges at any (fractional) scale.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CellMetrics {
+    /// Cell width in device px (at least 1).
+    pub width: u32,
+    /// Cell height (line pitch) in device px (at least 1).
+    pub height: u32,
+    /// Baseline offset from the top of the cell in device px.
+    pub baseline: u32,
+    /// Device pixels per logical pixel these metrics were measured at.
+    pub scale: f32,
+}
+
+impl CellMetrics {
+    /// Snap measured (fractional, device px) font metrics to whole pixels.
+    pub fn snap(advance: f32, line_height: f32, baseline: f32, scale: f32) -> Self {
+        let whole = |v: f32| v.round().max(1.0) as u32;
+        Self {
+            width: whole(advance),
+            height: whole(line_height),
+            baseline: baseline.round().max(0.0) as u32,
+            scale: scale.max(0.25),
+        }
+    }
+
+    pub fn logical_width(&self) -> f32 {
+        self.width as f32 / self.scale
+    }
+
+    pub fn logical_height(&self) -> f32 {
+        self.height as f32 / self.scale
+    }
+
+    /// Whole cells that fit a logical area (columns, rows); at least 1x1.
+    pub fn grid_for(&self, w: f32, h: f32) -> (u32, u32) {
+        let fit = |len: f32, cell: u32| ((len.max(0.0) * self.scale) as u32 / cell).max(1);
+        (fit(w, self.width), fit(h, self.height))
+    }
+
+    /// Logical size of a `cols` x `rows` grid.
+    pub fn size_of(&self, cols: u32, rows: u32) -> (f32, f32) {
+        (
+            (cols * self.width) as f32 / self.scale,
+            (rows * self.height) as f32 / self.scale,
+        )
+    }
+}
+
 /// A rasterized glyph bitmap.
 pub(crate) struct GlyphImage {
     pub left: i32,
@@ -328,6 +377,23 @@ impl TextSystem {
         let bytes = shaped.bytes() + key.text.len();
         i.shaped.insert(key, shaped.clone(), bytes);
         shaped
+    }
+
+    /// Cell metrics of `style` (its family should be monospace) at `scale`: the advance of
+    /// the face and `style.line_height` snapped to whole device pixels. Cached through the
+    /// shaped-text cache.
+    pub fn cell_metrics(&self, style: &TextStyle, scale: f32) -> CellMetrics {
+        const SAMPLE: &str = "MMMMMMMMMM";
+        let scale = scale.max(0.25);
+        let s = self.shape(SAMPLE, style, scale, None);
+        let n = SAMPLE.len() as f32;
+        let line = (style.size * scale).max(1.0) * style.line_height;
+        CellMetrics::snap(
+            s.width() * scale / n,
+            line.ceil(),
+            s.baseline() * scale,
+            scale,
+        )
     }
 
     /// Cached coverage/color bitmap of one glyph.

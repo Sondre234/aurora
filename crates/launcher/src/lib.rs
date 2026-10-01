@@ -8,8 +8,8 @@
 //! `Spawn` request, or directly when IPC is unavailable.
 //!
 //! Module map: [`fuzzy`] (scoring and highlight positions), [`entry`] (desktop entries,
-//! `Exec` field codes), [`index`] (scan, diff, search), [`frecency`], [`icons`] (theme
-//! lookup, rasterizing, byte-budgeted cache), [`watch`] (debounced directory watcher),
+//! `Exec` field codes), [`index`] (scan, diff, search), [`frecency`], [`system`] (session glue; icons live in
+//! `aurora-icons`), [`watch`] (debounced directory watcher),
 //! [`ipc`] (compositor connection), [`control`] (the `toggle` socket), [`view`] (widget
 //! tree), [`app`] (the daemon), [`hook`] (documented LLM extension trait, unimplemented).
 
@@ -19,7 +19,6 @@ pub mod entry;
 pub mod frecency;
 pub mod fuzzy;
 pub mod hook;
-pub mod icons;
 pub mod index;
 pub mod ipc;
 pub mod system;

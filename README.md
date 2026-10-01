@@ -35,8 +35,8 @@ file manager never takes down the session.
 | `notifd` | `aurora-notifd`: `org.freedesktop.Notifications` |
 | `lock` | `aurora-lock`: `ext-session-lock` screen locker |
 | `settingsd` | Config daemon + GUI |
-| `term` | GPU terminal |
-| `files` | File manager |
+| `term` | `aurora-term`: terminal (alacritty_terminal emulation, tiny-skia cell renderer first, GPU backend later) |
+| `files` | `aurora-files`: file manager |
 
 Crates are added as their milestone is reached.
 
@@ -47,7 +47,7 @@ Crates are added as their milestone is reached.
 - [x] **M2** Usable: tiling, workspaces, XWayland, layer-shell, config, multi-monitor. Verified on hardware
 - [x] **M3** The look: animation engine, rounded corners, shadows, blur, live overview, X11 scaling. Verified on hardware
 - [x] **M4** Services: `ipc`, `theme`, `ui`, shell bar, launcher, notifd, lock. Verified on hardware. Plan in [docs/m4-plan.md](docs/m4-plan.md)
-- [ ] **M5** `term` and `files`
+- [ ] **M5** `term` and `files`. Plan in [docs/m5-plan.md](docs/m5-plan.md)
 
 ## Using it (M2)
 
@@ -161,6 +161,50 @@ Scripted checks: `scripts/qa-nested.sh ipc services theme shell launcher notifd 
 (same rules as before: a headless host, never your live session). A scenario whose binary
 is not built is skipped. Fullscreen windows hide the bar (Top layer); the launcher and
 toasts use the Overlay layer.
+
+## Using it (M5)
+
+Status: in progress, plan in [docs/m5-plan.md](docs/m5-plan.md). The `ui` additions the apps
+need (xdg-toplevel surfaces, clipboard and primary selection, cursor shape, monospace cell
+metrics) are in. `aurora-term` and `aurora-files` land per stream; until a binary exists
+below, its section describes the plan, not something you can run yet. Neither is started for
+you: they are ordinary windows, one process per window, launched by a bind or the launcher.
+
+**Binds.** Suggested, not bound by default (put them in `[keybinds]`; `Mod+q` is `spawn kitty`
+unless you rebind it):
+
+```toml
+"Mod+q" = "spawn aurora-term"
+"Mod+e" = "spawn aurora-files"
+```
+
+**aurora-term** (not yet merged). Terminal on `alacritty_terminal` emulation, rendered with
+tiny-skia and cosmic-text into wl_shm (the "GPU terminal" backend is a later replacement of
+the draw loop only). Flags: `-e cmd args...`, `--cwd`, `--title`, `--class`, `--hold`,
+`--scrollback N`. Without `-e` it runs `$SHELL`. Copy and paste with Ctrl+Shift+C / Ctrl+Shift+V,
+selecting also fills the primary selection (middle-click pastes). Not in v1: ligatures, kitty
+keyboard and graphics protocols, sixel, tabs and splits (the compositor tiles), search in
+scrollback, IME.
+
+**aurora-files** (not yet merged). File manager, list view only: `aurora-files [dir]`
+(default `$HOME`). Ctrl+L path bar, Ctrl+H hidden files, `/` filter, F2 rename, Delete moves
+to the FreeDesktop trash (home volume only), Shift+Delete deletes permanently after a
+confirm, copy/cut/paste also over the Wayland clipboard as `text/uri-list`. It refuses to
+operate on `/` or `$HOME` itself. Not in v1: thumbnails, grid view, tabs, archives, network
+mounts, trash restore UI.
+
+**Theme and IPC.** Both follow `theme.toml` live (monospace font from `[fonts]`) and repaint
+without a restart. Neither needs the IPC socket: without it they read `theme.toml` once
+and spawn through plain `Command`.
+
+**Test hooks.** Builds with the `qa-hooks` cargo feature (QA only, never a default build)
+read `AURORA_FILES_TEST_SCRIPT` / `AURORA_TERM_TEST_INPUT` to fake input.
+
+Scripted checks: `scripts/qa-nested.sh term files` against a headless host, never your live
+session. They skip whatever is not built, and run the key-script and input-file parts only
+for `qa-hooks` builds (`cargo build --features qa-hooks` in the app crate). The scenarios
+were written from the plan before the binaries existed; check the PASS/FAIL list once the
+apps land.
 
 ## Performance
 

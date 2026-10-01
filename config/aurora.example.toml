@@ -233,3 +233,10 @@ scale = 1
 # built-in defaults stay as they are):
 #   "Mod+space" = "spawn aurora-launcher toggle"
 #   "Mod+l" = "lock"
+#
+# Suggested binds for the M5 apps (aurora-term, aurora-files). They are ordinary windows, not
+# services: one process per window, started by a bind (or the launcher), no [services] entry.
+# The default "Mod+q" above spawns kitty; rebind it to use aurora-term:
+#   "Mod+q" = "spawn aurora-term"
+#   "Mod+e" = "spawn aurora-files"
+# Both follow theme.toml live and work without the IPC socket.

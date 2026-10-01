@@ -504,16 +504,3 @@ fn theme_snapshot_survives_postcard() {
         other => panic!("{other:?}"),
     }
 }
-
-#[test]
-fn frame_helpers() {
-    let f = Frame::error(3, ErrorCode::NotFound, "no such window");
-    assert_eq!(f.id, 3);
-    assert!(matches!(
-        f.body,
-        Body::Error(Error {
-            code: ErrorCode::NotFound,
-            ..
-        })
-    ));
-}

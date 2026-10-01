@@ -13,6 +13,16 @@ pub(crate) fn device_size(logical: (u32, u32), scale120: u32) -> (u32, u32) {
     (f(logical.0), f(logical.1))
 }
 
+/// Surface size after a configure: an axis the compositor left at 0 ("you choose") takes
+/// the fallback, and no axis is ever 0.
+pub(crate) fn pick_size(configured: (u32, u32), fallback: (u32, u32)) -> (u32, u32) {
+    let axis = |c: u32, f: u32| if c > 0 { c } else { f.max(1) };
+    (
+        axis(configured.0, fallback.0),
+        axis(configured.1, fallback.1),
+    )
+}
+
 /// Logical damage to whole device pixels, one pixel of slack, clamped to the buffer.
 pub(crate) fn device_rect(r: Rect, scale: f32, bounds: (u32, u32)) -> Rect {
     let x0 = ((r.x * scale).floor() - 1.0).max(0.0);
@@ -112,6 +122,13 @@ mod tests {
             keysym,
             utf8: utf8.map(str::to_string),
         }
+    }
+
+    #[test]
+    fn pick_size_fills_open_axes() {
+        assert_eq!(pick_size((300, 200), (800, 600)), (300, 200));
+        assert_eq!(pick_size((0, 200), (800, 600)), (800, 200));
+        assert_eq!(pick_size((0, 0), (0, 0)), (1, 1));
     }
 
     #[test]

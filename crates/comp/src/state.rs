@@ -135,7 +135,6 @@ impl Aurora {
         let captures = crate::capture::Captures::new(&dh);
         let mut seat_state = SeatState::new();
         let mut seat: Seat<Self> = seat_state.new_wl_seat(&dh, backend.seat_name());
-        // Hotplug tracking arrives with the DRM backend (M1).
         let keyboard = seat
             .add_keyboard(Default::default(), REPEAT_DELAY, REPEAT_RATE)
             .map_err(|err| format!("failed to add the keyboard: {err}"))?;

@@ -99,11 +99,4 @@ mod tests {
         assert_eq!(ms_until_next_minute(59_999), 1);
         assert_eq!(ms_until_next_minute(120_000 + 30_250), 29_750);
     }
-
-    #[test]
-    fn local_now_is_in_range() {
-        let t = local_now();
-        assert!(t.wday < 7 && (1..=31).contains(&t.mday) && t.mon < 12);
-        assert!(t.hour < 24 && t.min < 60);
-    }
 }

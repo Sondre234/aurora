@@ -14,6 +14,8 @@
 //! with [`Align`]. A stack overlaps its children, `justify` aligning horizontally and
 //! `align` vertically. Wrapping labels get the width their parent offers.
 
+use std::rc::Rc;
+
 use crate::geom::{Color, Insets, Point, Rect, Size};
 use crate::input::Id;
 use crate::painter::{Image, Painter};
@@ -123,6 +125,18 @@ pub struct Icon {
     pub image: Option<Image>,
     pub size: Size,
     pub tint: Option<Color>,
+}
+
+/// Paint callback of a [`Canvas`]: the painter (clipped to the damaged region), the
+/// node's rect and the damaged region, both in logical pixels of the surface.
+pub type CanvasPaint = Rc<dyn Fn(&mut dyn Painter, Rect, Rect)>;
+
+/// A leaf the app paints itself (a terminal cell grid, a custom view). It has no
+/// intrinsic size: give it `Fill` or `Px` dimensions. Repaint parts of it with
+/// [`crate::Ui::damage`].
+#[derive(Clone)]
+pub struct Canvas {
+    pub paint: CanvasPaint,
 }
 
 /// One row of a [`List`].
@@ -292,6 +306,7 @@ pub enum Kind {
     Spacer,
     Label(Label),
     Icon(Icon),
+    Canvas(Canvas),
     List(Box<List>),
     Input(Box<TextInput>),
 }
@@ -388,6 +403,14 @@ impl Node {
             Style::default(),
             Vec::new(),
         )
+    }
+
+    /// A leaf painted by `paint(painter, node_rect, damaged_region)`.
+    pub fn canvas(paint: impl Fn(&mut dyn Painter, Rect, Rect) + 'static) -> Self {
+        let c = Canvas {
+            paint: Rc::new(paint),
+        };
+        Self::new(Kind::Canvas(c), Style::default(), Vec::new())
     }
 
     pub fn list(list: List) -> Self {
@@ -592,7 +615,7 @@ impl Node {
         }
         .map(|w| (w - pad.horizontal()).max(0.0));
         let content = match &self.kind {
-            Kind::Spacer => Size::default(),
+            Kind::Spacer | Kind::Canvas(_) => Size::default(),
             Kind::Icon(i) => i.size,
             Kind::Label(l) => {
                 let max = matches!(l.style.wrap, TextWrap::Word { .. })
@@ -874,6 +897,11 @@ impl Node {
                         i.size.h,
                     );
                     p.draw_image(img, dest, i.tint);
+                }
+            }
+            Kind::Canvas(c) => {
+                if let Some(area) = r.intersect(region) {
+                    (c.paint)(p, r, area);
                 }
             }
             Kind::List(l) => self.paint_list(p, cx, l),

@@ -21,6 +21,15 @@
 #   notifd    aurora-notifd on a PRIVATE dbus-daemon only: shown, replace, close, expiry
 #   lock      aurora-lock: surfaces, lock: locked, binds refused, emergency chords, client
 #             death stays locked, unlock only with the right test credential (else SKIP part)
+#            term files   (M5; written against the log contract in docs/m5-plan.md, SKIP when
+#            aurora-term / aurora-files are not built in AURORA_BIN_DIR; the key-script and
+#            input-file parts need binaries built with the `qa-hooks` cargo feature)
+#   term      aurora-term -e fixture: ready/spawn lines, toplevel + glyph pixels, TERM env, SIGWINCH
+#             on layout change, exit closes the window, typed line round trip, 50 MB flood with a
+#             responsive compositor, live theme, kill leaves the rest alone, works without IPC
+#   files     aurora-files on a fixture tree: ready entries, toplevel, live theme, then via
+#             AURORA_FILES_TEST_SCRIPT select/mkdir/rename/copy/move/trash/delete with filesystem
+#             and $XDG_DATA_HOME/Trash assertions (scratch only), chmod 000 dir, kill, no IPC
 #
 # Isolation: every scenario sets AURORA_IPC_SOCK to a file in its scratch dir (never touch the
 # live $XDG_RUNTIME_DIR/aurora/ipc.sock) and points DBUS_SESSION_BUS_ADDRESS at a dead path, so
@@ -1497,7 +1506,347 @@ EOF
     end_scenario
 }
 
-ALL=(keys emergency reload tiling workspaces layer xwayland multi robust anim effects overview xscale ipc services theme shell launcher notifd lock)
+# ------------------------------------------------------------------------------------------
+# M5 scenarios (docs/m5-plan.md log contract). Written against the plan before the apps existed;
+# a scenario whose binary is not built SKIPs. Fixtures live in scripts/qa/.
+# Apps run with HOME, XDG_CONFIG_HOME and XDG_DATA_HOME inside the scenario's scratch dir, so they
+# never see the real home, theme or trash.
+
+Q=$ROOT/scripts/qa
+APPENV=()
+# binhas BIN STRING: the binary contains STRING (is the qa-hooks feature compiled in?).
+binhas() { grep -qaF -- "$2" "$BINDIR/$1" 2>/dev/null; }
+# appc BIN ARGS...: an app as a Wayland client in the scenario's hermetic environment.
+# APPENV holds extra NAME=value pairs for the next call.
+appc() {
+    local b=$1
+    shift
+    client env HOME="$SDIR/home" XDG_CONFIG_HOME="$SDIR/cfg" XDG_DATA_HOME="$SDIR/data" \
+        QA_OUT="$SDIR/run" "${APPENV[@]+"${APPENV[@]}"}" "$BINDIR/$b" "$@"
+}
+m5_begin() {
+    begin "$1"
+    mkdir -p "$SDIR/home" "$SDIR/data"
+    APPENV=()
+}
+# win_wait APP_ID SECS: until the compositor dump lists a window with that app_id (DUMP is fresh).
+win_wait() {
+    local i
+    for i in $(seq $(($2 * 2))); do
+        dump || return 1
+        [ -n "$(dumpwin "$1" rect)" ] && return 0
+        sleep 0.5
+    done
+    return 1
+}
+# expect_count REGEX N SECS LABEL: at least N client log lines match.
+expect_count() {
+    if wait_client_count "$1" "$2" "$3"; then pass "client log: $4 (x$2)"; else fail "MISSING log contract line: $4 (want $2)"; fi
+}
+# samples PNG APP_ID: five pixels along the lower part of that window (DUMP must be fresh).
+samples() {
+    local x y w h i out=""
+    read -r x y w h <<<"$(rect4 "$(dumpwin "$2" rect)")"
+    for i in 1 2 3 4 5; do out+="$(pixel "$1" $((x + w * i / 6)) $((y + h * 4 / 5))) "; done
+    echo "$out"
+}
+# changed "A B C.." "D E F.." -> how many positions differ
+changed() {
+    local -a a b
+    local i n=0
+    read -ra a <<<"$1"
+    read -ra b <<<"$2"
+    for i in "${!a[@]}"; do [ "${a[$i]}" = "${b[$i]:-}" ] || n=$((n + 1)); done
+    echo "$n"
+}
+# theme_follow APP_ID LOG_REGEX: pushes a new bg through theme.toml + reload; the app logs its
+# theme line and its pixels change without a restart. The app window must be mapped.
+theme_follow() {
+    local app=$1 re=$2 before after sb sa base
+    win_wait "$app" 10 || { fail "$app window not mapped for the theme check"; return; }
+    sleep 0.5
+    snap before "$app-theme1" -o winit
+    sb=$(samples "$before" "$app")
+    base=$(clog | grep -acE -- "$re")
+    printf '[palette]\nbg = "#443322"\n' >"$SDIR/cfg/aurora/theme.toml"
+    mark
+    kill -USR1 "$APID"
+    need 'theme: changed rev=[0-9]+' 3
+    expect_count "$re" $((base + 1)) 5 "$re"
+    sleep 1
+    snap after "$app-theme2" -o winit
+    if [ -z "$before" ] || [ -z "$after" ]; then return; fi
+    dump
+    sa=$(samples "$after" "$app")
+    if [ "$(changed "$sb" "$sa")" -ge 3 ]; then pass "$app repainted with the new theme (${sb% } -> ${sa% })"; else fail "$app pixels did not follow the theme (${sb% } -> ${sa% })"; fi
+}
+
+sc_term() {
+    require term aurora-term || return
+    m5_begin term
+    local run=$SDIR/run
+    printf '[palette]\nbg = "#112233"\n' >"$SDIR/cfg/aurora/theme.toml"
+    launch || { end_scenario; return; }
+    local empty full x y w h colors i
+    snap empty t-empty -o winit
+
+    # 1. Starts, spawns the fixture on a pty, maps an aurora-term toplevel and paints glyphs.
+    appc aurora-term -e "$Q/term-hello.sh"
+    local tpid=$LASTPID
+    need_client 'term: ready cols=[0-9]+ rows=[0-9]+ scale=[0-9.]+ font=.* cell=[0-9]+x[0-9]+' 15
+    need_client 'term: spawn pid=[0-9]+ cmd=.*term-hello' 5
+    if waitfor 10 test -e "$run/hello.ready"; then pass "fixture ran inside the pty"; else fail "fixture never started (no hello.ready)"; fi
+    if win_wait aurora-term 10; then pass "aurora-term toplevel mapped"; else fail "no window with app_id aurora-term in the dump"; end_scenario; return; fi
+    sleep 0.8
+    snap full t-full -o winit
+    if [ -n "$empty" ] && [ -n "$full" ]; then
+        if [ "$(diffpx "$empty" "$full")" -gt 500 ]; then pass "screen differs from the empty frame"; else fail "no visible terminal surface (diff $(diffpx "$empty" "$full") px)"; fi
+        read -r x y w h <<<"$(rect4 "$(dumpwin aurora-term rect)")"
+        colors=$(magick "$full" -crop "${w}x${h}+${x}+${y}" +repage -format %k info: 2>/dev/null)
+        if [ "${colors:-0}" -gt 3 ]; then pass "glyph pixels are not background only ($colors colors in the window)"; else fail "window is a flat color (${colors:-?} colors), no glyphs painted"; fi
+    fi
+    if matches '^term=xterm-256color colorterm=truecolor program=aurora-term tty0 tty1$' "$(cat "$run/term-env" 2>/dev/null)"; then pass "child sees TERM/COLORTERM/TERM_PROGRAM and a tty"; else fail "child environment: $(cat "$run/term-env" 2>/dev/null)"; fi
+
+    # 2. A layout change resizes the pty: SIGWINCH reaches the child with a new size.
+    local rbase
+    rbase=$(clog | grep -acE 'term: resize cols=')
+    term sz1
+    need ':sz1:' 10
+    if waitfor 6 test "$(wc -l <"$run/size.log" 2>/dev/null || echo 0)" -ge 2; then pass "child got SIGWINCH on resize"; else fail "no SIGWINCH after a layout change (size.log: $(tr '\n' ';' <"$run/size.log"))"; fi
+    if [ "$(head -1 "$run/size.log")" != "$(tail -1 "$run/size.log")" ]; then pass "stty size changed: $(head -1 "$run/size.log") -> $(tail -1 "$run/size.log")"; else fail "stty size did not change"; fi
+    expect_count 'term: resize cols=[0-9]+ rows=[0-9]+' $((rbase + 1)) 5 'term: resize'
+
+    # Without --hold the window closes when the child exits.
+    : >"$run/quit"
+    expect_count 'term: exit pid=[0-9]+ code=0' 1 8 'term: exit code=0'
+    local gone=0
+    for i in 1 2 3 4 5 6; do
+        dump
+        [ -z "$(dumpwin aurora-term rect)" ] && { gone=1; break; }
+        sleep 0.5
+    done
+    if [ "$gone" = 1 ]; then pass "window closed when the shell exited"; else fail "aurora-term window still mapped after exit"; fi
+    if waitfor 5 pid_dead "$tpid"; then pass "aurora-term process ended"; else fail "aurora-term still running after the child exited"; fi
+
+    # 3. Typed bytes round-trip through the pty. Preferred: the qa-hooks input file; else wtype.
+    rm -f "$run/typed" "$run/echo.ready"
+    if binhas aurora-term AURORA_TERM_TEST_INPUT; then
+        printf 'qa-roundtrip\n' >"$SDIR/input.bin"
+        APPENV=(AURORA_TERM_TEST_INPUT="$SDIR/input.bin")
+        appc aurora-term -e "$Q/term-echo.sh"
+        APPENV=()
+    else
+        appc aurora-term -e "$Q/term-echo.sh"
+        win_wait aurora-term 10
+        waitfor 5 test -e "$run/echo.ready"
+        sleep 0.5
+        wl wtype 'qa-roundtrip'
+        key "" Return
+    fi
+    if waitfor 10 test -s "$run/typed" && [ "$(cat "$run/typed")" = qa-roundtrip ]; then pass "typed line reached the child through the pty"; else fail "round trip failed (typed: '$(cat "$run/typed" 2>/dev/null)')"; fi
+    expect_count 'term: exit pid=[0-9]+ code=0' 2 8 'term: exit code=0'
+
+    # 4. Flooding: 50 MB of output finishes in time and the compositor keeps answering.
+    appc aurora-term -e "$Q/term-flood.sh"
+    local t0=$SECONDS answered=0
+    for i in 1 2 3; do
+        sleep 0.5
+        [ -x "$BINDIR/auroractl" ] || break
+        if timeout 5 env -u DISPLAY AURORA_IPC_SOCK="$IPC" "$BINDIR/auroractl" snapshot >/dev/null 2>&1; then answered=$((answered + 1)); fi
+    done
+    if [ -x "$BINDIR/auroractl" ]; then
+        if [ "$answered" = 3 ]; then pass "compositor answers auroractl snapshot during a flood"; else fail "auroractl snapshot answered $answered/3 during the flood"; fi
+    else
+        skip "auroractl not built: flood responsiveness check"
+    fi
+    if waitfor 60 test -e "$run/flood.done"; then pass "50 MB flood completed in $((SECONDS - t0)) s"; else fail "flood did not finish within 60 s"; fi
+    expect_count 'term: exit pid=[0-9]+ code=0' 3 10 'term: exit code=0'
+    if alive; then pass "compositor alive after the flood"; else fail "compositor died during the flood"; fi
+
+    # 5. Theme: a changed theme.toml repaints the running terminal.
+    rm -f "$run/quit" "$run/hello.ready"
+    appc aurora-term -e "$Q/term-hello.sh"
+    local hpid=$LASTPID
+    waitfor 10 test -e "$run/hello.ready"
+    theme_follow aurora-term 'term: theme rev=[0-9]+'
+
+    # 6. Killing one terminal leaves the compositor and other windows alone.
+    kill "$hpid" 2>/dev/null
+    waitfor 5 pid_dead "$hpid"
+    sleep 0.5
+    dump
+    if alive && [ -n "$(dumpwin sz1 rect)" ] && [ -z "$(dumpwin aurora-term rect)" ]; then pass "kill <pid> removes only the terminal window"; else fail "state after killing aurora-term is wrong: $(grep -a '^dump: win' <<<"$DUMP" | cut -c1-100 | tr '\n' '|')"; fi
+
+    # 7. No IPC socket: still starts, draws, stays up.
+    rm -f "$run/quit" "$run/hello.ready"
+    APPENV=(AURORA_IPC_SOCK="$SDIR/run/missing.sock")
+    appc aurora-term -e "$Q/term-hello.sh"
+    APPENV=()
+    local npid=$LASTPID
+    expect_count 'term: ready cols=' 5 15 'term: ready (no IPC)'
+    if win_wait aurora-term 10; then pass "maps without an IPC socket"; else fail "no window without IPC"; fi
+    sleep 1
+    if kill -0 "$npid" 2>/dev/null; then pass "stays up without IPC"; else fail "aurora-term exited without IPC"; fi
+    kill "$npid" 2>/dev/null
+    : >"$run/quit"
+
+    # Clipboard (term: clipboard set / paste bytes) needs a pointer drag; there is no injector
+    # on the headless host, it is on the hardware checklist.
+    NAME=term
+    skip "clipboard: selection needs pointer injection, covered on hardware"
+    end_scenario
+}
+
+# ------------------------------------------------------------------------------------------
+
+# fstart LABEL KEYS...: fresh fixture, then aurora-files on it driven by a key script
+# (qa-hooks). Script format assumed: one key per line, xkb keysym names with ctrl+/shift+/alt+
+# prefixes, and `text:<string>` to type a string. Adapt `fstart` if the app's format differs.
+FP_PID=""
+FP_BASE=0
+fstart() {
+    local label=$1
+    shift
+    bash "$Q/files-fixture.sh" "$SCRATCH" "$SDIR/work" || { fail "fixture for $label"; FP_PID=""; return 1; }
+    printf '%s\n' "$@" >"$SDIR/script-$label.txt"
+    FP_BASE=$(clog | grep -acE 'files: op done id=[0-9]+ ok=[1-9][0-9]* failed=0')
+    APPENV=(AURORA_FILES_TEST_SCRIPT="$SDIR/script-$label.txt")
+    appc aurora-files "$SDIR/work"
+    APPENV=()
+    FP_PID=$LASTPID
+}
+# fwait KIND: the op started and finished with nothing failed, counted per app instance.
+fwait() {
+    if wait_client_count "files: op start id=[0-9]+ kind=$1 " 1 15 && wait_client_count 'files: op done id=[0-9]+ ok=[1-9][0-9]* failed=0' $((FP_BASE + 1)) 15; then
+        pass "files: op $1 start + done"
+    else
+        fail "MISSING log contract line: files: op start/done kind=$1 ($(clog | grep -a 'files: op' | tail -2 | tr '\n' '|'))"
+    fi
+}
+fend() {
+    [ -n "$FP_PID" ] || return 0
+    kill "$FP_PID" 2>/dev/null
+    waitfor 5 pid_dead "$FP_PID"
+    FP_PID=""
+}
+
+sc_files() {
+    require files aurora-files || return
+    m5_begin files
+    [ -n "$SDIR" ] || return
+    local W=$SDIR/work run=$SDIR/run
+    printf '[palette]\nbg = "#112233"\n' >"$SDIR/cfg/aurora/theme.toml"
+    launch || { end_scenario; return; }
+    local empty full info
+
+    snap empty f-empty -o winit
+
+    # 1. Starts on the fixture directory (argv[1]), lists it, maps a toplevel.
+    bash "$Q/files-fixture.sh" "$SCRATCH" "$W" || { fail "fixture"; end_scenario; return; }
+    appc aurora-files "$W"
+    need_client "files: ready path=$W entries=6" 15
+    if win_wait aurora-files 10; then pass "aurora-files toplevel mapped"; else fail "no window with app_id aurora-files"; end_scenario; return; fi
+    sleep 0.8
+    snap full f-full -o winit
+    if [ -n "$empty" ] && [ -n "$full" ]; then
+        if [ "$(diffpx "$empty" "$full")" -gt 500 ]; then pass "screen differs from the empty frame"; else fail "no visible files surface (diff $(diffpx "$empty" "$full") px)"; fi
+    fi
+
+    # 2. Theme push repaints it.
+    FP_PID=$LASTPID
+    theme_follow aurora-files 'files: theme rev=[0-9]+'
+    fend
+
+    # 3. File operations driven by AURORA_FILES_TEST_SCRIPT (qa-hooks build only). Every phase
+    # starts from a fresh fixture; sorted order is: alpha beta a.txt b.txt c.txt zzz-delete-me.txt.
+    if binhas aurora-files AURORA_FILES_TEST_SCRIPT; then
+        fstart select Home ctrl+a
+        expect_count 'files: select count=6' 1 10 'files: select count=6'
+        fend
+
+        fstart mkdir ctrl+shift+n text:qa-newdir Return
+        fwait mkdir
+        if waitfor 3 test -d "$W/qa-newdir"; then pass "new folder created"; else fail "qa-newdir missing"; fi
+        fend
+
+        fstart rename Home Down Down F2 ctrl+a text:renamed.txt Return
+        fwait rename
+        if [ -f "$W/renamed.txt" ] && [ ! -e "$W/a.txt" ] && [ "$(cat "$W/renamed.txt")" = a-content ]; then pass "a.txt renamed, content intact"; else fail "rename result wrong: $(ls "$W" | tr '\n' ' ')"; fi
+        fend
+
+        fstart copy Home Down Down Down ctrl+c Home Return ctrl+v
+        fwait copy
+        if [ "$(cat "$W/alpha/b.txt" 2>/dev/null)" = b-content ] && [ -f "$W/b.txt" ]; then pass "b.txt copied into alpha, original kept"; else fail "copy result wrong: alpha=$(ls "$W/alpha" | tr '\n' ' ') top=$(ls "$W" | tr '\n' ' ')"; fi
+        fend
+
+        fstart move Home Down Down Down Down ctrl+x Home Down Return ctrl+v
+        fwait move
+        if [ "$(cat "$W/beta/c.txt" 2>/dev/null)" = c-content ] && [ ! -e "$W/c.txt" ]; then pass "c.txt moved into beta"; else fail "move result wrong: beta=$(ls "$W/beta" | tr '\n' ' ') top=$(ls "$W" | tr '\n' ' ')"; fi
+        fend
+
+        rm -rf "${SDIR:?}/data/Trash"
+        fstart trash End Delete
+        fwait trash
+        if [ ! -e "$W/zzz-delete-me.txt" ] && [ -f "$SDIR/data/Trash/files/zzz-delete-me.txt" ]; then pass "trashed into \$XDG_DATA_HOME/Trash/files"; else fail "trash result wrong: $(ls "$W" | tr '\n' ' ') trash=$(ls "$SDIR/data/Trash/files" 2>&1 | tr '\n' ' ')"; fi
+        info=$SDIR/data/Trash/info/zzz-delete-me.txt.trashinfo
+        if grep -q '^\[Trash Info\]' "$info" 2>/dev/null && grep -q "^Path=.*zzz-delete-me.txt" "$info" && grep -q '^DeletionDate=' "$info"; then pass ".trashinfo is spec shaped"; else fail ".trashinfo missing or malformed: $(head -4 "$info" 2>&1 | tr '\n' '|')"; fi
+        fend
+
+        rm -rf "${SDIR:?}/data/Trash"
+        fstart delete End shift+Delete Return
+        fwait delete
+        if [ ! -e "$W/zzz-delete-me.txt" ] && [ ! -e "$SDIR/data/Trash/files/zzz-delete-me.txt" ]; then pass "permanent delete removed it without trashing"; else fail "permanent delete result wrong: $(ls "$W" | tr '\n' ' ')"; fi
+        fend
+        if alive; then pass "compositor alive after the file operations"; else fail "compositor died during the file operations"; fi
+    else
+        NAME=files
+        skip "aurora-files built without qa-hooks (AURORA_FILES_TEST_SCRIPT absent): operation phases (build with --features qa-hooks)"
+    fi
+
+    # 4. Unreadable directory: an error state, not a crash. (root ignores modes, so SKIP there.)
+    if [ "$(id -u)" = 0 ]; then
+        NAME=files
+        skip "running as root, chmod 000 does not deny access"
+    else
+        bash "$Q/files-fixture.sh" "$SCRATCH" "$W" && mkdir "$W/locked" && chmod 000 "$W/locked"
+        appc aurora-files "$W/locked"
+        local lpid=$LASTPID
+        if win_wait aurora-files 10; then pass "window maps on an unreadable directory"; else fail "no window on an unreadable directory"; fi
+        sleep 1.5
+        if kill -0 "$lpid" 2>/dev/null; then pass "aurora-files survives a chmod 000 directory"; else fail "aurora-files died on an unreadable directory"; fi
+        if clog | grep -qaiE 'panicked'; then fail "panic on an unreadable directory"; else pass "no panic on an unreadable directory"; fi
+        kill "$lpid" 2>/dev/null
+        waitfor 5 pid_dead "$lpid"
+        chmod u+rwx "$W/locked"
+    fi
+
+    # 5. Independence: kill leaves the compositor and other windows alone; no IPC still works.
+    term keep1
+    need ':keep1:' 10
+    bash "$Q/files-fixture.sh" "$SCRATCH" "$W"
+    appc aurora-files "$W"
+    local kpid=$LASTPID
+    win_wait aurora-files 10
+    kill "$kpid" 2>/dev/null
+    waitfor 5 pid_dead "$kpid"
+    sleep 0.5
+    dump
+    if alive && [ -n "$(dumpwin keep1 rect)" ] && [ -z "$(dumpwin aurora-files rect)" ]; then pass "kill <pid> removes only the files window"; else fail "state after killing aurora-files is wrong: $(grep -a '^dump: win' <<<"$DUMP" | cut -c1-100 | tr '\n' '|')"; fi
+    local nbase
+    nbase=$(clog | grep -acE 'files: ready path=')
+    APPENV=(AURORA_IPC_SOCK="$SDIR/run/missing.sock")
+    appc aurora-files "$W"
+    APPENV=()
+    local npid=$LASTPID
+    expect_count 'files: ready path=' $((nbase + 1)) 15 'files: ready (no IPC)'
+    sleep 1
+    if kill -0 "$npid" 2>/dev/null; then pass "stays up without IPC"; else fail "aurora-files exited without IPC"; fi
+    kill "$npid" 2>/dev/null
+    NAME=files
+    end_scenario
+}
+
+ALL=(keys emergency reload tiling workspaces layer xwayland multi robust anim effects overview xscale ipc services theme shell launcher notifd lock term files)
 if [ $# -eq 0 ]; then set -- "${ALL[@]}"; fi
 for s in "$@"; do
     declare -F "sc_$s" >/dev/null || { echo "unknown scenario $s" >&2; exit 2; }

@@ -228,6 +228,15 @@ mod tests {
         cap: usize,
     }
 
+    impl Sink {
+        fn new(cap: usize) -> Self {
+            Self {
+                got: Vec::new(),
+                cap,
+            }
+        }
+    }
+
     impl Write for Sink {
         fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
             let room = self.cap.saturating_sub(self.got.len());
@@ -245,10 +254,7 @@ mod tests {
     }
 
     fn drain(q: &mut OutQueue) -> Vec<u8> {
-        let mut sink = Sink {
-            got: Vec::new(),
-            cap: usize::MAX,
-        };
+        let mut sink = Sink::new(usize::MAX);
         assert!(q.flush(&mut sink).unwrap());
         sink.got
     }
@@ -292,17 +298,11 @@ mod tests {
     fn a_partly_written_frame_is_never_replaced() {
         let mut q = OutQueue::default();
         q.push_latest(Key::Focus, b"0123456789".to_vec());
-        let mut sink = Sink {
-            got: Vec::new(),
-            cap: 4,
-        };
+        let mut sink = Sink::new(4);
         assert!(!q.flush(&mut sink).unwrap());
         assert_eq!(q.bytes(), 6);
         assert_eq!(q.push_latest(Key::Focus, b"NEW".to_vec()), Push::Queued);
-        let mut rest = Sink {
-            got: Vec::new(),
-            cap: usize::MAX,
-        };
+        let mut rest = Sink::new(usize::MAX);
         assert!(q.flush(&mut rest).unwrap());
         assert_eq!([sink.got, rest.got].concat(), b"0123456789NEW");
     }
@@ -312,10 +312,7 @@ mod tests {
         let mut q = OutQueue::default();
         q.push_reliable(b"abcdef".to_vec());
         q.push_reliable(b"gh".to_vec());
-        let mut sink = Sink {
-            got: Vec::new(),
-            cap: 7,
-        };
+        let mut sink = Sink::new(7);
         assert!(!q.flush(&mut sink).unwrap());
         assert_eq!(sink.got, b"abcdefg");
         assert_eq!(q.bytes(), 1);
@@ -344,18 +341,12 @@ mod tests {
     fn a_started_frame_survives_a_drop() {
         let mut q = OutQueue::with_limits(40, 1000);
         q.push_latest(Key::Focus, vec![b'f'; 20]);
-        let mut sink = Sink {
-            got: Vec::new(),
-            cap: 5,
-        };
+        let mut sink = Sink::new(5);
         assert!(!q.flush(&mut sink).unwrap());
         assert_eq!(q.push_latest(Key::Window(1), vec![b'w'; 40]), Push::Resync);
         // Only the started frame's remainder is left, so the stream stays parseable.
         assert_eq!(q.bytes(), 15);
-        let mut rest = Sink {
-            got: Vec::new(),
-            cap: usize::MAX,
-        };
+        let mut rest = Sink::new(usize::MAX);
         assert!(q.flush(&mut rest).unwrap());
         assert_eq!(rest.got, vec![b'f'; 15]);
     }

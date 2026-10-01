@@ -15,7 +15,7 @@ use aurora_ui::{Id, Insets, Key, KeyEvent, TextSystem, Ui, UiEvent};
 use crate::control::{self, Command};
 use crate::entry::AppEntry;
 use crate::frecency::{self, Frecency};
-use crate::icons::{IconCache, IconLoader, Loaded, default_theme};
+use aurora_icons::{IconCache, IconLoader, Loaded, default_theme};
 use crate::index::{Hit, Index};
 use crate::ipc::{IpcLink, IpcMsg};
 use crate::system;
