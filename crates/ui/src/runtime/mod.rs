@@ -665,6 +665,12 @@ impl<A: App> Runtime<A> {
         self.signal.stop();
     }
 
+    /// Keyboard modifiers as of the last `wl_keyboard.modifiers`. Pointer events carry none,
+    /// so a view that wants Ctrl/Shift-click asks here.
+    pub fn modifiers(&self) -> Mods {
+        self.mods
+    }
+
     /// Currently known outputs.
     pub fn outputs(&self) -> &[Output] {
         &self.outputs
