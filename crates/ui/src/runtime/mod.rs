@@ -1,4 +1,5 @@
-//! Wayland runtime: layer-shell and ext-session-lock surface runners on a calloop loop.
+//! Wayland runtime: layer-shell, ext-session-lock and xdg-toplevel surface runners on a
+//! calloop loop.
 //!
 //! A service builds an [`App`], connects a [`Client`], creates surfaces with a [`Ui`]
 //! each, adds its own calloop sources (IPC socket, D-Bus, timers) and calls
@@ -41,6 +42,18 @@
 //!   [`crate::Input`] and delivered to the surface that has focus; what the widgets
 //!   produce arrives as [`Event::Ui`]. Keys no widget consumes (Escape, Up/Down while
 //!   typing, ...) arrive as `UiEvent::Key`.
+//! - **Toplevels.** [`Runtime::create_toplevel`] makes an `xdg_toplevel` (title, app id,
+//!   minimum size, server-side decoration request). The compositor's size arrives as
+//!   [`Event::Configured`] (an open axis keeps the current size, first the config hint),
+//!   [`Event::ToplevelState`] reports activated/fullscreen/maximized, and
+//!   [`Event::CloseRequested`] leaves the decision to the app. `raw_input` surfaces get
+//!   every key and button as [`Event::Input`] (repeats included: the keyboard repeats at
+//!   the compositor's `repeat_info` rate through the loop) and pair well with a
+//!   [`crate::widget::Canvas`].
+//! - **Clipboard and primary selection.** [`Runtime::set_text`], [`Runtime::set_selection`],
+//!   [`Runtime::read_selection`]: nothing blocks, see the `selection` module.
+//! - **Cursor.** [`Runtime::set_cursor`] per surface (cursor-shape protocol, else the
+//!   themed cursor).
 //! - **Hide/show.** [`Runtime::hide`] unmaps a layer surface while keeping its buffers,
 //!   caches and `Ui` warm; [`Runtime::show`] re-maps it with its stored configuration.
 //!
@@ -48,13 +61,18 @@
 
 mod convert;
 mod pool;
+mod selection;
 
 use std::fmt;
 use std::io;
 
 use smithay_client_toolkit::compositor::{CompositorHandler, CompositorState, FrameCallbackData};
+use smithay_client_toolkit::data_device_manager::DataDeviceManagerState;
+use smithay_client_toolkit::data_device_manager::data_device::DataDevice;
 use smithay_client_toolkit::dispatch2::Dispatch2;
 use smithay_client_toolkit::output::{OutputHandler, OutputState};
+use smithay_client_toolkit::primary_selection::PrimarySelectionManagerState;
+use smithay_client_toolkit::primary_selection::device::PrimarySelectionDevice;
 use smithay_client_toolkit::reexports::calloop::{EventLoop, LoopHandle, LoopSignal};
 use smithay_client_toolkit::reexports::calloop_wayland_source::WaylandSource;
 use smithay_client_toolkit::reexports::client::globals::registry_queue_init;
@@ -98,6 +116,7 @@ use smithay_client_toolkit::shell::xdg::window::{
 use smithay_client_toolkit::shm::{Shm, ShmHandler};
 use smithay_client_toolkit::{delegate_dispatch2, delegate_registry, registry_handlers};
 
+pub use selection::{MAX_PASTE, Offer, Selection, pick_text_mime, text_offers};
 pub use smithay_client_toolkit::reexports::calloop;
 pub use smithay_client_toolkit::seat::pointer::CursorIcon;
 pub use smithay_client_toolkit::shell::wlr_layer::{Anchor, KeyboardInteractivity, Layer};
@@ -272,6 +291,21 @@ pub enum Event {
         surface: SurfaceId,
         focused: bool,
     },
+    /// Another client took or changed the selection (also sent after our own `set_*`).
+    SelectionChanged {
+        selection: Selection,
+    },
+    /// Another client replaced a selection this client owned.
+    SelectionLost {
+        selection: Selection,
+    },
+    /// Result of [`Runtime::read_selection`].
+    SelectionData {
+        selection: Selection,
+        tag: u64,
+        mime: String,
+        data: Option<Vec<u8>>,
+    },
     /// Raw input of a surface made raw with [`ToplevelConfig::raw_input`] or
     /// [`Runtime::set_raw_input`]; its [`Ui`] does not see it.
     Input {
@@ -371,6 +405,14 @@ pub struct Runtime<A: App> {
     pointer_focus: Option<SurfaceId>,
     keyboard: Option<WlKeyboard>,
     kb_focus: Option<SurfaceId>,
+    /// Serial of the latest key press, pointer press or keyboard enter (for selections).
+    serial: u32,
+    data_mgr: Option<DataDeviceManagerState>,
+    data_device: Option<DataDevice>,
+    owned_clipboard: Option<selection::Owned>,
+    primary_mgr: Option<PrimarySelectionManagerState>,
+    primary_device: Option<PrimarySelectionDevice>,
+    owned_primary: Option<selection::Owned>,
     mods: Mods,
     outputs: Vec<Output>,
 }
@@ -468,6 +510,13 @@ impl<A: App> Client<A> {
             pointer_focus: None,
             keyboard: None,
             kb_focus: None,
+            serial: 0,
+            data_mgr: DataDeviceManagerState::bind(&globals, &qh).ok(),
+            data_device: None,
+            owned_clipboard: None,
+            primary_mgr: PrimarySelectionManagerState::bind(&globals, &qh).ok(),
+            primary_device: None,
+            owned_primary: None,
             mods: Mods::default(),
             outputs: Vec::new(),
         };
@@ -1304,6 +1353,18 @@ impl<A: App> SeatHandler for State<A> {
         seat: WlSeat,
         capability: Capability,
     ) {
+        if capability == Capability::Keyboard && self.rt.data_device.is_none() {
+            self.rt.data_device = self
+                .rt
+                .data_mgr
+                .as_ref()
+                .map(|m| m.get_data_device(qh, &seat));
+            self.rt.primary_device = self
+                .rt
+                .primary_mgr
+                .as_ref()
+                .map(|m| m.get_selection_device(qh, &seat));
+        }
         match capability {
             Capability::Keyboard if self.rt.keyboard.is_none() => {
                 let lh = self.rt.loop_handle.clone();
@@ -1347,6 +1408,8 @@ impl<A: App> SeatHandler for State<A> {
                     k.release();
                 }
                 self.rt.kb_focus = None;
+                self.rt.data_device = None;
+                self.rt.primary_device = None;
             }
             Capability::Pointer => {
                 // Dropping the themed pointer releases it.
@@ -1367,10 +1430,11 @@ impl<A: App> KeyboardHandler for State<A> {
         _: &QueueHandle<Self>,
         _: &WlKeyboard,
         surface: &WlSurface,
-        _: u32,
+        serial: u32,
         _: &[u32],
         _: &[smithay_client_toolkit::seat::keyboard::Keysym],
     ) {
+        self.rt.serial = serial;
         self.rt.kb_focus = self.rt.sid_of(surface);
         if let Some(sid) = self.rt.kb_focus {
             self.emit(Event::KeyboardFocus {
@@ -1404,9 +1468,10 @@ impl<A: App> KeyboardHandler for State<A> {
         _: &Connection,
         _: &QueueHandle<Self>,
         _: &WlKeyboard,
-        _: u32,
+        serial: u32,
         event: SctkKey,
     ) {
+        self.rt.serial = serial;
         self.key(&event);
     }
 
@@ -1473,7 +1538,8 @@ impl<A: App> PointerHandler for State<A> {
                     }
                     Input::PointerLeave
                 }
-                PointerEventKind::Press { button, .. } => {
+                PointerEventKind::Press { button, serial, .. } => {
+                    self.rt.serial = serial;
                     Input::PointerDown(pos, map_button(button))
                 }
                 PointerEventKind::Release { button, .. } => {
