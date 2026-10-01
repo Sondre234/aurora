@@ -1,0 +1,29 @@
+[package]
+name = "aurora-files"
+description = "File manager for the Aurora desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "aurora-files"
+path = "src/main.rs"
+
+[features]
+# Test-only input hook (AURORA_FILES_TEST_SCRIPT). Never part of a default build; the QA
+# stream builds with it explicitly.
+qa-hooks = []
+
+[dependencies]
+aurora-ui = { path = "../ui" }
+aurora-ipc = { workspace = true }
+aurora-theme = { workspace = true }
+# Icon lookup, rasterizing and the byte-budgeted cache are the launcher's.
+aurora-launcher = { path = "../launcher" }
+notify = "8"
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+libc = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

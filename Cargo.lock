@@ -222,6 +222,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "aurora-files"
+version = "0.1.0"
+dependencies = [
+ "aurora-ipc",
+ "aurora-launcher",
+ "aurora-theme",
+ "aurora-ui",
+ "libc",
+ "notify",
+ "tempfile",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "aurora-ipc"
 version = "0.1.0"
 dependencies = [
