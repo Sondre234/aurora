@@ -67,6 +67,7 @@ use smithay_client_toolkit::reexports::client::protocol::{
     wl_surface::WlSurface,
 };
 use smithay_client_toolkit::reexports::client::{Connection, Proxy, QueueHandle};
+use smithay_client_toolkit::reexports::csd_frame::WindowState;
 use smithay_client_toolkit::reexports::protocols::wp::fractional_scale::v1::client::{
     wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1,
     wp_fractional_scale_v1::{self, WpFractionalScaleV1},
@@ -88,6 +89,10 @@ use smithay_client_toolkit::shell::WaylandSurface;
 use smithay_client_toolkit::shell::wlr_layer::{
     LayerShell, LayerShellHandler, LayerSurface, LayerSurfaceConfigure,
 };
+use smithay_client_toolkit::shell::xdg::XdgShell;
+use smithay_client_toolkit::shell::xdg::window::{
+    Window, WindowConfigure, WindowDecorations, WindowHandler,
+};
 use smithay_client_toolkit::shm::{Shm, ShmHandler};
 use smithay_client_toolkit::{delegate_dispatch2, delegate_registry, registry_handlers};
 
@@ -102,7 +107,7 @@ use crate::text::TextSystem;
 use crate::ui::Ui;
 
 use convert::{
-    device_rect, device_size, finish_frame, logical_rect, map_button, map_key, map_mods,
+    device_rect, device_size, finish_frame, logical_rect, map_button, map_key, map_mods, pick_size,
     repaint_region,
 };
 use pool::{BufferData, BufferPool};
@@ -188,6 +193,45 @@ impl Default for LayerConfig {
     }
 }
 
+/// Configuration of an `xdg_toplevel` window.
+#[derive(Debug, Clone)]
+pub struct ToplevelConfig {
+    pub title: String,
+    pub app_id: String,
+    /// Logical size used when the compositor lets the client choose (configure 0x0).
+    pub size: (u32, u32),
+    /// Logical minimum size, if any.
+    pub min_size: Option<(u32, u32)>,
+    /// Ask for server-side decoration mode (Aurora draws borders itself).
+    pub server_decorations: bool,
+    /// Deliver pointer and keyboard input as [`Event::Input`] instead of feeding the
+    /// surface's [`Ui`] (for views that handle every key and button themselves).
+    pub raw_input: bool,
+}
+
+impl Default for ToplevelConfig {
+    fn default() -> Self {
+        Self {
+            title: "aurora".into(),
+            app_id: "aurora".into(),
+            size: (800, 600),
+            min_size: None,
+            server_decorations: true,
+            raw_input: false,
+        }
+    }
+}
+
+/// Toplevel state from the last configure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ToplevelState {
+    pub activated: bool,
+    pub fullscreen: bool,
+    pub maximized: bool,
+    pub tiled: bool,
+    pub resizing: bool,
+}
+
 /// What the runtime tells the [`App`].
 #[derive(Debug)]
 pub enum Event {
@@ -209,6 +253,27 @@ pub enum Event {
     /// The compositor closed the layer surface (output gone, ...); it is already dropped.
     Closed {
         surface: SurfaceId,
+    },
+    /// The user or compositor asked a toplevel to close. Nothing is destroyed: answer with
+    /// [`Runtime::destroy`] (or [`Runtime::quit`]) or ignore it to keep the window.
+    CloseRequested {
+        surface: SurfaceId,
+    },
+    /// State of a toplevel, sent with every configure just before [`Event::Configured`].
+    ToplevelState {
+        surface: SurfaceId,
+        state: ToplevelState,
+    },
+    /// Keyboard focus moved to or away from a surface.
+    KeyboardFocus {
+        surface: SurfaceId,
+        focused: bool,
+    },
+    /// Raw input of a surface made raw with [`ToplevelConfig::raw_input`] or
+    /// [`Runtime::set_raw_input`]; its [`Ui`] does not see it.
+    Input {
+        surface: SurfaceId,
+        input: Input,
     },
     OutputAdded(Output),
     OutputChanged(Output),
@@ -234,6 +299,7 @@ pub struct State<A: App> {
 enum Role {
     Layer(LayerSurface),
     Lock(#[allow(dead_code)] SessionLockSurface),
+    Window(Window),
 }
 
 struct Surf {
@@ -242,6 +308,10 @@ struct Surf {
     wl: WlSurface,
     ui: Ui,
     layer_cfg: Option<LayerConfig>,
+    /// Size used for an axis the compositor leaves open, when no layer config says (logical).
+    fallback: (u32, u32),
+    /// Input goes to the app as [`Event::Input`], not into the `Ui`.
+    raw_input: bool,
     /// Logical size from the last configure.
     size: (u32, u32),
     configured: bool,
@@ -284,6 +354,7 @@ pub struct Runtime<A: App> {
     shm: Shm,
     compositor: CompositorState,
     layer_shell: Option<LayerShell>,
+    xdg_shell: Option<XdgShell>,
     lock_state: SessionLockState,
     lock: Option<SessionLock>,
     viewporter: Option<WpViewporter>,
@@ -363,6 +434,7 @@ impl<A: App> Client<A> {
             CompositorState::bind(&globals, &qh).map_err(|_| Error::Global("wl_compositor"))?;
         let shm = Shm::bind(&globals, &qh).map_err(|_| Error::Global("wl_shm"))?;
         let layer_shell = LayerShell::bind(&globals, &qh).ok();
+        let xdg_shell = XdgShell::bind(&globals, &qh).ok();
         let viewporter = globals.bind::<WpViewporter, _, _>(&qh, 1..=1, Noop).ok();
         let frac_mgr = globals
             .bind::<WpFractionalScaleManagerV1, _, _>(&qh, 1..=1, Noop)
@@ -378,6 +450,7 @@ impl<A: App> Client<A> {
             shm,
             compositor,
             layer_shell,
+            xdg_shell,
             lock_state: SessionLockState::new(&globals, &qh),
             lock: None,
             viewporter,
@@ -444,6 +517,13 @@ impl<A: App> State<A> {
 
     fn deliver(&mut self, sid: SurfaceId, input: Input) {
         let events = match self.rt.surf_mut(sid) {
+            Some(s) if s.raw_input => {
+                self.emit(Event::Input {
+                    surface: sid,
+                    input,
+                });
+                return;
+            }
             Some(s) => s.ui.handle(input),
             None => return,
         };
@@ -479,11 +559,13 @@ impl<A: App> State<A> {
         let Some(s) = self.rt.surfs.iter_mut().find(|s| &s.wl == wl) else {
             return;
         };
-        let fallback = s.layer_cfg.as_ref().map_or((1, 1), |c| c.size);
-        let size = (
-            if new.0 > 0 { new.0 } else { fallback.0.max(1) },
-            if new.1 > 0 { new.1 } else { fallback.1.max(1) },
-        );
+        let fallback = match &s.layer_cfg {
+            Some(c) => c.size,
+            // A toplevel keeps the size it has; before the first configure, its hint.
+            None if s.size.0 > 0 && s.size.1 > 0 => s.size,
+            None => s.fallback,
+        };
+        let size = pick_size(new, fallback);
         s.size = size;
         s.configured = true;
         // A configure never maps a surface that was hidden on purpose; only `show` does.
@@ -632,6 +714,8 @@ impl<A: App> Runtime<A> {
             wl,
             ui,
             layer_cfg: Some(cfg),
+            fallback: (0, 0),
+            raw_input: false,
             size: (0, 0),
             configured: false,
             hidden: false,
@@ -645,6 +729,98 @@ impl<A: App> Runtime<A> {
             pool: None,
         });
         Ok(id)
+    }
+
+    /// Create an `xdg_toplevel` window showing `ui`. It is mapped once the compositor
+    /// configures it ([`Event::Configured`], preceded by [`Event::ToplevelState`]).
+    pub fn create_toplevel(&mut self, cfg: ToplevelConfig, ui: Ui) -> Result<SurfaceId, Error> {
+        if self.xdg_shell.is_none() {
+            return Err(Error::Global("xdg_wm_base"));
+        }
+        let (id, wl, frac, viewport) = self.new_surface();
+        let Some(shell) = self.xdg_shell.as_ref() else {
+            return Err(Error::Global("xdg_wm_base"));
+        };
+        let decorations = if cfg.server_decorations {
+            WindowDecorations::RequestServer
+        } else {
+            WindowDecorations::ServerDefault
+        };
+        let window = shell.create_window(wl.clone(), decorations, &self.qh);
+        window.set_title(cfg.title.clone());
+        window.set_app_id(cfg.app_id.clone());
+        window.set_min_size(cfg.min_size);
+        window.commit();
+        self.surfs.push(Surf {
+            id,
+            role: Role::Window(window),
+            wl,
+            ui,
+            layer_cfg: None,
+            fallback: (cfg.size.0.max(1), cfg.size.1.max(1)),
+            raw_input: cfg.raw_input,
+            size: (0, 0),
+            configured: false,
+            hidden: false,
+            mapped: false,
+            show_pending: false,
+            frame_pending: false,
+            frac,
+            viewport,
+            frac120: None,
+            int_scale: 1,
+            pool: None,
+        });
+        Ok(id)
+    }
+
+    fn window(&self, id: SurfaceId) -> Option<&Window> {
+        match &self.surf(id)?.role {
+            Role::Window(w) => Some(w),
+            _ => None,
+        }
+    }
+
+    /// Set a toplevel's title (a no-op for other surface kinds).
+    pub fn set_title(&mut self, id: SurfaceId, title: &str) {
+        if let Some(w) = self.window(id) {
+            w.set_title(title);
+            w.commit();
+        }
+    }
+
+    pub fn set_min_size(&mut self, id: SurfaceId, min: Option<(u32, u32)>) {
+        if let Some(w) = self.window(id) {
+            w.set_min_size(min);
+            w.commit();
+        }
+    }
+
+    /// Ask the compositor to (un)fullscreen a toplevel; it answers with a configure.
+    pub fn set_fullscreen(&mut self, id: SurfaceId, on: bool) {
+        if let Some(w) = self.window(id) {
+            match on {
+                true => w.set_fullscreen(None),
+                false => w.unset_fullscreen(),
+            }
+        }
+    }
+
+    /// Ask the compositor to (un)maximize a toplevel; it answers with a configure.
+    pub fn set_maximized(&mut self, id: SurfaceId, on: bool) {
+        if let Some(w) = self.window(id) {
+            match on {
+                true => w.set_maximized(),
+                false => w.unset_maximized(),
+            }
+        }
+    }
+
+    /// Route a surface's input to the app as [`Event::Input`] (true) or to its `Ui` (false).
+    pub fn set_raw_input(&mut self, id: SurfaceId, raw: bool) {
+        if let Some(s) = self.surf_mut(id) {
+            s.raw_input = raw;
+        }
     }
 
     /// Change a live layer surface: the closure may call `set_size`, `set_anchor`,
@@ -768,6 +944,8 @@ impl<A: App> Runtime<A> {
             wl,
             ui,
             layer_cfg: None,
+            fallback: (0, 0),
+            raw_input: false,
             size: (0, 0),
             configured: false,
             hidden: false,
@@ -1021,6 +1199,44 @@ impl<A: App> LayerShellHandler for State<A> {
     }
 }
 
+impl<A: App> WindowHandler for State<A> {
+    fn request_close(&mut self, _: &Connection, _: &QueueHandle<Self>, window: &Window) {
+        if let Some(sid) = self.rt.sid_of(window.wl_surface()) {
+            self.emit(Event::CloseRequested { surface: sid });
+        }
+    }
+
+    fn configure(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        window: &Window,
+        configure: WindowConfigure,
+        _: u32,
+    ) {
+        let Some(sid) = self.rt.sid_of(window.wl_surface()) else {
+            return;
+        };
+        let st = &configure.state;
+        let state = ToplevelState {
+            activated: st.contains(WindowState::ACTIVATED),
+            fullscreen: st.contains(WindowState::FULLSCREEN),
+            maximized: st.contains(WindowState::MAXIMIZED),
+            tiled: st.contains(WindowState::TILED),
+            resizing: st.contains(WindowState::RESIZING),
+        };
+        self.emit(Event::ToplevelState {
+            surface: sid,
+            state,
+        });
+        let size = |v: Option<std::num::NonZeroU32>| v.map_or(0, |v| v.get());
+        self.configured(
+            window.wl_surface(),
+            (size(configure.new_size.0), size(configure.new_size.1)),
+        );
+    }
+}
+
 impl<A: App> SessionLockHandler for State<A> {
     fn locked(&mut self, _: &Connection, _: &QueueHandle<Self>, _: SessionLock) {
         self.emit(Event::Locked);
@@ -1118,6 +1334,12 @@ impl<A: App> KeyboardHandler for State<A> {
         _: &[smithay_client_toolkit::seat::keyboard::Keysym],
     ) {
         self.rt.kb_focus = self.rt.sid_of(surface);
+        if let Some(sid) = self.rt.kb_focus {
+            self.emit(Event::KeyboardFocus {
+                surface: sid,
+                focused: true,
+            });
+        }
     }
 
     fn leave(
@@ -1128,8 +1350,14 @@ impl<A: App> KeyboardHandler for State<A> {
         surface: &WlSurface,
         _: u32,
     ) {
-        if self.rt.sid_of(surface) == self.rt.kb_focus {
+        if let Some(sid) = self.rt.sid_of(surface)
+            && Some(sid) == self.rt.kb_focus
+        {
             self.rt.kb_focus = None;
+            self.emit(Event::KeyboardFocus {
+                surface: sid,
+                focused: false,
+            });
         }
     }
 
