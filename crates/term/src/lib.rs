@@ -5,5 +5,8 @@
 
 pub mod cli;
 pub mod colors;
+pub mod grid;
 pub mod keys;
 pub mod mouse;
+pub mod pty;
+pub mod select;
