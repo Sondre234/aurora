@@ -10,4 +10,5 @@ pub mod grid;
 pub mod keys;
 pub mod mouse;
 pub mod pty;
+pub mod render;
 pub mod select;
