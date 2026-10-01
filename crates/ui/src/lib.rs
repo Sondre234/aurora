@@ -35,4 +35,6 @@ pub use painter::{Image, Painter};
 pub use skia::{PaintBudgets, PaintCaches, PixelBuffer, SkiaPainter};
 pub use text::{FontFamily, ShapedText, TextBudgets, TextStyle, TextSystem, TextWrap};
 pub use ui::Ui;
-pub use widget::{Align, Dim, Justify, List, ListItem, Node, Shadow, Style, TextAlign, TextInput};
+pub use widget::{
+    Align, Canvas, Dim, Justify, List, ListItem, Node, Shadow, Style, TextAlign, TextInput,
+};
