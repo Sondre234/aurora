@@ -6,11 +6,15 @@
 //! [`trash`] (FreeDesktop trash).
 
 pub mod edit;
+pub mod ipc;
 pub mod listing;
 pub mod model;
 pub mod names;
 pub mod ops;
 pub mod places;
+pub mod scene;
+pub mod system;
 pub mod trash;
 pub mod uri;
+pub mod view;
 pub mod watch;
