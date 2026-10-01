@@ -6,7 +6,7 @@ use std::collections::HashSet;
 use std::ffi::OsString;
 use std::path::PathBuf;
 
-use aurora_launcher::icons::IconCache;
+use aurora_icons::IconCache;
 use aurora_ui::{Color, Image, Painter, Point, Rect, Size, TextStyle, TextSystem};
 
 use crate::edit::LineEdit;

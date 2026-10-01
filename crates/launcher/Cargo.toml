@@ -13,13 +13,11 @@ path = "src/main.rs"
 aurora-ui = { path = "../ui" }
 aurora-ipc = { workspace = true }
 aurora-theme = { workspace = true }
+aurora-icons = { path = "../icons" }
 freedesktop-desktop-entry = { version = "0.7", default-features = false }
-freedesktop-icons = "0.3"
 notify = "8"
 serde = { workspace = true }
 serde_json = "1"
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 libc = { workspace = true }
-png = "0.18"
-resvg = { version = "0.48", default-features = false }

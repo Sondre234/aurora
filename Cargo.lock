@@ -250,8 +250,8 @@ dependencies = [
 name = "aurora-files"
 version = "0.1.0"
 dependencies = [
+ "aurora-icons",
  "aurora-ipc",
- "aurora-launcher",
  "aurora-theme",
  "aurora-ui",
  "libc",
@@ -259,6 +259,17 @@ dependencies = [
  "tempfile",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "aurora-icons"
+version = "0.1.0"
+dependencies = [
+ "aurora-ui",
+ "freedesktop-icons",
+ "png",
+ "resvg",
+ "tracing",
 ]
 
 [[package]]
@@ -274,15 +285,13 @@ dependencies = [
 name = "aurora-launcher"
 version = "0.1.0"
 dependencies = [
+ "aurora-icons",
  "aurora-ipc",
  "aurora-theme",
  "aurora-ui",
  "freedesktop-desktop-entry",
- "freedesktop-icons",
  "libc",
  "notify",
- "png",
- "resvg",
  "serde",
  "serde_json",
  "tracing",

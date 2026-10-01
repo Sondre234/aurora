@@ -10,7 +10,7 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use aurora_ipc::ThemeSnapshot;
-use aurora_launcher::icons::{IconLoader, Loaded, default_theme};
+use aurora_icons::{IconLoader, Loaded, default_theme};
 use aurora_ui::runtime::calloop::channel::{self, Channel, Sender};
 use aurora_ui::runtime::calloop::timer::{TimeoutAction, Timer};
 use aurora_ui::runtime::{App, Client, Event, Runtime, State, SurfaceId, ToplevelConfig};

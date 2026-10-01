@@ -18,8 +18,7 @@ qa-hooks = []
 aurora-ui = { path = "../ui" }
 aurora-ipc = { workspace = true }
 aurora-theme = { workspace = true }
-# Icon lookup, rasterizing and the byte-budgeted cache are the launcher's.
-aurora-launcher = { path = "../launcher" }
+aurora-icons = { path = "../icons" }
 notify = "8"
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
