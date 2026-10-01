@@ -40,9 +40,9 @@ use crate::{
 
 render_elements! {
     /// Everything one output draws. The cursor is first so DrmCompositor can put it on the
-    /// cursor plane. Effect streams add one variant each here (`Shadow`, `Blur`, `Overview`,
-    /// `Ghost`), with the element type defined in their own module, and push it from the
-    /// matching hook in `output_elements`.
+    /// cursor plane. Effects add one variant each here (`Shadow`, `Blur`, `Overview`, `Ghost`),
+    /// with the element type defined in their own module, pushed from the matching hook in
+    /// `output_elements`.
     pub OutputElement<=GlesRenderer>;
     Cursor=MemoryRenderBufferRenderElement<GlesRenderer>,
     CursorSurface=WaylandSurfaceRenderElement<GlesRenderer>,
@@ -267,7 +267,7 @@ pub fn output_elements(
         let at: Point<i32, Logical> = loc - SpaceElement::geometry(window).loc - geo.loc;
         // Hooks, in front-to-back order for this window: (1) the window's own elements below
         // (the corner program and `current - target` offset/scale apply there), (2) its
-        // shadow, (3) blur of what is behind it. Streams push their variants here.
+        // shadow, (3) blur of what is behind it. Effect variants are pushed here.
         let start = out.len();
         out.extend(
             window

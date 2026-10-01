@@ -147,10 +147,6 @@ impl Timeline {
         self.busy = false;
     }
 
-    pub fn now(&self) -> Duration {
-        self.now
-    }
-
     pub fn sample<T: Lerp + PartialEq>(&mut self, a: &Animated<T>) -> T {
         self.busy |= a.is_active(self.now);
         a.value(self.now)

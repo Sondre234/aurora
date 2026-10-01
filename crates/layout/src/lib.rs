@@ -1,5 +1,5 @@
 //! Pure layout logic: no Smithay types, no dependencies. Window rectangles are plain
-//! retained state (`Placement`), so a later milestone can animate them.
+//! retained state (`Placement`), so they can be animated.
 
 mod dwindle;
 mod geom;

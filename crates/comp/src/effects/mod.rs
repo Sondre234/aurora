@@ -1,7 +1,7 @@
 //! Visual effects: shader programs and the elements built on them. Everything that needs
 //! the GPU is compiled once at startup (`init`, called right after a renderer is created), so
-//! no frame ever pays for compilation. Streams add their programs to `Programs` and one
-//! `compile` line each; the element code lives in sibling modules (`corners`, `shadow`,
+//! no frame ever pays for compilation. Each program lives in `Programs` with one
+//! `compile` line; the element code lives in sibling modules (`corners`, `shadow`,
 //! `blur`).
 
 use smithay::backend::renderer::gles::{GlesError, GlesPixelProgram, GlesRenderer, GlesTexProgram};
