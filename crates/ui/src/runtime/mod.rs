@@ -79,7 +79,9 @@ use smithay_client_toolkit::registry::{ProvidesRegistryState, RegistryState};
 use smithay_client_toolkit::seat::keyboard::{
     KeyEvent as SctkKey, KeyboardHandler, Modifiers, RawModifiers,
 };
-use smithay_client_toolkit::seat::pointer::{PointerEvent, PointerEventKind, PointerHandler};
+use smithay_client_toolkit::seat::pointer::{
+    PointerEvent, PointerEventKind, PointerHandler, ThemeSpec, ThemedPointer,
+};
 use smithay_client_toolkit::seat::{Capability, SeatHandler, SeatState};
 use smithay_client_toolkit::session_lock::{
     SessionLock, SessionLockHandler, SessionLockState, SessionLockSurface,
@@ -97,6 +99,7 @@ use smithay_client_toolkit::shm::{Shm, ShmHandler};
 use smithay_client_toolkit::{delegate_dispatch2, delegate_registry, registry_handlers};
 
 pub use smithay_client_toolkit::reexports::calloop;
+pub use smithay_client_toolkit::seat::pointer::CursorIcon;
 pub use smithay_client_toolkit::shell::wlr_layer::{Anchor, KeyboardInteractivity, Layer};
 
 use crate::damage::Damage;
@@ -321,6 +324,7 @@ struct Surf {
     /// `show` committed and the surface waits for the compositor's configure to map.
     show_pending: bool,
     frame_pending: bool,
+    cursor: CursorIcon,
     frac: Option<WpFractionalScaleV1>,
     viewport: Option<WpViewport>,
     /// Preferred fractional scale in 120ths, once the compositor sent one.
@@ -362,7 +366,9 @@ pub struct Runtime<A: App> {
     surfs: Vec<Surf>,
     next_id: u32,
     caches: PaintCaches,
-    pointer: Option<WlPointer>,
+    pointer: Option<ThemedPointer>,
+    /// Surface under the pointer.
+    pointer_focus: Option<SurfaceId>,
     keyboard: Option<WlKeyboard>,
     kb_focus: Option<SurfaceId>,
     mods: Mods,
@@ -459,6 +465,7 @@ impl<A: App> Client<A> {
             next_id: 1,
             caches: PaintCaches::new(text),
             pointer: None,
+            pointer_focus: None,
             keyboard: None,
             kb_focus: None,
             mods: Mods::default(),
@@ -722,6 +729,7 @@ impl<A: App> Runtime<A> {
             mapped: false,
             show_pending: false,
             frame_pending: false,
+            cursor: CursorIcon::Default,
             frac,
             viewport,
             frac120: None,
@@ -765,6 +773,7 @@ impl<A: App> Runtime<A> {
             mapped: false,
             show_pending: false,
             frame_pending: false,
+            cursor: CursorIcon::Default,
             frac,
             viewport,
             frac120: None,
@@ -813,6 +822,27 @@ impl<A: App> Runtime<A> {
                 true => w.set_maximized(),
                 false => w.unset_maximized(),
             }
+        }
+    }
+
+    /// Cursor shown while the pointer is over a surface. Uses `wp_cursor_shape_v1` when the
+    /// compositor has it, else the themed cursor (`XCURSOR_THEME`/`XCURSOR_SIZE`).
+    pub fn set_cursor(&mut self, id: SurfaceId, icon: CursorIcon) {
+        let Some(s) = self.surf_mut(id) else { return };
+        if s.cursor == icon {
+            return;
+        }
+        s.cursor = icon;
+        if self.pointer_focus == Some(id) {
+            self.apply_cursor(icon);
+        }
+    }
+
+    fn apply_cursor(&self, icon: CursorIcon) {
+        if let Some(p) = &self.pointer
+            && let Err(e) = p.set_cursor(&self.conn, icon)
+        {
+            tracing::debug!(target: "ui", "cursor {icon:?}: {e}");
         }
     }
 
@@ -952,6 +982,7 @@ impl<A: App> Runtime<A> {
             mapped: false,
             show_pending: false,
             frame_pending: false,
+            cursor: CursorIcon::Default,
             frac,
             viewport,
             frac120: None,
@@ -1287,7 +1318,14 @@ impl<A: App> SeatHandler for State<A> {
                 }
             }
             Capability::Pointer if self.rt.pointer.is_none() => {
-                match self.rt.seat_state.get_pointer(qh, &seat) {
+                let cursor_surface = self.rt.compositor.create_surface(qh);
+                match self.rt.seat_state.get_pointer_with_theme::<_, ()>(
+                    qh,
+                    &seat,
+                    self.rt.shm.wl_shm(),
+                    cursor_surface,
+                    ThemeSpec::System,
+                ) {
                     Ok(p) => self.rt.pointer = Some(p),
                     Err(e) => tracing::warn!(target: "ui", "pointer: {e}"),
                 }
@@ -1311,9 +1349,9 @@ impl<A: App> SeatHandler for State<A> {
                 self.rt.kb_focus = None;
             }
             Capability::Pointer => {
-                if let Some(p) = self.rt.pointer.take() {
-                    p.release();
-                }
+                // Dropping the themed pointer releases it.
+                self.rt.pointer = None;
+                self.rt.pointer_focus = None;
             }
             _ => {}
         }
@@ -1421,10 +1459,20 @@ impl<A: App> PointerHandler for State<A> {
             };
             let pos = Point::new(e.position.0 as f32, e.position.1 as f32);
             let input = match e.kind {
-                PointerEventKind::Enter { .. } | PointerEventKind::Motion { .. } => {
+                PointerEventKind::Enter { .. } => {
+                    self.rt.pointer_focus = Some(sid);
+                    if let Some(s) = self.rt.surf(sid) {
+                        self.rt.apply_cursor(s.cursor);
+                    }
                     Input::PointerMove(pos)
                 }
-                PointerEventKind::Leave { .. } => Input::PointerLeave,
+                PointerEventKind::Motion { .. } => Input::PointerMove(pos),
+                PointerEventKind::Leave { .. } => {
+                    if self.rt.pointer_focus == Some(sid) {
+                        self.rt.pointer_focus = None;
+                    }
+                    Input::PointerLeave
+                }
                 PointerEventKind::Press { button, .. } => {
                     Input::PointerDown(pos, map_button(button))
                 }
