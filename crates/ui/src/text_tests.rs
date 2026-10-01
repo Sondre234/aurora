@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use crate::text::{TextBudgets, TextStyle, TextSystem};
+use crate::text::{CellMetrics, TextBudgets, TextStyle, TextSystem};
 
 fn sys() -> Option<TextSystem> {
     let t = TextSystem::new();
@@ -102,4 +102,35 @@ fn cursor_mapping_round_trips() {
         (0.0, 0.0, 0)
     );
     assert!(empty.height() > 0.0);
+}
+
+#[test]
+fn cell_metrics_snap_to_whole_device_pixels() {
+    let m = CellMetrics::snap(8.4, 17.2, 13.6, 1.25);
+    assert_eq!((m.width, m.height, m.baseline), (8, 17, 14));
+    let tiny = CellMetrics::snap(0.1, 0.0, -3.0, 1.0);
+    assert_eq!((tiny.width, tiny.height, tiny.baseline), (1, 1, 0));
+}
+
+#[test]
+fn cell_grid_math() {
+    let m = CellMetrics::snap(10.0, 20.0, 15.0, 2.0);
+    // 400x300 logical = 800x600 device = 80x30 cells.
+    assert_eq!(m.grid_for(400.0, 300.0), (80, 30));
+    // The remainder is dropped, never rounded up; a degenerate area is 1x1.
+    assert_eq!(m.grid_for(405.0, 309.0), (81, 30));
+    assert_eq!(m.grid_for(1.0, 1.0), (1, 1));
+    assert_eq!(m.size_of(80, 30), (400.0, 300.0));
+    assert_eq!((m.logical_width(), m.logical_height()), (5.0, 10.0));
+}
+
+#[test]
+fn monospace_cell_metrics_are_stable() {
+    let Some(t) = sys() else { return };
+    let st = TextStyle::sized(14.0).mono();
+    let a = t.cell_metrics(&st, 1.0);
+    assert_eq!(a, t.cell_metrics(&st, 1.0));
+    let b = t.cell_metrics(&st, 2.0);
+    assert!(a.width >= 1 && a.height >= a.baseline);
+    assert!(b.width > a.width && b.height > a.height);
 }

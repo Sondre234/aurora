@@ -33,7 +33,7 @@ pub use geom::{Color, Insets, Point, Rect, Size};
 pub use input::{Button, Id, Input, Key, KeyEvent, Mods, UiEvent};
 pub use painter::{Image, Painter};
 pub use skia::{PaintBudgets, PaintCaches, PixelBuffer, SkiaPainter};
-pub use text::{FontFamily, ShapedText, TextBudgets, TextStyle, TextSystem, TextWrap};
+pub use text::{CellMetrics, FontFamily, ShapedText, TextBudgets, TextStyle, TextSystem, TextWrap};
 pub use ui::Ui;
 pub use widget::{
     Align, Canvas, Dim, Justify, List, ListItem, Node, Shadow, Style, TextAlign, TextInput,
