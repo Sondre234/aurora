@@ -1,0 +1,24 @@
+[package]
+name = "aurora-term"
+description = "Aurora terminal: alacritty_terminal emulation, tiny-skia cell renderer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+# Test-only input hook (AURORA_TERM_TEST_INPUT); never part of a default build.
+qa-hooks = []
+
+[[bin]]
+name = "aurora-term"
+path = "src/main.rs"
+
+[dependencies]
+aurora-ui = { path = "../ui" }
+aurora-ipc = { workspace = true }
+aurora-theme = { workspace = true }
+alacritty_terminal = "=0.26.0"
+rustix = { version = "1", features = ["pty", "termios", "process", "stdio", "fs"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+libc = { workspace = true }
