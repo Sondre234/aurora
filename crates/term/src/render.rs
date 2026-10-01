@@ -89,7 +89,10 @@ impl Fonts {
 /// Shaped glyph runs per character and face. Owner: the [`View`]; invalidated by a theme
 /// or scale change (everything is shaped for one scale and font); budgeted by
 /// [`GLYPH_BUDGET`] with LRU eviction; hit rate and size appear as `perf` lines.
+/// ASCII skips the LRU bookkeeping through a direct table: at most 4 faces x 128 chars,
+/// so its size is bounded without a budget.
 pub struct GlyphCache {
+    ascii: Vec<Option<Arc<ShapedText>>>,
     single: LruCache<(char, u8), Arc<ShapedText>>,
     cluster: LruCache<(String, u8), Arc<ShapedText>>,
 }
@@ -97,12 +100,14 @@ pub struct GlyphCache {
 impl GlyphCache {
     pub fn new() -> Self {
         Self {
+            ascii: vec![None; 4 * 128],
             single: LruCache::new("term-glyphs", GLYPH_BUDGET),
             cluster: LruCache::new("term-clusters", GLYPH_BUDGET / 4),
         }
     }
 
     pub fn clear(&mut self) {
+        self.ascii.fill(None);
         self.single.clear();
         self.cluster.clear();
     }
@@ -117,7 +122,16 @@ impl GlyphCache {
         let face = cell.attrs.bold as u8 | (cell.attrs.italic as u8) << 1;
         let style = fonts.style(cell.attrs.bold, cell.attrs.italic);
         let bytes = |s: &ShapedText| 96 + s.glyph_count() * 40;
-        if cell.zerowidth.is_empty() {
+        if cell.zerowidth.is_empty() && cell.ch.is_ascii() {
+            let slot = (face as usize) << 7 | cell.ch as usize;
+            if let Some(s) = &self.ascii[slot] {
+                return s.clone();
+            }
+            let mut buf = [0u8; 4];
+            let s = text.shape(cell.ch.encode_utf8(&mut buf), style, scale, None);
+            self.ascii[slot] = Some(s.clone());
+            s
+        } else if cell.zerowidth.is_empty() {
             let key = (cell.ch, face);
             if let Some(s) = self.single.get(&key) {
                 return s;
