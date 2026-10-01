@@ -16,12 +16,14 @@ use crate::pty;
 impl TermApp {
     pub(super) fn configured(&mut self, rt: &mut Runtime<Self>, id: SurfaceId, size: Size) {
         let scale = rt.scale(id).unwrap_or(1.0);
+        let first = !std::mem::replace(&mut self.configured_once, true);
         let changed = self.view.borrow_mut().relayout((size.w, size.h), scale);
-        if changed {
+        // The first size is announced by `ready`, the child starts at it.
+        if changed && !first {
             self.grid_changed();
         }
         self.flush_damage(rt);
-        if !std::mem::replace(&mut self.configured_once, true) {
+        if first {
             self.first_configure(rt);
         }
     }

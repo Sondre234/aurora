@@ -7,6 +7,15 @@
 //! mono font come from the theme (`theme.toml`, live over the compositor IPC when
 //! `AURORA_IPC_SOCK` is reachable). Logs go to stderr (`RUST_LOG` filters).
 //!
+//! Keys: Ctrl+Shift+C / Ctrl+Shift+V copy and paste, Shift+Insert and the middle button
+//! paste the primary selection (selecting text owns it), Shift+PageUp/PageDown and the
+//! wheel scroll the history, any typed key returns to the bottom. Ctrl+click opens an
+//! OSC 8 hyperlink with `xdg-open`.
+//!
+//! Test hook: built with `--features qa-hooks` (never by default), the bytes of the file
+//! named by `AURORA_TERM_TEST_INPUT` are written to the pty right after the child starts,
+//! as if typed.
+//!
 //! Exit status: 0 normally, 1 when the window or the child could not be started, 2 for
 //! a usage error.
 
