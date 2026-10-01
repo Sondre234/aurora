@@ -35,8 +35,8 @@ file manager never takes down the session.
 | `notifd` | `aurora-notifd`: `org.freedesktop.Notifications` |
 | `lock` | `aurora-lock`: `ext-session-lock` screen locker |
 | `settingsd` | Config daemon + GUI |
-| `term` | GPU terminal |
-| `files` | File manager |
+| `term` | `aurora-term`: terminal (alacritty_terminal emulation, tiny-skia cell renderer first, GPU backend later) |
+| `files` | `aurora-files`: file manager |
 
 Crates are added as their milestone is reached.
 
@@ -47,7 +47,7 @@ Crates are added as their milestone is reached.
 - [x] **M2** Usable: tiling, workspaces, XWayland, layer-shell, config, multi-monitor. Verified on hardware
 - [x] **M3** The look: animation engine, rounded corners, shadows, blur, live overview, X11 scaling. Verified on hardware
 - [x] **M4** Services: `ipc`, `theme`, `ui`, shell bar, launcher, notifd, lock. Verified on hardware. Plan in [docs/m4-plan.md](docs/m4-plan.md)
-- [ ] **M5** `term` and `files`
+- [ ] **M5** `term` and `files`. Plan in [docs/m5-plan.md](docs/m5-plan.md)
 
 ## Using it (M2)
 
