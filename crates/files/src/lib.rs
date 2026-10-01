@@ -5,7 +5,10 @@
 //! [`ops`] (executor), [`names`] (name validation and collision-free names), [`uri`] (clipboard codecs),
 //! [`trash`] (FreeDesktop trash).
 
+pub mod actions;
+pub mod app;
 pub mod edit;
+pub mod input;
 pub mod ipc;
 pub mod listing;
 pub mod model;
@@ -14,6 +17,8 @@ pub mod ops;
 pub mod places;
 pub mod scene;
 pub mod system;
+#[cfg(feature = "qa-hooks")]
+pub mod testscript;
 pub mod trash;
 pub mod uri;
 pub mod view;

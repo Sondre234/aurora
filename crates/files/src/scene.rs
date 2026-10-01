@@ -122,6 +122,16 @@ impl Scene {
         self.cut_dir.as_deref() == Some(self.browser.path()) && self.cut.contains(name)
     }
 
+    /// The modal card and its buttons, as painted.
+    pub fn modal_layout(&self) -> Option<(Rect, Vec<Rect>)> {
+        let modal = self.modal.as_ref()?;
+        let extra = usize::from(modal.apply_all.is_some());
+        Some(
+            self.metrics()
+                .modal(modal.buttons.len(), modal.lines.len() + extra + 1),
+        )
+    }
+
     /// Paints the part of the window inside `area` (logical px).
     pub fn paint(&mut self, p: &mut dyn Painter, area: Rect) {
         let m = self.metrics();
@@ -583,8 +593,9 @@ impl Scene {
             Rect::new(0.0, 0.0, m.size.w, m.size.h),
             Color::rgba(0, 0, 0, 120),
         );
-        let extra = usize::from(modal.apply_all.is_some());
-        let (card, buttons) = m.modal(modal.buttons.len(), modal.lines.len() + extra + 1);
+        let Some((card, buttons)) = self.modal_layout() else {
+            return;
+        };
         p.shadow(card, l.radius + 4.0, 32.0, Point::new(0.0, 10.0), l.shadow);
         p.fill_rounded_rect(
             card,
