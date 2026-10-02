@@ -13,6 +13,8 @@
 #      (lock), each only if your file does not already define them. theme.toml is linked in
 #      next to it so the services follow your theme. [services.notifd] is added only when
 #      nothing owns org.freedesktop.Notifications on your session bus (dunst would win).
+#      [session] import_environment is forced off, so a test run never repoints the
+#      systemd/D-Bus environment of the session you may have open on another VT.
 #   3. Puts target/release on PATH so the services are found by name, and runs
 #      aurora-comp --drm with the merged config.
 #
@@ -77,6 +79,17 @@ if [ -z "$owner" ]; then
     service notifd ''
 else
     echo "aurora-test: org.freedesktop.Notifications is owned ($owner); not starting aurora-notifd" >&2
+fi
+
+# A test run must not point the systemd/D-Bus environment (portals, polkit) of the session
+# you may still have open on another VT at itself: no [session] import_environment.
+if grep -q '^[[:space:]]*import_environment[[:space:]]*=' "$CFG"; then
+    sed -i 's/^[[:space:]]*import_environment[[:space:]]*=.*/import_environment = false/' "$CFG"
+elif grep -q '^\[session\]' "$CFG"; then
+    awk '{ print } /^\[session\]/ { print "import_environment = false" }' "$CFG" >"$OUT/config.tmp"
+    mv "$OUT/config.tmp" "$CFG"
+else
+    printf '\n[session]\nimport_environment = false\n' >>"$CFG"
 fi
 
 export PATH=$BIN:$PATH
