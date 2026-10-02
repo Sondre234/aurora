@@ -268,6 +268,9 @@ impl Aurora {
             self.wm.tick(now) | crate::overview::Overview::tick(&mut self.overview, &self.wm, now);
         let output = surface.output.clone();
         let _span = tracing::debug_span!("render_surface", output = %output.name()).entered();
+        let vrr_mode = crate::display::vrr::mode_for(&self.config.outputs, &output.name());
+        let fullscreen = self.wm.output_fullscreen(&output);
+        let _ = super::display::sync_vrr(surface, vrr_mode, fullscreen);
 
         self.space.refresh();
         self.xwayland.unmanaged.refresh();
@@ -526,7 +529,13 @@ impl Aurora {
             Ok(feedback) => {
                 surface.render.frame_pending = false;
                 if let Some(mut feedback) = feedback.flatten() {
-                    feedback.presented(clock, Refresh::fixed(frame_duration), seq as u64, flags);
+                    // With VRR the frame duration is only the fastest the panel goes.
+                    let refresh = if surface.drm_output.with_compositor(|c| c.vrr_enabled()) {
+                        Refresh::variable(frame_duration)
+                    } else {
+                        Refresh::fixed(frame_duration)
+                    };
+                    feedback.presented(clock, refresh, seq as u64, flags);
                 }
             }
             Err(err) => {

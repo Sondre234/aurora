@@ -7,10 +7,58 @@
 //! - Gamma: the atomic `GAMMA_LUT` blob when the driver has it, else the legacy ramp. The
 //!   wanted ramp is kept on the surface and pushed again after a session resume or power on,
 //!   since another DRM master may have changed it meanwhile.
-use smithay::{backend::drm::DrmNode, output::Output, reexports::drm::control::crtc};
+//! - VRR: `VRR_ENABLED` through the DRM compositor, toggled before the frame that needs it.
+use smithay::{
+    backend::drm::{DrmNode, VrrSupport},
+    output::Output,
+    reexports::drm::control::{connector, crtc},
+};
 
-use super::device::UdevOutputId;
-use crate::{backend::Backend, state::Aurora};
+use super::device::{ConnectorOutput, Surface, UdevOutputId};
+use crate::{
+    backend::Backend,
+    config::VrrMode,
+    display::vrr::{self, Capability},
+    state::Aurora,
+};
+
+pub fn vrr_capability(drm_output: &ConnectorOutput, connector: connector::Handle) -> Capability {
+    match drm_output.with_compositor(|c| c.vrr_supported(connector)) {
+        Ok(VrrSupport::Supported) => Capability::Supported,
+        Ok(VrrSupport::RequiresModeset) => Capability::RequiresModeset,
+        Ok(VrrSupport::NotSupported) => Capability::Unsupported,
+        Err(err) => {
+            tracing::debug!("vrr: capability unknown: {err}");
+            Capability::Unsupported
+        }
+    }
+}
+
+/// Brings the CRTC's VRR in line with the policy before a frame is built; the change rides
+/// on that frame's commit. True when it changed.
+pub fn sync_vrr(surface: &mut Surface, mode: VrrMode, fullscreen: bool) -> bool {
+    let want = vrr::target(mode, fullscreen, surface.vrr);
+    if surface.drm_output.with_compositor(|c| c.vrr_enabled()) == want {
+        surface.vrr_refused = None;
+        return false;
+    }
+    if surface.vrr_refused == Some(want) {
+        return false;
+    }
+    let name = surface.output.name();
+    match surface.drm_output.with_compositor(|c| c.use_vrr(want)) {
+        Ok(()) => {
+            surface.vrr_refused = None;
+            tracing::info!("vrr: output={name} {}", if want { "on" } else { "off" });
+            true
+        }
+        Err(err) => {
+            surface.vrr_refused = Some(want);
+            tracing::warn!("vrr: output={name} refused {want}: {err}");
+            false
+        }
+    }
+}
 
 impl Aurora {
     pub fn drm_set_power(&mut self, output: &Output, on: bool) {

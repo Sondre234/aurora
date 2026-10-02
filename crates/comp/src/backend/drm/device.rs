@@ -79,6 +79,10 @@ pub struct Surface {
     /// reach the hardware.
     pub gamma: Option<Vec<u16>>,
     pub gamma_pending: bool,
+    /// The connector's VRR capability, read once at connect.
+    pub vrr: crate::display::vrr::Capability,
+    /// The VRR state the driver last refused, so a failure is not retried every frame.
+    pub vrr_refused: Option<bool>,
     global: Option<GlobalId>,
     dh: DisplayHandle,
 }
@@ -431,6 +435,9 @@ impl Aurora {
             }
         };
 
+        let vrr = super::display::vrr_capability(&drm_output, connector.handle());
+        tracing::info!("output: {name} vrr={}", vrr.name());
+
         let dmabuf_feedback = drm_output.with_compositor(|c| {
             surface_feedback(device.render_node, &renderer.dmabuf_formats(), c.surface())
         });
@@ -458,6 +465,8 @@ impl Aurora {
                 dmabuf_feedback,
                 gamma: None,
                 gamma_pending: false,
+                vrr,
+                vrr_refused: None,
                 dh: self.display_handle.clone(),
             },
         );

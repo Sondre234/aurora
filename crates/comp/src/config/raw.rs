@@ -6,7 +6,7 @@ use toml::{Table, Value};
 
 use super::{
     AnimSpec, Animations, Color, Decoration, General, Glob, ModKey, ModeSpec, OutputRule,
-    RestartPolicy, ServiceSpec, WindowRule, WorkspaceRule, XWayland,
+    RestartPolicy, ServiceSpec, VrrMode, WindowRule, WorkspaceRule, XWayland,
 };
 use crate::anim::Curve;
 
@@ -428,7 +428,9 @@ pub fn outputs(section: Option<&Value>, warnings: &mut Vec<String>) -> Vec<Outpu
         check_keys(
             ctx,
             t,
-            &["name", "enabled", "primary", "position", "mode", "scale"],
+            &[
+                "name", "enabled", "primary", "position", "mode", "scale", "vrr",
+            ],
             w,
         );
         let e = |err| strip(err, ctx);
@@ -452,6 +454,11 @@ pub fn outputs(section: Option<&Value>, warnings: &mut Vec<String>) -> Vec<Outpu
         {
             return Err("position is out of range (-100000..=100000)".into());
         }
+        let vrr = match get_str(ctx, t, "vrr").map_err(e)? {
+            Some(text) => VrrMode::parse(text)
+                .ok_or_else(|| format!("invalid vrr {text:?} (off, on, on-demand)"))?,
+            None => VrrMode::Off,
+        };
         Ok(OutputRule {
             name: name.to_string(),
             enabled: get_bool(ctx, t, "enabled").map_err(e)?.unwrap_or(true),
@@ -459,6 +466,7 @@ pub fn outputs(section: Option<&Value>, warnings: &mut Vec<String>) -> Vec<Outpu
             position,
             mode,
             scale,
+            vrr,
         })
     });
     dedup(&mut rules, |r| r.name.clone(), "output", warnings);

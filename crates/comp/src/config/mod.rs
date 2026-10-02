@@ -291,6 +291,28 @@ pub struct OutputRule {
     pub position: Option<(i32, i32)>,
     pub mode: Option<ModeSpec>,
     pub scale: Option<f64>,
+    pub vrr: VrrMode,
+}
+
+/// `[[output]] vrr`: variable refresh rate (adaptive sync).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum VrrMode {
+    #[default]
+    Off,
+    On,
+    /// Only while a fullscreen window is on the output.
+    OnDemand,
+}
+
+impl VrrMode {
+    pub fn parse(text: &str) -> Option<Self> {
+        Some(match text {
+            "off" => Self::Off,
+            "on" => Self::On,
+            "on-demand" => Self::OnDemand,
+            _ => return None,
+        })
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -820,5 +842,38 @@ mod tests {
             Some(true)
         );
         assert_eq!(Color::parse("ff0000"), None);
+    }
+
+    #[test]
+    fn output_vrr_parses_and_rejects_bad_values() {
+        let (config, warnings) = resolve(
+            r#"
+            [[output]]
+            name = "A-1"
+            vrr = "on-demand"
+            [[output]]
+            name = "B-1"
+            vrr = "on"
+            [[output]]
+            name = "C-1"
+            [[output]]
+            name = "D-1"
+            vrr = "sometimes"
+            [[output]]
+            name = "E-1"
+            vrr = true
+            "#,
+        );
+        let vrr: Vec<_> = config.outputs.iter().map(|o| (o.name.as_str(), o.vrr)).collect();
+        assert_eq!(
+            vrr,
+            [
+                ("A-1", VrrMode::OnDemand),
+                ("B-1", VrrMode::On),
+                ("C-1", VrrMode::Off)
+            ]
+        );
+        assert_eq!(warnings.len(), 2, "{warnings:?}");
+        assert!(warnings.iter().all(|w| w.contains("vrr")), "{warnings:?}");
     }
 }

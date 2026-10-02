@@ -7,6 +7,7 @@ use crate::state::Aurora;
 
 pub mod gamma;
 pub mod power;
+pub mod vrr;
 
 /// Protocol globals and bookkeeping of the display stream, one field of `Aurora`.
 pub struct DisplayState {
