@@ -49,10 +49,6 @@ use smithay::{
     },
 };
 
-/// Keyboard repeat delay (ms) and rate (keys per second).
-pub const REPEAT_DELAY: i32 = 250;
-pub const REPEAT_RATE: i32 = 40;
-
 pub struct Aurora {
     pub backend: Backend,
     pub clock: Clock<Monotonic>,
@@ -79,6 +75,8 @@ pub struct Aurora {
     pub lock: Option<crate::lock::LockState>,
     /// Supervised `[services]` processes.
     pub services: crate::services::Services,
+    /// What D-Bus and systemd were last told about this session.
+    pub env_import: crate::session_env::EnvImport,
     /// The IPC server, `None` when it could not start.
     pub ipc: Option<crate::ipc::Ipc>,
     /// The live theme and where it is loaded from.
@@ -136,7 +134,11 @@ impl Aurora {
         let mut seat_state = SeatState::new();
         let mut seat: Seat<Self> = seat_state.new_wl_seat(&dh, backend.seat_name());
         let keyboard = seat
-            .add_keyboard(Default::default(), REPEAT_DELAY, REPEAT_RATE)
+            .add_keyboard(
+                Default::default(),
+                config.input.keyboard.repeat_delay,
+                config.input.keyboard.repeat_rate,
+            )
             .map_err(|err| format!("failed to add the keyboard: {err}"))?;
         let pointer = seat.add_pointer();
 
@@ -165,6 +167,7 @@ impl Aurora {
             layer_focus: Default::default(),
             lock: None,
             services,
+            env_import: Default::default(),
             ipc: None,
             theme,
             theme_path,

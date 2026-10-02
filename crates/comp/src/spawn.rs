@@ -2,6 +2,7 @@ use std::{
     ffi::{OsStr, OsString},
     os::unix::process::CommandExt,
     process::{Child, Command, Stdio},
+    time::{Duration, Instant},
 };
 
 use crate::state::Aurora;
@@ -77,6 +78,47 @@ pub fn spawn_argv(argv: &[String], env: &[(&str, &OsStr)]) {
     let line = argv.join(" ");
     tracing::info!("spawn: {line}");
     launch(command, &line);
+}
+
+/// Runs a program without a shell like `spawn_argv`, but its waiting thread logs how it
+/// ended (`<what>: ok` or `<what>: failed ...`) and kills it if it still runs after `limit`,
+/// so a hung helper never lingers. Never blocks the caller.
+pub fn spawn_logged(argv: &[String], env: &[(&str, &OsStr)], what: &'static str, limit: Duration) {
+    let Some(mut command) = argv_command(argv, env) else {
+        return;
+    };
+    command.stdout(Stdio::null());
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(err) => return tracing::warn!("{what}: failed to start {:?}: {err}", argv[0]),
+    };
+    let waiter = std::thread::Builder::new()
+        .name("reaper".into())
+        .spawn(move || {
+            let start = Instant::now();
+            let status = loop {
+                match child.try_wait() {
+                    Ok(Some(status)) => break Ok(status),
+                    Ok(None) if start.elapsed() < limit => {
+                        std::thread::sleep(Duration::from_millis(50));
+                    }
+                    Ok(None) => {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        break Err(format!("timed out after {}s", limit.as_secs()));
+                    }
+                    Err(err) => break Err(err.to_string()),
+                }
+            };
+            match status {
+                Ok(status) if status.success() => tracing::info!("{what}: ok"),
+                Ok(status) => tracing::warn!("{what}: failed {status}"),
+                Err(err) => tracing::warn!("{what}: failed {err}"),
+            }
+        });
+    if let Err(err) = waiter {
+        tracing::warn!("spawn: cannot start a reaper thread: {err}");
+    }
 }
 
 /// Starts `cmd` (through `sh -c`, own session) for the service supervisor, which reaps the

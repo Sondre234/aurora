@@ -1,0 +1,123 @@
+#!/bin/bash
+# Aurora as a daily login session: what the display manager runs (Exec= in aurora.desktop).
+# Installed next to aurora-comp by scripts/install.sh. For hand testing from a TTY with a
+# timeout and a merged test config, use scripts/aurora-test.sh instead.
+#
+#   aurora-session [extra aurora-comp args]
+#
+# What it does, in order:
+#   1. Sends its own output and every child's to $XDG_STATE_HOME/aurora/aurora.log, keeping
+#      the previous session's as aurora.log.old (the compositor also writes comp.log).
+#   2. Exports XDG_SESSION_TYPE=wayland, XDG_CURRENT_DESKTOP=Aurora, XDG_SESSION_DESKTOP=aurora
+#      and puts its own directory first on PATH, so services are found by name.
+#   3. With a systemd user manager: clears WAYLAND_DISPLAY, DISPLAY and the other session
+#      variables a previous session (Aurora or another compositor) left in it, and stops a
+#      stale aurora-session.target.
+#   4. Runs aurora-comp --drm --no-timeout with the real config (~/.config/aurora/config.toml,
+#      or AURORA_CONFIG). Not exec'd: the launcher stays to clean up after it.
+#   5. Once Aurora has imported its environment ([session] import_environment, the
+#      default), starts aurora-session.target, which binds graphical-session.target, so user
+#      units WantedBy=graphical-session.target (portals, polkit agent) start against Aurora.
+#   6. When the compositor exits, however it exits: stops aurora-session.target (and with it
+#      graphical-session.target and its units) and clears the session variables again.
+#
+# Environment: AURORA_COMP (compositor binary, default: aurora-comp next to this script, else
+# from PATH), AURORA_SESSION_DRY_RUN=1 (print the plan, start nothing, log to stderr).
+set -u
+
+SELF_DIR=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)
+TARGET=aurora-session.target
+VARS=(WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE XDG_SESSION_DESKTOP AURORA_IPC_SOCK)
+# Seconds to wait for the compositor's environment import before giving up on the target.
+IMPORT_WAIT=30
+DRY=${AURORA_SESSION_DRY_RUN:-}
+
+log() { printf 'aurora-session: %s\n' "$*" >&2; }
+
+COMP=${AURORA_COMP:-$SELF_DIR/aurora-comp}
+if [ ! -x "$COMP" ]; then
+    COMP=$(command -v aurora-comp) || { log "no aurora-comp next to $0 or on PATH"; exit 1; }
+fi
+
+if [ -z "$DRY" ]; then
+    STATE=${XDG_STATE_HOME:-$HOME/.local/state}/aurora
+    mkdir -p "$STATE"
+    LOG=$STATE/aurora.log
+    [ -f "$LOG" ] && mv -f "$LOG" "$LOG.old"
+    exec >"$LOG" 2>&1 </dev/null
+fi
+log "starting $(date --iso-8601=seconds), compositor $COMP"
+
+# Aurora sets these for its children; a leftover would leak to them when XWayland is down.
+unset WAYLAND_DISPLAY DISPLAY AURORA_IPC_SOCK
+export XDG_SESSION_TYPE=wayland
+export XDG_CURRENT_DESKTOP=Aurora
+export XDG_SESSION_DESKTOP=aurora
+export PATH="$SELF_DIR:$PATH"
+
+systemd=""
+if command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1; then
+    if systemctl --user cat "$TARGET" >/dev/null 2>&1; then
+        systemd=1
+    else
+        log "no $TARGET installed (scripts/install.sh), graphical-session units will not start"
+    fi
+fi
+
+# Only the session variables, never the whole login environment. (D-Bus has no unset; the
+# next session's import overwrites its copy.)
+clear_env() { systemctl --user unset-environment "${VARS[@]}"; }
+
+if [ -n "$DRY" ]; then
+    log "dry run: systemd=${systemd:-no}"
+    log "would run: $COMP --drm --no-timeout $*"
+    [ -n "$systemd" ] && log "would start $TARGET once WAYLAND_DISPLAY is imported, stop it on exit"
+    exit 0
+fi
+
+if [ -n "$systemd" ]; then
+    if systemctl --user -q is-active "$TARGET"; then
+        log "$TARGET is still active from an earlier session, stopping it"
+        systemctl --user stop "$TARGET"
+    fi
+    clear_env
+fi
+
+"$COMP" --drm --no-timeout "$@" &
+comp=$!
+# The display manager ends the session with SIGTERM/SIGHUP: pass it on and clean up below.
+trap 'kill -TERM "$comp" 2>/dev/null' TERM INT HUP
+
+waiter=""
+if [ -n "$systemd" ]; then
+    (
+        for _ in $(seq $((IMPORT_WAIT * 10))); do
+            kill -0 "$comp" 2>/dev/null || exit 0
+            if systemctl --user show-environment | grep -q '^WAYLAND_DISPLAY='; then
+                log "environment imported, starting $TARGET"
+                systemctl --user start "$TARGET" || log "starting $TARGET failed"
+                exit 0
+            fi
+            sleep 0.1
+        done
+        log "no WAYLAND_DISPLAY in the systemd environment after ${IMPORT_WAIT}s" \
+            "([session] import_environment off?), not starting $TARGET"
+    ) &
+    waiter=$!
+fi
+
+# `wait` returns early when a trapped signal arrives; keep waiting until it has really exited.
+while :; do
+    wait "$comp"
+    status=$?
+    kill -0 "$comp" 2>/dev/null || break
+done
+log "compositor exited with status $status"
+
+if [ -n "$systemd" ]; then
+    kill "$waiter" 2>/dev/null
+    wait "$waiter" 2>/dev/null
+    systemctl --user stop "$TARGET"
+    clear_env
+fi
+exit "$status"

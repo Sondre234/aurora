@@ -1,0 +1,69 @@
+# Daily-use additions for ~/.config/aurora/config.toml, on top of config/aurora.example.toml.
+# This file is complete and valid on its own (a unit test parses it), but you will usually
+# merge it into your own: TOML allows each [table] only once, so add the [keybinds] lines
+# below to your existing [keybinds] table, and keep `autostart` ABOVE the first [table] in
+# the file (a bare key after a table header belongs to that table).
+#
+# Programs used here (Arch packages): wireplumber (wpctl), brightnessctl, playerctl, grim,
+# slurp, wl-clipboard, swayidle, hyprpolkitagent, and wlopm (AUR) for turning monitors off.
+
+# Commands run once at login, through `sh -c`, after the socket exists.
+#
+# Polkit agent: started by systemd when hyprpolkitagent.service is enabled
+# (`systemctl --user enable hyprpolkitagent`, WantedBy=graphical-session.target, which
+# aurora-session starts). The line below only runs it when that service is not enabled.
+#
+# Idle and lock: lock after 5 min, monitors off after 10 min (on again at the first input),
+# lock before suspend. Locking goes through the IPC (`auroractl raw '"Lock"'` is the same as
+# the `lock` bind and needs [services.lock]). Monitors off/on use
+# wlr-output-power-management-v1 through wlopm; Aurora's support for that protocol and the
+# `power-off-monitors` / `power-on-monitors` actions come with the display work, so until it
+# is merged swayidle's monitor lines do nothing harmful but also nothing visible.
+# `-w` makes swayidle wait for before-sleep; `auroractl raw` returns once the compositor has
+# accepted the request, the lock surface follows a moment later.
+autostart = [
+    "systemctl --user -q is-enabled hyprpolkitagent.service 2>/dev/null || exec /usr/lib/hyprpolkitagent/hyprpolkitagent",
+    '''exec swayidle -w timeout 300 'auroractl raw "\"Lock\""' timeout 600 'wlopm --off "*"' resume 'wlopm --on "*"' before-sleep 'auroractl raw "\"Lock\""' ''',
+]
+
+# Supervised services (see the example config for every key). Leave out notifd if you keep
+# dunst or another notification daemon.
+[services.shell]
+command = "aurora-shell"
+restart = "always"
+
+[services.launcher]
+command = "aurora-launcher"
+restart = "always"
+
+[services.notifd]
+command = "aurora-notifd"
+restart = "on-failure"
+
+[services.lock]
+command = "aurora-lock"
+autostart = false
+restart = "always"
+
+[keybinds]
+"Mod+space" = "spawn aurora-launcher toggle"
+"Mod+l" = "lock"
+
+# Volume (default sink, capped at 100%) and microphone mute, repeating while held.
+"XF86AudioRaiseVolume" = { action = "spawn wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 5%+", repeat = true }
+"XF86AudioLowerVolume" = { action = "spawn wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-", repeat = true }
+"XF86AudioMute" = "spawn wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"
+"XF86AudioMicMute" = "spawn wpctl set-mute @DEFAULT_AUDIO_SOURCE@ toggle"
+"XF86AudioPlay" = "spawn playerctl play-pause"
+"XF86AudioPause" = "spawn playerctl play-pause"
+"XF86AudioNext" = "spawn playerctl next"
+"XF86AudioPrev" = "spawn playerctl previous"
+
+# Backlight: laptops and some monitors only; desktop monitors usually need ddcutil instead.
+"XF86MonBrightnessUp" = { action = "spawn brightnessctl set 5%+", repeat = true }
+"XF86MonBrightnessDown" = { action = "spawn brightnessctl set 5%-", repeat = true }
+
+# Screenshots (grim uses ext-image-copy-capture): Print selects a region to the clipboard,
+# Shift+Print saves the whole layout to ~/Pictures/Screenshots.
+"Print" = '''spawn grim -g "$(slurp)" - | wl-copy --type image/png'''
+"Shift+Print" = '''spawn mkdir -p ~/Pictures/Screenshots && grim ~/Pictures/Screenshots/$(date +%Y-%m-%d_%H-%M-%S).png'''
