@@ -433,7 +433,14 @@ pub fn outputs(section: Option<&Value>, warnings: &mut Vec<String>) -> Vec<Outpu
             ctx,
             t,
             &[
-                "name", "enabled", "primary", "position", "mode", "scale", "vrr",
+                "name",
+                "enabled",
+                "primary",
+                "position",
+                "mode",
+                "scale",
+                "vrr",
+                "transform",
             ],
             w,
         );
@@ -463,6 +470,14 @@ pub fn outputs(section: Option<&Value>, warnings: &mut Vec<String>) -> Vec<Outpu
                 .ok_or_else(|| format!("invalid vrr {text:?} (off, on, on-demand)"))?,
             None => VrrMode::Off,
         };
+        let transform = match get_str(ctx, t, "transform").map_err(e)? {
+            Some(text) => Some(super::parse_transform(text).ok_or_else(|| {
+                format!(
+                    "invalid transform {text:?} (normal, 90, 180, 270, flipped, flipped-90, ...)"
+                )
+            })?),
+            None => None,
+        };
         Ok(OutputRule {
             name: name.to_string(),
             enabled: get_bool(ctx, t, "enabled").map_err(e)?.unwrap_or(true),
@@ -471,6 +486,7 @@ pub fn outputs(section: Option<&Value>, warnings: &mut Vec<String>) -> Vec<Outpu
             mode,
             scale,
             vrr,
+            transform,
         })
     });
     dedup(&mut rules, |r| r.name.clone(), "output", warnings);

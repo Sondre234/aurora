@@ -13,6 +13,7 @@ use std::{
 
 use crate::anim::Curve;
 use crate::state::Aurora;
+use smithay::utils::Transform;
 use keybind::{BindTable, Mods};
 
 pub mod keybind;
@@ -295,6 +296,24 @@ pub struct OutputRule {
     pub mode: Option<ModeSpec>,
     pub scale: Option<f64>,
     pub vrr: VrrMode,
+    /// `None` is normal (no rotation).
+    pub transform: Option<Transform>,
+}
+
+/// `[[output]] transform`: the wl_output transform names, `normal`, `90`, `180`, `270`,
+/// `flipped`, `flipped-90`, `flipped-180`, `flipped-270`.
+pub fn parse_transform(text: &str) -> Option<Transform> {
+    Some(match text {
+        "normal" => Transform::Normal,
+        "90" => Transform::_90,
+        "180" => Transform::_180,
+        "270" => Transform::_270,
+        "flipped" => Transform::Flipped,
+        "flipped-90" => Transform::Flipped90,
+        "flipped-180" => Transform::Flipped180,
+        "flipped-270" => Transform::Flipped270,
+        _ => return None,
+    })
 }
 
 /// `[[output]] vrr`: variable refresh rate (adaptive sync).
@@ -560,6 +579,7 @@ impl Aurora {
                     .virtual_keyboard
                     .set_allowed(config.general.allow_virtual_keyboard);
                 self.config = Arc::new(config);
+                self.display_config_reloaded();
                 self.apply_config();
                 self.reapply_output_config();
                 self.drm_apply_output_config();
@@ -878,5 +898,24 @@ mod tests {
         );
         assert_eq!(warnings.len(), 2, "{warnings:?}");
         assert!(warnings.iter().all(|w| w.contains("vrr")), "{warnings:?}");
+    }
+    #[test]
+    fn output_transform_parses_names() {
+        let (config, warnings) = resolve(
+            r#"
+            [[output]]
+            name = "A-1"
+            transform = "flipped-90"
+            [[output]]
+            name = "B-1"
+            [[output]]
+            name = "C-1"
+            transform = "sideways"
+            "#,
+        );
+        let got: Vec<_> = config.outputs.iter().map(|o| o.transform).collect();
+        assert_eq!(got, [Some(Transform::Flipped90), None]);
+        assert!(warnings.iter().any(|w| w.contains("transform")), "{warnings:?}");
+        assert_eq!(parse_transform("270"), Some(Transform::_270));
     }
 }

@@ -181,6 +181,7 @@ mod tests {
             mode: None,
             scale: None,
             vrr: Default::default(),
+            transform: None,
         }
     }
 

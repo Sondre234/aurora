@@ -41,7 +41,7 @@ use crate::{
     dmabuf::{SurfaceDmabufFeedback, surface_feedback},
     outputs::choose_mode,
     state::Aurora,
-    wm::outputs::rule_scale,
+    wm::outputs::{rule_scale, rule_transform},
 };
 
 pub type Allocator = GbmAllocator<DrmDeviceFd>;
@@ -414,7 +414,12 @@ impl Aurora {
         );
         // The DRM compositor refuses an output without a current mode.
         output.set_preferred(wl_mode);
-        output.change_current_state(Some(wl_mode), None, Some(rule_scale(rule.as_ref())), None);
+        output.change_current_state(
+            Some(wl_mode),
+            Some(rule_transform(rule.as_ref())),
+            Some(rule_scale(rule.as_ref())),
+            None,
+        );
 
         let drm_output = match device
             .output_manager
@@ -582,7 +587,7 @@ impl Aurora {
     /// modes that changed. A mode the driver refuses keeps the old one. Not exercised by the
     /// nested backend, so it is checked by reading only.
     pub fn drm_apply_output_config(&mut self) {
-        let config = self.config.clone();
+        let rules = self.display.rules.clone();
         let mut disable = Vec::new();
         let mut enable = Vec::new();
         let mut mode_changed = false;
@@ -603,7 +608,7 @@ impl Aurora {
                     .collect();
                 for (info, crtc) in connectors {
                     let name = connector_name(&info);
-                    let rule = config.outputs.iter().find(|r| r.name == name);
+                    let rule = rules.iter().find(|r| r.name == name);
                     let enabled =
                         rule.is_none_or(|r| r.enabled) || forced.as_deref() == Some(name.as_str());
                     let live = device.surfaces.contains_key(&crtc);

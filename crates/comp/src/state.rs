@@ -135,7 +135,7 @@ impl Aurora {
         );
 
         let captures = crate::capture::Captures::new(&dh);
-        let display_state = crate::display::DisplayState::new(&dh);
+        let display_state = crate::display::DisplayState::new(&dh, &config);
         let mut seat_state = SeatState::new();
         let mut seat: Seat<Self> = seat_state.new_wl_seat(&dh, backend.seat_name());
         let keyboard = seat

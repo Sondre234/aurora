@@ -81,6 +81,7 @@ mod tests {
             mode: None,
             scale: None,
             vrr: VrrMode::OnDemand,
+            transform: None,
         };
         assert_eq!(
             mode_for(std::slice::from_ref(&rule), "DP-1"),

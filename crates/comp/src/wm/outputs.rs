@@ -54,6 +54,11 @@ pub fn logical_size(output: &Output) -> Size {
     }
 }
 
+/// The transform a config rule asks for, normal when it names none.
+pub fn rule_transform(rule: Option<&OutputRule>) -> Transform {
+    rule.and_then(|r| r.transform).unwrap_or(Transform::Normal)
+}
+
 /// The scale a config rule asks for; anything unusable means 1.
 pub fn rule_scale(rule: Option<&OutputRule>) -> Scale {
     match rule.and_then(|r| r.scale) {
@@ -64,7 +69,7 @@ pub fn rule_scale(rule: Option<&OutputRule>) -> Scale {
 
 impl Aurora {
     pub fn output_rule(&self, name: &str) -> Option<&OutputRule> {
-        self.config.outputs.iter().find(|r| r.name == name)
+        self.display.rules.iter().find(|r| r.name == name)
     }
 
     /// The `primary = true` output if one is connected, else the first.
@@ -156,13 +161,17 @@ impl Aurora {
         self.queue_redraw_all();
     }
 
-    /// Applies the config's scale and positions to the running outputs.
+    /// Applies the config's scale, transform and positions to the running outputs.
     pub fn reapply_output_config(&mut self) {
         let outputs = self.wm.outputs.clone();
         for output in &outputs {
-            let scale = rule_scale(self.output_rule(&output.name()));
+            let rule = self.output_rule(&output.name());
+            let (scale, transform) = (rule_scale(rule), rule_transform(rule));
             if output.current_scale().fractional_scale() != scale.fractional_scale() {
                 output.change_current_state(None, None, Some(scale), None);
+            }
+            if output.current_transform() != transform {
+                output.change_current_state(None, Some(transform), None, None);
             }
         }
         self.arrange_outputs();
