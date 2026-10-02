@@ -1,0 +1,11 @@
+# Started by aurora-session once Aurora has handed WAYLAND_DISPLAY and friends to the systemd
+# user manager, stopped when the compositor exits. graphical-session.target cannot be
+# started by hand (RefuseManualStart), so this target binds to it: units WantedBy it
+# (xdg-desktop-portal, hyprpolkitagent, ...) start with Aurora and stop with it.
+# Installed to ~/.config/systemd/user/ by scripts/install.sh. Never enable it.
+[Unit]
+Description=Aurora compositor session
+Documentation=man:systemd.special(7)
+BindsTo=graphical-session.target
+Wants=graphical-session-pre.target
+After=graphical-session-pre.target

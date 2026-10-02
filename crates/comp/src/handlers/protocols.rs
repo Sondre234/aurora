@@ -23,6 +23,7 @@ use smithay::{
         xdg_activation::{
             XdgActivationHandler, XdgActivationState, XdgActivationToken, XdgActivationTokenData,
         },
+        xdg_foreign::{XdgForeignHandler, XdgForeignState},
     },
 };
 
@@ -204,5 +205,26 @@ impl Aurora {
             tracing::info!("shortcuts inhibit: revoked");
             inhibitor.inactivate();
         }
+    }
+}
+
+/// Portal dialogs (file chooser, screen share picker) run in another process and name their
+/// parent through an exported handle; Smithay checks it and sets the toplevel's parent.
+impl XdgForeignHandler for Aurora {
+    fn xdg_foreign_state(&mut self) -> &mut XdgForeignState {
+        &mut self.protocols.xdg_foreign
+    }
+}
+
+/// The icon is double-buffered on the surface by Smithay and read when needed.
+impl smithay::wayland::xdg_toplevel_icon::XdgToplevelIconHandler for Aurora {}
+
+/// The bell has no sound or flash yet; a terminal's bell shows up in the log only.
+impl smithay::wayland::xdg_system_bell::XdgSystemBellHandler for Aurora {
+    fn ring(&mut self, surface: Option<WlSurface>) {
+        let app_id = surface
+            .and_then(|s| self.wm.window_of(&s).map(|w| w.app_id.clone()))
+            .unwrap_or_default();
+        tracing::debug!(app_id, "system bell");
     }
 }

@@ -65,6 +65,57 @@ inactive_opacity = 1.0    # 0..=1, 1 leaves unfocused windows untouched
 [xwayland]
 scale = 1.0
 
+# Real sessions (--drm) only; nested runs never touch the host's environment. Once the socket
+# exists (and again when XWayland's DISPLAY is known) Aurora runs
+#   dbus-update-activation-environment --systemd WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP \
+#       XDG_SESSION_TYPE XDG_SESSION_DESKTOP AURORA_IPC_SOCK
+# so services that D-Bus or systemd start on demand (xdg-desktop-portal, gnome-keyring, polkit
+# agents, units WantedBy=graphical-session.target) reach this session. The log says
+# "session: environment import: ok" or why it failed. Read at startup.
+[session]
+import_environment = true
+
+# Input. Reload applies all of it live: a changed XKB field swaps the keymap for every client,
+# libinput settings go to every device present and to devices plugged in later.
+#
+# Keyboard. The keymap comes from the first source that compiles:
+#   1. ~/.config/aurora/keymap.xkb (or the file in AURORA_XKB_FILE), a full xkb keymap
+#   2. the XKB fields below, when any is set (unset ones are xkbcommon's defaults)
+#   3. XKB_DEFAULT_* environment variables
+#   4. /etc/X11/xorg.conf.d/00-keyboard.conf (what `localectl set-x11-keymap` writes)
+#   5. plain "us"
+# repeat_rate is keys per second (0..=1000, 0 turns repeat off, binds with `repeat` too);
+# repeat_delay is ms before a held key repeats (1..=10000).
+[input.keyboard]
+# layout = "us,no"
+# variant = "altgr-intl,"
+# model = "pc105"
+# options = "grp:alt_shift_toggle,caps:escape"
+# rules = "evdev"
+repeat_rate = 40
+repeat_delay = 250
+
+# Pointers (mice, trackballs, trackpoints) and touchpads. A device skips what it lacks.
+#   accel_profile  "flat" | "adaptive"
+#   accel_speed    -1..=1
+#   natural_scroll, left_handed
+#   scroll_method  "none" | "two-finger" | "edge" | "on-button-down"; unset keeps the
+#                  device's default
+#   tap, dwt       touchpads only: tap to click, disable while typing
+[input.pointer]
+accel_profile = "adaptive"
+accel_speed = 0.0
+natural_scroll = false
+left_handed = false
+
+[input.touchpad]
+accel_profile = "adaptive"
+accel_speed = 0.0
+natural_scroll = false
+left_handed = false
+tap = true
+dwt = true
+
 # Binds: "<Mods>+<key>" = "<action>", or a table { action = "..", repeat = false,
 # bypass_inhibit = false }. Modifiers: Mod, Super (Logo, Win), Ctrl, Shift, Alt, AltGr.
 # The key is an xkb keysym name naming the UNSHIFTED key (write Shift+1, not exclam);
@@ -257,3 +308,6 @@ scale = 1
 #   "Mod+q" = "spawn aurora-term"
 #   "Mod+e" = "spawn aurora-files"
 # Both follow theme.toml live and work without the IPC socket.
+#
+# A complete daily setup (services, media keys, screenshots, idle and lock) to merge into
+# this file: contrib/config.daily.toml. Logging in from SDDM: README, "Daily session".

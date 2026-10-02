@@ -16,8 +16,13 @@ use crate::state::Aurora;
 use smithay::utils::Transform;
 use keybind::{BindTable, Mods};
 
+mod input;
 pub mod keybind;
 mod raw;
+mod session;
+
+pub use input::{AccelProfile, Input, ScrollMethod};
+pub use session::Session;
 
 /// Also the source of the built-in default binds.
 pub const EXAMPLE: &str = include_str!("../../../../config/aurora.example.toml");
@@ -448,6 +453,10 @@ pub struct Config {
     pub autostart: Vec<String>,
     /// `[services.<name>]`, supervised by `services.rs`, sorted by name.
     pub services: Vec<ServiceSpec>,
+    /// `[session]`.
+    pub session: Session,
+    /// `[input.*]`: keymap, key repeat and libinput settings.
+    pub input: Input,
     /// False when the file did not exist and everything is defaults.
     pub from_file: bool,
 }
@@ -483,6 +492,8 @@ impl Config {
             window_rules: raw::window_rules(raw.window_rule.as_ref(), general.workspaces, &mut w),
             autostart: raw::autostart(raw.autostart.as_ref(), &mut w),
             services: raw::services(raw.services.as_ref(), &mut w),
+            session: session::session(raw.session.as_ref(), &mut w),
+            input: input::input(raw.input.as_ref(), &mut w),
             general,
             from_file: true,
         };
@@ -578,8 +589,10 @@ impl Aurora {
                 self.protocols
                     .virtual_keyboard
                     .set_allowed(config.general.allow_virtual_keyboard);
-                self.config = Arc::new(config);
+                let old = std::mem::replace(&mut self.config, Arc::new(config));
                 self.display_config_reloaded();
+                self.reapply_keyboard_config(&old.input);
+                self.reapply_device_config(&old.input);
                 self.apply_config();
                 self.reapply_output_config();
                 self.drm_apply_output_config();
@@ -627,12 +640,26 @@ mod tests {
         assert_eq!(config.animations.duration_ms, a.duration_ms);
         assert_eq!(config.animations.curve, a.curve);
         assert_eq!(config.xwayland, XWayland::default());
+        assert_eq!(config.session, Session::default());
+        assert_eq!(config.input, Input::default());
         assert_eq!(config.decoration.rounding, d.rounding);
         assert_eq!(config.decoration.shadow_radius, d.shadow_radius);
         assert_eq!(config.decoration.shadow_color, d.shadow_color);
         assert_eq!(config.decoration.blur_passes, d.blur_passes);
         assert_eq!(config.decoration.blur_radius, d.blur_radius);
         assert_eq!(config.decoration.inactive_opacity, d.inactive_opacity);
+    }
+
+    #[test]
+    fn daily_snippet_parses_cleanly() {
+        let (config, warnings) = resolve(include_str!("../../../../contrib/config.daily.toml"));
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(config.autostart.len(), 2);
+        assert!(config.autostart[1].contains(r#"'auroractl raw "\"Lock\""'"#));
+        let names: Vec<_> = config.services.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, ["launcher", "lock", "notifd", "shell"]);
+        let (defaults, _) = resolve("");
+        assert_eq!(config.binds.len(), defaults.binds.len() + 14);
     }
 
     #[test]
@@ -698,7 +725,11 @@ mod tests {
 
     #[test]
     fn xwayland_scale_parses_and_rejects_bad_values() {
-        assert_eq!(XWayland::default().dpi(), None, "the default changes nothing");
+        assert_eq!(
+            XWayland::default().dpi(),
+            None,
+            "the default changes nothing"
+        );
         let (config, warnings) = resolve("[xwayland]\nscale = 1.25\n");
         assert_eq!(config.xwayland.scale, 1.25);
         assert_eq!(config.xwayland.dpi(), Some(120));

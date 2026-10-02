@@ -87,8 +87,9 @@ impl GlobalDispatch2<ZwpVirtualKeyboardManagerV1, Aurora> for ManagerGlobal {
         );
     }
 
-    fn can_view(&self, _client: &Client) -> bool {
+    fn can_view(&self, client: &Client) -> bool {
         self.allowed.load(Ordering::Relaxed)
+            && crate::sandbox::can_view(crate::sandbox::Privileged::VirtualKeyboard, client)
     }
 }
 

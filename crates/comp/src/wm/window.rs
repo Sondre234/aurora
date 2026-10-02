@@ -7,6 +7,7 @@ use std::{
 };
 
 use smithay::wayland::seat::WaylandFocus;
+use smithay::wayland::{alpha_modifier::AlphaModifierSurfaceCachedState, compositor::with_states};
 use smithay::{
     backend::renderer::{
         element::{
@@ -310,8 +311,49 @@ impl WindowElement {
         let (geo, factor, alpha) = self.drawn_geometry(at);
         let rounding = (f64::from(d.rounding) * factor).round() as i32;
         let mut color = d.shadow_color.0;
-        color[3] *= alpha;
+        // The client's own alpha modifier fades its shadow too, on top of the animation's.
+        color[3] *= alpha * self.surface_alpha();
         cache.shadow(program, geo, rounding, d.shadow_radius, color)
+    }
+
+    /// The wp_alpha_modifier_v1 factor of the main surface, 1.0 without one. Smithay already
+    /// applies it to the surface elements; this is for what Aurora draws on the window's behalf.
+    pub fn surface_alpha(&self) -> f32 {
+        let Some(surface) = self.window.wl_surface() else {
+            return 1.0;
+        };
+        with_states(&surface, |states| {
+            states
+                .cached_state
+                .get::<AlphaModifierSurfaceCachedState>()
+                .current()
+                .multiplier_f32()
+                .unwrap_or(1.0)
+        })
+    }
+
+    /// The content type the main surface declared (wp_content_type_v1). Nothing acts on it
+    /// yet; it is here for on-demand VRR and similar per-window policy.
+    #[allow(dead_code)]
+    pub fn content_type(&self) -> crate::protocols::ContentType {
+        self.window
+            .wl_surface()
+            .map_or_else(Default::default, |s| crate::protocols::content_type(&s))
+    }
+
+    /// The icon name the client set with xdg-toplevel-icon-v1 (pixel icons are not read).
+    /// Stored only: the IPC window info does not carry it yet.
+    #[allow(dead_code)]
+    pub fn icon_name(&self) -> Option<String> {
+        let surface = self.window.wl_surface()?;
+        with_states(&surface, |states| {
+            states
+                .cached_state
+                .get::<smithay::wayland::xdg_toplevel_icon::ToplevelIconCachedState>()
+                .current()
+                .icon_name()
+                .map(str::to_owned)
+        })
     }
 
     /// Window geometry in output-relative logical pixels for a surface origin `at`.

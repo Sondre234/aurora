@@ -45,6 +45,7 @@ impl CompositorHandler for Aurora {
 
     fn new_surface(&mut self, surface: &WlSurface) {
         crate::syncobj::install_blocker_hook(surface);
+        crate::pacing::install_commit_timer_hook(surface);
     }
 
     fn commit(&mut self, surface: &WlSurface) {
@@ -91,6 +92,7 @@ impl CompositorHandler for Aurora {
             self.toplevel_commit(surface);
         }
         xdg_shell::handle_commit(&mut self.popups, surface);
+        self.ime_popup_commit(surface);
 
         if sync_subsurface || offscreen {
             return;
@@ -142,10 +144,14 @@ impl Aurora {
             // whose owner is not on any output has nothing to repaint.
             let mut owner = root;
             for _ in 0..16 {
-                let Some(PopupKind::Xdg(xdg)) = self.popups.find_popup(&owner) else {
-                    break;
+                let parent = match self.popups.find_popup(&owner) {
+                    Some(PopupKind::Xdg(xdg)) => xdg.get_parent_surface(),
+                    Some(PopupKind::InputMethod(ime)) => {
+                        ime.get_parent().map(|p| p.surface.clone())
+                    }
+                    None => break,
                 };
-                let Some(parent) = xdg.get_parent_surface() else {
+                let Some(parent) = parent else {
                     return Some(Vec::new());
                 };
                 owner = root_surface(&parent);

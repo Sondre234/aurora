@@ -227,6 +227,10 @@ impl Aurora {
     /// Renders one output if it has damage and no frame is in flight, then queues the frame.
     pub fn render_surface(&mut self, node: DrmNode, crtc: crtc::Handle) {
         let start = Instant::now();
+        // commit-timing: updates due by the time this frame is on screen go into it.
+        if let Some((output, target)) = self.frame_target(node, crtc) {
+            self.release_commit_timers(&output, target);
+        }
         let handle = self.handle.clone();
         let Backend::Drm(drm) = &mut self.backend else {
             return;
@@ -365,6 +369,8 @@ impl Aurora {
                         Err(err) => tracing::warn!(%err, "failed to arm the estimated vblank"),
                     }
                 }
+                // fifo-v1: what this frame shows is latched now, released once it is presented.
+                self.latch_fifo_barriers(&output);
             }
             Some(Ok(None)) => {}
             Some(Err(err)) => {
@@ -415,6 +421,24 @@ impl Aurora {
         }
     }
 
+    /// The output `render_surface` is about to render and when that frame reaches the screen,
+    /// `None` when it will not render now.
+    fn frame_target(&self, node: DrmNode, crtc: crtc::Handle) -> Option<(Output, Duration)> {
+        let Backend::Drm(drm) = &self.backend else {
+            return None;
+        };
+        let surface = drm.devices.get(&node)?.surfaces.get(&crtc)?;
+        let render = &surface.render;
+        if !drm.session_active || render.frame_pending || !render.damaged {
+            return None;
+        }
+        let now = Duration::from(self.clock.now());
+        let frame = frame_duration(&surface.output)?;
+        let last = render.last_presentation.map(Duration::from);
+        let target = crate::pacing::predict_presentation(now, last, frame);
+        Some((surface.output.clone(), target))
+    }
+
     /// Sends the frame callbacks of an empty frame at the time its vblank would have been.
     fn estimated_vblank(
         &mut self,
@@ -448,6 +472,8 @@ impl Aurora {
             feedback.as_ref(),
             states,
         );
+        // Nothing flipped, but the refresh cycle passed: FIFO clients move on.
+        self.signal_fifo_barriers(&output);
         let _ = self.display_handle.flush_clients();
     }
 
@@ -530,9 +556,11 @@ impl Aurora {
         surface.render.last_presentation = Some(clock);
 
         let mut render_again = true;
+        let mut presented = None;
         match surface.drm_output.frame_submitted() {
             Ok(feedback) => {
                 surface.render.frame_pending = false;
+                presented = Some(surface.output.clone());
                 if let Some(mut feedback) = feedback.flatten() {
                     // With VRR the frame duration is only the fastest the panel goes.
                     let refresh = if surface.drm_output.with_compositor(|c| c.vrr_enabled()) {
@@ -578,6 +606,12 @@ impl Aurora {
             surface
                 .render
                 .schedule(&handle, node, crtc, Some(frame_duration.mul_f64(0.6)));
+        }
+        // fifo-v1: the frame is on screen, so the updates waiting on it may follow. After
+        // the scheduling above, so a released commit renders at the planned time.
+        if let Some(output) = presented {
+            self.signal_fifo_barriers(&output);
+            let _ = self.display_handle.flush_clients();
         }
     }
 }

@@ -12,6 +12,7 @@ mod effects;
 mod emergency;
 mod focus;
 mod handlers;
+mod ime;
 mod input;
 mod ipc;
 mod keymap;
@@ -21,11 +22,14 @@ mod lock;
 mod log;
 mod outputs;
 mod overview;
+mod pacing;
 mod protocols;
 mod safety;
+mod sandbox;
 mod scene;
 mod services;
 mod session;
+mod session_env;
 mod spawn;
 mod state;
 mod syncobj;
@@ -100,6 +104,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     // Before any child starts, so they all see AURORA_IPC_SOCK.
     state.ipc_start();
     state.start_xwayland();
+    // D-Bus and systemd activated services (portals, keyring, polkit) find this session.
+    state.import_session_env();
     state.spawn(&cli.command);
     // exec-once: once per process, never re-run by a reload.
     for cmd in state.config.autostart.clone() {

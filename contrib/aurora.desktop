@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=Aurora
+Comment=Aurora Wayland compositor and desktop
+Exec=aurora-session
+TryExec=aurora-session
+Type=Application
+DesktopNames=Aurora

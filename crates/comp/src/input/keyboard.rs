@@ -16,7 +16,7 @@ use crate::{
     config::keybind::{Bind, Chord, Mods, Trigger},
     emergency::{self, Emergency},
     overview::input::{OverviewKey, key_for},
-    state::{Aurora, REPEAT_DELAY, REPEAT_RATE},
+    state::Aurora,
 };
 
 /// What the filter decided for a key press.
@@ -27,6 +27,8 @@ enum KeyOutcome {
     Overview(OverviewKey),
     /// The release of a key whose press a bind took.
     Swallowed,
+    /// A key for the client that must not go through the IME's keyboard grab.
+    PastIme,
 }
 
 /// The repeat bind that is currently held.
@@ -59,6 +61,7 @@ impl Aurora {
     ) {
         self.notify_activity();
         let serial = SERIAL_COUNTER.next_serial();
+        let past_ime = self.bypasses_ime(source != KeyboardSource::MAIN);
         let outcome = self.keyboard.clone().input_from_source::<KeyOutcome, _>(
             source,
             self,
@@ -66,7 +69,12 @@ impl Aurora {
             key_state,
             serial,
             time,
-            |state, modifiers, handle| state.filter_key(keycode, key_state, modifiers, &handle),
+            |state, modifiers, handle| match state
+                .filter_key(keycode, key_state, modifiers, &handle)
+            {
+                FilterResult::Forward if past_ime => FilterResult::Intercept(KeyOutcome::PastIme),
+                other => other,
+            },
         );
 
         match &outcome {
@@ -89,6 +97,7 @@ impl Aurora {
                 }
             }
             Some(KeyOutcome::Overview(key)) => self.overview_key(*key),
+            Some(KeyOutcome::PastIme) => self.forward_past_ime(keycode, key_state, time),
             Some(KeyOutcome::Swallowed) | None => {}
         }
         if matches!(outcome, Some(KeyOutcome::Emergency(_))) {
@@ -189,10 +198,18 @@ impl Aurora {
         }
     }
 
-    /// Fires `action` again after `REPEAT_DELAY`, then at `REPEAT_RATE`, until the key goes up.
+    /// Fires `action` again after the keyboard's repeat delay, then at its rate, until the key
+    /// goes up. A rate of 0 (`[input.keyboard] repeat_rate`) turns repeat off.
     fn start_repeat(&mut self, keycode: Keycode, action: Action) {
-        let period = Duration::from_micros(1_000_000 / REPEAT_RATE as u64);
-        let timer = Timer::from_duration(Duration::from_millis(REPEAT_DELAY as u64));
+        let keyboard = &self.config.input.keyboard;
+        let Ok(rate) = u64::try_from(keyboard.repeat_rate) else {
+            return;
+        };
+        if rate == 0 {
+            return;
+        }
+        let period = Duration::from_micros(1_000_000 / rate);
+        let timer = Timer::from_duration(Duration::from_millis(keyboard.repeat_delay as u64));
         let token = self.handle.insert_source(timer, move |_, _, state| {
             // Also stops if the release was absorbed elsewhere (another source, a pause).
             let held = state.keyboard.pressed_keys().contains(&keycode);
