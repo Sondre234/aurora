@@ -270,7 +270,9 @@ impl Aurora {
         let _span = tracing::debug_span!("render_surface", output = %output.name()).entered();
         let vrr_mode = crate::display::vrr::mode_for(&self.display.rules, &output.name());
         let fullscreen = self.wm.output_fullscreen(&output);
-        let _ = super::display::sync_vrr(surface, vrr_mode, fullscreen);
+        if super::display::sync_vrr(surface, vrr_mode, fullscreen) {
+            self.display.output_management.dirty = true;
+        }
         let tearing =
             crate::display::tearing::wanted(&self.wm, &output, self.config.general.allow_tearing);
         self.display.tearing.note(&output, tearing);

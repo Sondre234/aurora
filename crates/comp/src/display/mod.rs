@@ -11,6 +11,7 @@ use crate::{
 };
 
 pub mod gamma;
+pub mod output_management;
 pub mod power;
 pub mod rules;
 pub mod tearing;
@@ -21,6 +22,7 @@ pub struct DisplayState {
     pub power: power::PowerState,
     pub gamma: gamma::GammaState,
     pub tearing: tearing::TearingState,
+    pub output_management: output_management::OutputManagementState,
     /// Runtime changes from wlr-output-management, by output name, until the next reload.
     pub overrides: BTreeMap<String, rules::OutputOverride>,
     /// The config's output rules with the overrides applied; what `output_rule` reads.
@@ -33,6 +35,7 @@ impl DisplayState {
             power: power::PowerState::new(dh),
             gamma: gamma::GammaState::new(dh),
             tearing: tearing::TearingState::new(dh),
+            output_management: output_management::OutputManagementState::new(dh),
             overrides: BTreeMap::new(),
             rules: config.outputs.clone(),
         }
@@ -58,11 +61,14 @@ impl Aurora {
     }
 
     /// A new output joined the layout (called from `add_output`).
-    pub fn display_output_added(&mut self, _output: &Output) {}
+    pub fn display_output_added(&mut self, _output: &Output) {
+        self.display.output_management.dirty = true;
+    }
 
     /// An output is going away and is still alive (called from `wm_output_removed`).
     pub fn display_output_removed(&mut self, output: &Output) {
         self.power_output_removed(output);
         self.gamma_output_removed(output);
+        self.display.output_management.dirty = true;
     }
 }

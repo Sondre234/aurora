@@ -145,6 +145,7 @@ impl Aurora {
     /// Something about the arrangement changed (position, size, scale, an output came or
     /// went): lay everything out again, keep the pointer on an output and tell clients.
     pub fn wm_output_geometry_changed(&mut self) {
+        self.display.output_management.dirty = true;
         self.space.refresh();
         // Layout rebases floating windows whose output rectangle moved.
         self.relayout_all();

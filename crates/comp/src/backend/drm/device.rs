@@ -100,7 +100,7 @@ impl Drop for Surface {
 pub struct Device {
     pub surfaces: HashMap<crtc::Handle, Surface>,
     pub output_manager: OutputManager,
-    scanner: DrmScanner,
+    pub(super) scanner: DrmScanner,
     /// Connectors the config turned off, kept so a reload can turn them on again.
     disabled: HashMap<crtc::Handle, connector::Info>,
     pub render_node: DrmNode,
@@ -232,6 +232,8 @@ impl Aurora {
         let Some(device) = drm.devices.get_mut(&node) else {
             return;
         };
+        // Disabled connectors coming and going are heads too.
+        self.display.output_management.dirty = true;
         let events = match device
             .scanner
             .scan_connectors(device.output_manager.device())
@@ -520,7 +522,7 @@ impl Aurora {
     }
 }
 
-fn connector_name(connector: &connector::Info) -> String {
+pub(super) fn connector_name(connector: &connector::Info) -> String {
     format!(
         "{}-{}",
         connector.interface().as_str(),

@@ -116,6 +116,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         state.ipc_update();
         // A lock client that vanished, or an output that changed, while locked.
         state.lock_update();
+        // Output changes reach wlr-output-management clients.
+        state.display_update();
     });
     // Every exit path: the window manager must go before the state drops, and the server
     // with it, so no Xwayland outlives the compositor.

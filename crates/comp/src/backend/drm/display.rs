@@ -14,11 +14,16 @@ use smithay::{
     reexports::drm::control::{connector, crtc},
 };
 
-use super::device::{ConnectorOutput, Surface, UdevOutputId};
+use smithay_drm_extras::display_info;
+
+use super::device::{ConnectorOutput, Surface, UdevOutputId, connector_name};
 use crate::{
     backend::Backend,
     config::VrrMode,
-    display::vrr::{self, Capability},
+    display::{
+        output_management::{HeadState, ModeInfo},
+        vrr::{self, Capability},
+    },
     state::Aurora,
 };
 
@@ -61,6 +66,61 @@ pub fn sync_vrr(surface: &mut Surface, mode: VrrMode, fullscreen: bool) -> bool 
 }
 
 impl Aurora {
+    /// Every connector with a CRTC, live or disabled, as an output-management head.
+    pub fn drm_heads(&self) -> Vec<HeadState> {
+        let Backend::Drm(drm) = &self.backend else {
+            return Vec::new();
+        };
+        let mut heads = Vec::new();
+        for device in drm.devices.values() {
+            for (info, crtc) in device.scanner.crtcs() {
+                if let Some(surface) = device.surfaces.get(&crtc) {
+                    let mut head = HeadState::from_output(&surface.output, true);
+                    // The connector's own list, so every mode is offered, not only the ones
+                    // the output was told about.
+                    let current = head.current_mode.map(|i| head.modes[i]);
+                    head.modes = connector_modes(info);
+                    head.current_mode = current.and_then(|c| {
+                        head.modes.iter().position(|m| {
+                            (m.width, m.height, m.refresh_mhz) == (c.width, c.height, c.refresh_mhz)
+                        })
+                    });
+                    head.adaptive_sync = surface.drm_output.with_compositor(|c| c.vrr_enabled());
+                    head.vrr_capable = surface.vrr != Capability::Unsupported;
+                    heads.push(head);
+                    continue;
+                }
+                let name = connector_name(info);
+                let edid =
+                    display_info::for_connector(device.output_manager.device(), info.handle());
+                let field = |f: Option<String>| f.unwrap_or_else(|| "Unknown".into());
+                let make = field(edid.as_ref().and_then(|i| i.make()));
+                let model = field(edid.as_ref().and_then(|i| i.model()));
+                let serial = field(edid.as_ref().and_then(|i| i.serial()));
+                let (w, h) = info.size().unwrap_or((0, 0));
+                heads.push(HeadState {
+                    description: format!("{make} - {model} - {name}"),
+                    name,
+                    make,
+                    model,
+                    serial,
+                    physical_size: (w as i32, h as i32),
+                    modes: connector_modes(info),
+                    enabled: false,
+                    current_mode: None,
+                    position: (0, 0),
+                    transform: smithay::utils::Transform::Normal,
+                    scale: 1.0,
+                    adaptive_sync: false,
+                    can_modeset: true,
+                    // Unknown until it is lit; refusing VRR here would be a guess.
+                    vrr_capable: true,
+                });
+            }
+        }
+        heads
+    }
+
     pub fn drm_set_power(&mut self, output: &Output, on: bool) {
         let Some(id) = output.user_data().get::<UdevOutputId>().copied() else {
             return;
@@ -263,4 +323,21 @@ mod gamma {
         let (green, blue) = rest.split_at(len);
         dev.set_gamma(crtc, red, green, blue)
     }
+}
+
+fn connector_modes(info: &connector::Info) -> Vec<ModeInfo> {
+    info.modes()
+        .iter()
+        .map(|m| {
+            let wl = smithay::output::Mode::from(*m);
+            ModeInfo {
+                width: wl.size.w,
+                height: wl.size.h,
+                refresh_mhz: wl.refresh,
+                preferred: m
+                    .mode_type()
+                    .contains(smithay::reexports::drm::control::ModeTypeFlags::PREFERRED),
+            }
+        })
+        .collect()
 }
