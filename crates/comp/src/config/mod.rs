@@ -89,6 +89,8 @@ pub struct General {
     pub allow_virtual_keyboard: bool,
     /// xdg-activation requests focus the window instead of only marking it urgent.
     pub focus_on_activate: bool,
+    /// Fullscreen surfaces asking for async presentation (wp_tearing_control) may tear.
+    pub allow_tearing: bool,
 }
 
 impl Default for General {
@@ -115,6 +117,7 @@ impl Default for General {
             mod_key: ModKey::Super,
             allow_virtual_keyboard: true,
             focus_on_activate: false,
+            allow_tearing: false,
         }
     }
 }

@@ -271,6 +271,9 @@ impl Aurora {
         let vrr_mode = crate::display::vrr::mode_for(&self.config.outputs, &output.name());
         let fullscreen = self.wm.output_fullscreen(&output);
         let _ = super::display::sync_vrr(surface, vrr_mode, fullscreen);
+        let tearing =
+            crate::display::tearing::wanted(&self.wm, &output, self.config.general.allow_tearing);
+        self.display.tearing.note(&output, tearing);
 
         self.space.refresh();
         self.xwayland.unmanaged.refresh();
