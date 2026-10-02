@@ -206,6 +206,24 @@ for `qa-hooks` builds (`cargo build --features qa-hooks` in the app crate). The 
 were written from the plan before the binaries existed; check the PASS/FAIL list once the
 apps land.
 
+## Protocols
+
+Served by `aurora-comp` beyond core `wl_*`, xdg-shell and XWayland:
+
+| Area | Protocols |
+|---|---|
+| Buffers and sync | linux-dmabuf (with scanout feedback), linux-drm-syncobj (explicit sync), single-pixel-buffer, viewporter, fractional-scale |
+| Presentation and pacing | presentation-time, fifo-v1, commit-timing-v1 (barriers released per output on vblank / frame target), content-type-v1 (stored per window for on-demand VRR), alpha-modifier-v1 (multiplied into fades, inactive opacity and the shadow) |
+| Shell | xdg-output, xdg-decoration (server side), xdg-activation, xdg-foreign-v2 (portal dialogs get their parent), xdg-dialog-v1 (modal dialogs float centred on the parent), xdg-toplevel-icon-v1 (stored), xdg-system-bell-v1 (logged), wlr-layer-shell, ext-session-lock, ext-foreign-toplevel-list, cursor-shape |
+| Input | relative-pointer, pointer-constraints, pointer-gestures, tablet-v2 (tools, no pads), keyboard-shortcuts-inhibit, text-input-v3, input-method-v2 (IME popups placed at the cursor), virtual-keyboard (through the bind table) |
+| Data | data-device, primary-selection, wlr-data-control |
+| Capture and idle | ext-image-copy-capture (outputs, shm), idle-inhibit, ext-idle-notify |
+| Sandboxing | security-context-v1 |
+
+Clients that connect through a security context (Flatpak) do not see data-control, virtual
+keyboard, input method, image capture, session lock, layer shell, foreign toplevel list or
+the security context manager itself; the policy table is in `crates/comp/src/sandbox.rs`.
+
 ## Performance
 
 The desktop is built like a browser engine: retained scene, aggressive caching,
