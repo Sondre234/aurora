@@ -12,6 +12,7 @@ use smithay::{
     wayland::seat::WaylandFocus,
     wayland::shell::xdg::{
         PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
+        dialog::{ToplevelDialogHint, XdgDialogHandler},
     },
 };
 
@@ -171,6 +172,19 @@ impl XdgShellHandler for Aurora {
         keyboard.set_grab(self, PopupKeyboardGrab::new(&grab), serial);
         pointer.set_grab(self, PopupPointerGrab::new(&grab), serial, Focus::Keep);
         self.popup_grab = Some((grab, root));
+    }
+}
+
+/// A toplevel that turns modal after it was placed leaves the tiling for a float centred on
+/// its parent; one that was modal when placed already floats (`place`).
+impl XdgDialogHandler for Aurora {
+    fn dialog_hint_changed(&mut self, toplevel: ToplevelSurface, hint: ToplevelDialogHint) {
+        if hint != ToplevelDialogHint::Modal {
+            return;
+        }
+        if let Some(id) = self.wm.id_of(toplevel.wl_surface()) {
+            self.float_modal(id);
+        }
     }
 }
 

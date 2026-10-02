@@ -24,7 +24,10 @@ use smithay::{
         relative_pointer::RelativePointerManagerState,
         selection::{primary_selection::PrimarySelectionState, wlr_data_control::DataControlState},
         session_lock::SessionLockManagerState,
-        shell::{wlr_layer::WlrLayerShellState, xdg::decoration::XdgDecorationState},
+        shell::{
+            wlr_layer::WlrLayerShellState,
+            xdg::{decoration::XdgDecorationState, dialog::XdgDialogState},
+        },
         single_pixel_buffer::SinglePixelBufferState,
         viewporter::ViewporterState,
         xdg_activation::XdgActivationState,
@@ -71,6 +74,8 @@ pub struct Protocols {
     _pacing: crate::pacing::Pacing,
     /// zxdg_foreign_v2: Smithay sets the imported parent, `parent_changed` re-reads it.
     pub xdg_foreign: XdgForeignState,
+    /// xdg_wm_dialog_v1: modal dialogs always float, centred on their parent.
+    _dialog: XdgDialogState,
 }
 
 impl Protocols {
@@ -111,6 +116,7 @@ impl Protocols {
             _content_type: ContentTypeState::new::<Aurora>(dh),
             _pacing: crate::pacing::Pacing::new(dh),
             xdg_foreign: XdgForeignState::new::<Aurora>(dh),
+            _dialog: XdgDialogState::new::<Aurora>(dh),
         }
     }
 }

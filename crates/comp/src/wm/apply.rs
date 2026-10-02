@@ -543,7 +543,8 @@ impl Aurora {
             return;
         };
         let (constraints, parent) = (win.constraints, win.parent);
-        let decision = rules::evaluate(
+        let modal = super::modes::is_modal(&win.element);
+        let mut decision = rules::evaluate(
             &rules::Attrs {
                 has_parent,
                 constraints,
@@ -553,6 +554,8 @@ impl Aurora {
             },
             &self.config.window_rules,
         );
+        // A modal dialog floats whatever the rules say: tiled, it would resize its parent.
+        decision.floating |= modal;
         // A rule may name a workspace that is hidden or shown on another output; an explicit
         // workspace wins over an output.
         let by_output = decision.output.as_deref().and_then(|name| {

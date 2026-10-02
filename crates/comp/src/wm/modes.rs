@@ -11,7 +11,60 @@ use super::{
 };
 use crate::Aurora;
 
+/// Whether the toplevel declared itself a modal dialog (xdg-dialog-v1).
+pub fn is_modal(element: &crate::wm::window::WindowElement) -> bool {
+    use smithay::wayland::shell::xdg::{XdgToplevelSurfaceData, dialog::ToplevelDialogHint};
+    let Some(toplevel) = element.toplevel() else {
+        return false;
+    };
+    smithay::wayland::compositor::with_states(toplevel.wl_surface(), |states| {
+        states
+            .data_map
+            .get::<XdgToplevelSurfaceData>()
+            .and_then(|d| {
+                d.lock()
+                    .ok()
+                    .map(|d| d.dialog_hint == ToplevelDialogHint::Modal)
+            })
+            .unwrap_or(false)
+    })
+}
+
 impl Aurora {
+    /// Takes a placed, tiled window out of the tiling into a float centred on its parent (or
+    /// the work area), as for a modal dialog. Fullscreen and floating windows are left alone.
+    pub fn float_modal(&mut self, id: WinId) {
+        let Some(win) = self.wm.windows.get(&id) else {
+            return;
+        };
+        if !win.placed {
+            return;
+        }
+        let (ws, constraints, parent) = (win.ws, win.constraints, win.parent);
+        let parent_rect = parent
+            .and_then(|p| self.wm.windows.get(&p))
+            .filter(|p| p.ws == ws)
+            .map(|p| p.target);
+        let params = layout_params(&self.config);
+        let Some(work) = self
+            .wm
+            .output_for_ws(ws)
+            .and_then(|o| self.work_area(&o))
+            .map(|(work, _)| work)
+        else {
+            return;
+        };
+        let Some(workspace) = self.wm.workspaces.get_mut(&ws) else {
+            return;
+        };
+        if workspace.is_floating(id) || workspace.fullscreen().is_some_and(|(f, _)| f == id) {
+            return;
+        }
+        let rect = floating_rect(work, parent_rect, constraints, None, params.border);
+        workspace.add_floating(id, rect);
+        self.relayout_ws(ws);
+    }
+
     pub fn toggle_floating(&mut self) {
         let Some((id, ws)) = self.focused_with_ws() else {
             return;
