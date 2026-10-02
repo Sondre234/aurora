@@ -249,6 +249,26 @@ decision is computed per output and logged when it changes
 the backend can flip async only the commit flag is missing. Use VRR for low-latency games
 meanwhile.
 
+**Output configuration.** `zwlr_output_manager_v1` (version 4) is served: `wlr-randr`,
+`wdisplays` and `kanshi` see every connected output, including ones the config turned off,
+with all the modes the connector offers, and can change mode, position, scale, transform,
+enabled and adaptive sync live. `test` validates the whole configuration (every head must be
+named, the mode must be one the head offers; custom modes are accepted only when they match
+an offered one within 0.5 Hz; at least one output stays on). `apply` turns it into runtime
+overrides of the `[[output]]` rules, applies them the way a reload would, and reverts with
+`failed` if an output did not end up as asked. A configuration made against an older serial
+gets `cancelled`. Overrides are runtime only: the next config reload drops them (logged as
+`output-management: reload drops runtime changes ...`). `adaptive_sync` reports whether VRR
+is on right now; setting it to the reported value keeps the configured policy (so
+`on-demand` survives kanshi round trips), anything else overrides it with `on` or `off`. The
+nested window can only be moved and scaled. `[[output]] transform` sets the rotation in the
+file.
+
+```sh
+wlr-randr --output DP-3 --mode 2560x1440@144 --pos 2048,0 --scale 1.25
+wlr-randr --output DP-1 --off
+```
+
 ## Performance
 
 The desktop is built like a browser engine: retained scene, aggressive caching,

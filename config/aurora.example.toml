@@ -164,6 +164,10 @@ scale = 1.0
 #              output. The log says what each connector supports at startup
 #              ("output: DP-3 vrr=supported"); "requires-modeset" connectors (HDMI) honour
 #              "on" but keep "on-demand" off, since toggling would blank the screen.
+#   transform = "normal" | "90" | "180" | "270" | "flipped" | "flipped-90" | "flipped-180" |
+#              "flipped-270" (rotation, counter-clockwise like wl_output; default "normal")
+# wlr-randr, wdisplays and kanshi can change all of this live (wlr-output-management); such
+# changes are runtime only and the next reload puts this file back in charge.
 # HDMI-A-1 and DP-3 are the two halves (2560x1440 each) of the 49 inch ultrawide in PBP
 # mode, DP-1 is a separate 1080p monitor. Positions are in scaled (logical) pixels:
 # 2560 / 1.25 = 2048 wide per half.
