@@ -11,6 +11,7 @@ mod effects;
 mod emergency;
 mod focus;
 mod handlers;
+mod ime;
 mod input;
 mod ipc;
 mod keymap;

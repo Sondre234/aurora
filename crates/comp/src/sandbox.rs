@@ -13,6 +13,7 @@
 //! |---|---|
 //! | `zwlr_data_control_manager_v1` | reads and replaces the clipboard of every client |
 //! | `zwp_virtual_keyboard_manager_v1` | injects keys, and through Aurora's binds runs actions |
+//! | `zwp_input_method_manager_v2` | sees every key and every text field |
 //! | `ext_image_copy_capture_manager_v1`, `ext_output_image_capture_source_manager_v1` | screenshots without the portal |
 //! | `ext_session_lock_manager_v1` | takes over (or fakes) the lock screen |
 //! | `zwlr_layer_shell_v1` | overlays above every window, exclusive keyboard focus |
@@ -40,6 +41,7 @@ use crate::state::{Aurora, ClientState};
 pub enum Privileged {
     DataControl,
     VirtualKeyboard,
+    InputMethod,
     ImageCopyCapture,
     SessionLock,
     LayerShell,
@@ -53,6 +55,7 @@ impl Privileged {
         match self {
             Self::DataControl
             | Self::VirtualKeyboard
+            | Self::InputMethod
             | Self::ImageCopyCapture
             | Self::SessionLock
             | Self::LayerShell
@@ -108,9 +111,10 @@ impl SecurityContextHandler for Aurora {
 mod tests {
     use super::*;
 
-    const ALL: [Privileged; 7] = [
+    const ALL: [Privileged; 8] = [
         Privileged::DataControl,
         Privileged::VirtualKeyboard,
+        Privileged::InputMethod,
         Privileged::ImageCopyCapture,
         Privileged::SessionLock,
         Privileged::LayerShell,

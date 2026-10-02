@@ -86,6 +86,8 @@ pub struct Protocols {
     _toplevel_icon: XdgToplevelIconManager,
     /// wp_security_context_v1: sandboxed clients lose the privileged globals (`sandbox.rs`).
     _security_context: smithay::wayland::security_context::SecurityContextState,
+    /// text-input-v3 and input-method-v2 (`ime.rs`).
+    _ime: crate::ime::Ime,
 }
 
 impl Protocols {
@@ -136,6 +138,7 @@ impl Protocols {
             _dialog: XdgDialogState::new::<Aurora>(dh),
             _toplevel_icon: XdgToplevelIconManager::new::<Aurora>(dh),
             _security_context: sandbox::init(dh),
+            _ime: crate::ime::Ime::new(dh),
         }
     }
 }

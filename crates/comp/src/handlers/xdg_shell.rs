@@ -156,7 +156,13 @@ impl XdgShellHandler for Aurora {
         // A grab already held by something else (a drag, a move) that this popup is not
         // nested in wins; the popup is dismissed.
         let previous = grab.previous_serial();
+        // The input method's grab is not one a menu has to yield to.
+        let ime_grab = {
+            use smithay::wayland::input_method::InputMethodSeat;
+            seat.input_method().keyboard_grabbed()
+        };
         if keyboard.is_grabbed()
+            && !ime_grab
             && !(keyboard.has_grab(serial) || keyboard.has_grab(previous.unwrap_or(serial)))
         {
             grab.ungrab(PopupUngrabStrategy::All);
