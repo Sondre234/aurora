@@ -194,6 +194,11 @@ impl Aurora {
     /// Frame callbacks for the backends that have no vblank of their own (nested, headless).
     pub fn send_nested_frames(&mut self, output: &Output) {
         let time = Duration::from(self.clock.now());
+        // Called right after the frame is drawn (headless: on its timer), which stands in
+        // for the vblank: what was drawn counts as presented.
+        self.latch_fifo_barriers(output);
+        self.signal_fifo_barriers(output);
+        self.release_commit_timers(output, time);
         self.send_output_scale(output);
         if crate::lock::engaged() {
             if let Some(surface) = crate::lock::surface_of(output) {

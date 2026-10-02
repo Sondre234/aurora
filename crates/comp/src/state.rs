@@ -430,6 +430,8 @@ pub fn take_presentation_feedback(
 #[derive(Default)]
 pub struct ClientState {
     pub compositor_state: CompositorClientState,
+    /// Set for clients of a sandbox's socket (wp-security-context-v1), see `sandbox.rs`.
+    pub security_context: Option<smithay::wayland::security_context::SecurityContext>,
 }
 
 impl ClientData for ClientState {

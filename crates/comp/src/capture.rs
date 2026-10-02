@@ -31,7 +31,12 @@ use smithay::{
     },
 };
 
-use crate::{backend::BACKGROUND, scene::OutputElement, state::Aurora};
+use crate::{
+    backend::BACKGROUND,
+    sandbox::{Privileged, can_view},
+    scene::OutputElement,
+    state::Aurora,
+};
 
 /// Sessions and the frames waiting for their output's next render.
 pub struct Captures {
@@ -52,8 +57,12 @@ impl Captures {
     pub fn new(dh: &smithay::reexports::wayland_server::DisplayHandle) -> Self {
         Self {
             _source: ImageCaptureSourceState::new(),
-            output_source: OutputCaptureSourceState::new::<Aurora>(dh),
-            copy: ImageCopyCaptureState::new::<Aurora>(dh),
+            output_source: OutputCaptureSourceState::new_with_filter::<Aurora, _>(dh, |c| {
+                can_view(Privileged::ImageCopyCapture, c)
+            }),
+            copy: ImageCopyCaptureState::new_with_filter::<Aurora, _>(dh, |c| {
+                can_view(Privileged::ImageCopyCapture, c)
+            }),
             sessions: Vec::new(),
             pending: Vec::new(),
         }

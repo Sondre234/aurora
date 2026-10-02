@@ -14,8 +14,10 @@ use keyboard::Repeat;
 use pointer::{AxisInput, AxisValue};
 
 pub mod constraints;
+mod gestures;
 pub mod keyboard;
 pub mod pointer;
+mod tablet;
 
 /// Bind bookkeeping that outlives a single event.
 #[derive(Default)]
@@ -81,6 +83,20 @@ impl Aurora {
                     vertical: value(Axis::Vertical),
                 });
             }
+            InputEvent::GestureSwipeBegin { event } => self.on_swipe_begin::<I>(event),
+            InputEvent::GestureSwipeUpdate { event } => self.on_swipe_update::<I>(event),
+            InputEvent::GestureSwipeEnd { event } => self.on_swipe_end::<I>(event),
+            InputEvent::GesturePinchBegin { event } => self.on_pinch_begin::<I>(event),
+            InputEvent::GesturePinchUpdate { event } => self.on_pinch_update::<I>(event),
+            InputEvent::GesturePinchEnd { event } => self.on_pinch_end::<I>(event),
+            InputEvent::GestureHoldBegin { event } => self.on_hold_begin::<I>(event),
+            InputEvent::GestureHoldEnd { event } => self.on_hold_end::<I>(event),
+            InputEvent::DeviceAdded { device } => self.tablet_device_added::<I>(&device),
+            InputEvent::DeviceRemoved { device } => self.tablet_device_removed::<I>(&device),
+            InputEvent::TabletToolAxis { event } => self.on_tablet_axis::<I>(event),
+            InputEvent::TabletToolProximity { event } => self.on_tablet_proximity::<I>(event),
+            InputEvent::TabletToolTip { event } => self.on_tablet_tip::<I>(event),
+            InputEvent::TabletToolButton { event } => self.on_tablet_button::<I>(event),
             _ => {}
         }
     }

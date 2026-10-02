@@ -27,6 +27,8 @@ enum KeyOutcome {
     Overview(OverviewKey),
     /// The release of a key whose press a bind took.
     Swallowed,
+    /// A key for the client that must not go through the IME's keyboard grab.
+    PastIme,
 }
 
 /// The repeat bind that is currently held.
@@ -59,6 +61,7 @@ impl Aurora {
     ) {
         self.notify_activity();
         let serial = SERIAL_COUNTER.next_serial();
+        let past_ime = self.bypasses_ime(source != KeyboardSource::MAIN);
         let outcome = self.keyboard.clone().input_from_source::<KeyOutcome, _>(
             source,
             self,
@@ -66,7 +69,12 @@ impl Aurora {
             key_state,
             serial,
             time,
-            |state, modifiers, handle| state.filter_key(keycode, key_state, modifiers, &handle),
+            |state, modifiers, handle| match state
+                .filter_key(keycode, key_state, modifiers, &handle)
+            {
+                FilterResult::Forward if past_ime => FilterResult::Intercept(KeyOutcome::PastIme),
+                other => other,
+            },
         );
 
         match &outcome {
@@ -89,6 +97,7 @@ impl Aurora {
                 }
             }
             Some(KeyOutcome::Overview(key)) => self.overview_key(*key),
+            Some(KeyOutcome::PastIme) => self.forward_past_ime(keycode, key_state, time),
             Some(KeyOutcome::Swallowed) | None => {}
         }
         if matches!(outcome, Some(KeyOutcome::Emergency(_))) {
