@@ -37,7 +37,11 @@ use smithay::{
     },
 };
 
-use crate::{state::Aurora, virtual_input::VirtualKeyboardGlobal};
+use crate::{
+    sandbox::{self, Privileged},
+    state::Aurora,
+    virtual_input::VirtualKeyboardGlobal,
+};
 
 pub struct Protocols {
     _output_manager: OutputManagerState,
@@ -80,6 +84,8 @@ pub struct Protocols {
     /// xdg_toplevel_icon_v1: Smithay keeps the committed icon on the surface; nothing draws
     /// it yet (`WindowElement::icon_name`).
     _toplevel_icon: XdgToplevelIconManager,
+    /// wp_security_context_v1: sandboxed clients lose the privileged globals (`sandbox.rs`).
+    _security_context: smithay::wayland::security_context::SecurityContextState,
 }
 
 impl Protocols {
@@ -90,9 +96,10 @@ impl Protocols {
         allow_virtual_keyboard: bool,
     ) -> Self {
         let primary_selection = PrimarySelectionState::new::<Aurora>(dh);
-        // Clipboard managers are trusted with every selection, so no filter.
-        let data_control =
-            DataControlState::new::<Aurora, _>(dh, Some(&primary_selection), |_| true);
+        // Clipboard managers are trusted with every selection; sandboxes are not.
+        let data_control = DataControlState::new::<Aurora, _>(dh, Some(&primary_selection), |c| {
+            sandbox::can_view(Privileged::DataControl, c)
+        });
         Self {
             _output_manager: OutputManagerState::new_with_xdg_output::<Aurora>(dh),
             _presentation: PresentationState::new::<Aurora>(dh, clock_id),
@@ -103,7 +110,9 @@ impl Protocols {
             _idle_inhibit: IdleInhibitManagerState::new::<Aurora>(dh),
             _relative_pointer: RelativePointerManagerState::new::<Aurora>(dh),
             _pointer_constraints: PointerConstraintsState::new::<Aurora>(dh),
-            layer_shell: WlrLayerShellState::new::<Aurora>(dh),
+            layer_shell: WlrLayerShellState::new_with_filter::<Aurora, _>(dh, |c| {
+                sandbox::can_view(Privileged::LayerShell, c)
+            }),
             primary_selection,
             data_control,
             xwayland_shell: XWaylandShellState::new::<Aurora>(dh),
@@ -111,8 +120,12 @@ impl Protocols {
             idle_notifier: IdleNotifierState::new(dh, handle.clone()),
             shortcuts_inhibit: KeyboardShortcutsInhibitState::new::<Aurora>(dh),
             virtual_keyboard: VirtualKeyboardGlobal::new(dh, allow_virtual_keyboard),
-            session_lock: SessionLockManagerState::new::<Aurora, _>(dh, |_| true),
-            foreign_toplevel: ForeignToplevelListState::new::<Aurora>(dh),
+            session_lock: SessionLockManagerState::new::<Aurora, _>(dh, |c| {
+                sandbox::can_view(Privileged::SessionLock, c)
+            }),
+            foreign_toplevel: ForeignToplevelListState::new_with_filter::<Aurora>(dh, |c| {
+                sandbox::can_view(Privileged::ForeignToplevelList, c)
+            }),
             idle_inhibitors: HashSet::new(),
             active_inhibitor: None,
             _single_pixel: SinglePixelBufferState::new::<Aurora>(dh),
@@ -122,6 +135,7 @@ impl Protocols {
             xdg_foreign: XdgForeignState::new::<Aurora>(dh),
             _dialog: XdgDialogState::new::<Aurora>(dh),
             _toplevel_icon: XdgToplevelIconManager::new::<Aurora>(dh),
+            _security_context: sandbox::init(dh),
         }
     }
 }

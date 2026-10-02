@@ -23,6 +23,7 @@ mod overview;
 mod pacing;
 mod protocols;
 mod safety;
+mod sandbox;
 mod scene;
 mod services;
 mod session;
