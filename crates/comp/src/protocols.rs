@@ -88,6 +88,8 @@ pub struct Protocols {
     _security_context: smithay::wayland::security_context::SecurityContextState,
     /// text-input-v3 and input-method-v2 (`ime.rs`).
     _ime: crate::ime::Ime,
+    /// zwp_pointer_gestures_v1, fed from libinput in `input/gestures.rs`.
+    _pointer_gestures: smithay::wayland::pointer_gestures::PointerGesturesState,
 }
 
 impl Protocols {
@@ -139,6 +141,9 @@ impl Protocols {
             _toplevel_icon: XdgToplevelIconManager::new::<Aurora>(dh),
             _security_context: sandbox::init(dh),
             _ime: crate::ime::Ime::new(dh),
+            _pointer_gestures: smithay::wayland::pointer_gestures::PointerGesturesState::new::<
+                Aurora,
+            >(dh),
         }
     }
 }

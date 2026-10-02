@@ -14,6 +14,7 @@ use keyboard::Repeat;
 use pointer::{AxisInput, AxisValue};
 
 pub mod constraints;
+mod gestures;
 pub mod keyboard;
 pub mod pointer;
 
@@ -79,6 +80,14 @@ impl Aurora {
                     vertical: value(Axis::Vertical),
                 });
             }
+            InputEvent::GestureSwipeBegin { event } => self.on_swipe_begin::<I>(event),
+            InputEvent::GestureSwipeUpdate { event } => self.on_swipe_update::<I>(event),
+            InputEvent::GestureSwipeEnd { event } => self.on_swipe_end::<I>(event),
+            InputEvent::GesturePinchBegin { event } => self.on_pinch_begin::<I>(event),
+            InputEvent::GesturePinchUpdate { event } => self.on_pinch_update::<I>(event),
+            InputEvent::GesturePinchEnd { event } => self.on_pinch_end::<I>(event),
+            InputEvent::GestureHoldBegin { event } => self.on_hold_begin::<I>(event),
+            InputEvent::GestureHoldEnd { event } => self.on_hold_end::<I>(event),
             _ => {}
         }
     }
