@@ -206,6 +206,97 @@ for `qa-hooks` builds (`cargo build --features qa-hooks` in the app crate). The 
 were written from the plan before the binaries existed; check the PASS/FAIL list once the
 apps land.
 
+## Daily session
+
+Aurora as the session you log into from SDDM, next to Hyprland. `scripts/aurora-test.sh`
+stays the tool for hand tests from a TTY (timeout, merged test config).
+
+**Install.** `scripts/install.sh` (try `--dry-run` first; it is idempotent, rerun it after a
+pull) builds the release workspace and installs, for your user only:
+
+| What | Where |
+|---|---|
+| `aurora-comp`, `auroractl`, `aurora-shell`, `aurora-launcher`, `aurora-notifd`, `aurora-lock`, `aurora-term`, `aurora-files`, `aurora-session` | `${PREFIX:-~/.local}/bin` |
+| [contrib/portals/aurora-portals.conf](contrib/portals/aurora-portals.conf) | `~/.config/xdg-desktop-portal/` |
+| [contrib/systemd/aurora-session.target](contrib/systemd/aurora-session.target) | `~/.config/systemd/user/` (then `daemon-reload`) |
+
+**The sudo step.** SDDM only reads `/usr/share/wayland-sessions`, so install.sh writes
+`target/aurora.desktop` (from [contrib/aurora.desktop](contrib/aurora.desktop), with `Exec=`
+set to the absolute path of the installed `aurora-session`) and prints the one command to
+run yourself:
+
+```sh
+sudo install -Dm644 target/aurora.desktop /usr/share/wayland-sessions/aurora.desktop
+```
+
+Rerun it only when install.sh says the entry changed (it compares the two). Then pick
+"Aurora" in SDDM's session menu.
+
+**What a login runs.** `aurora-session` logs everything to `~/.local/state/aurora/aurora.log`
+(the previous login's is `aurora.log.old`; the compositor's own log is `comp.log` next to
+it), exports `XDG_SESSION_TYPE=wayland`, `XDG_CURRENT_DESKTOP=Aurora`,
+`XDG_SESSION_DESKTOP=aurora`, and runs `aurora-comp --drm --no-timeout` with your real
+`~/.config/aurora/config.toml`. It stays alive as the compositor's parent so it can clean up
+however the compositor exits.
+
+**Environment and systemd.** Once its socket exists, Aurora runs
+`dbus-update-activation-environment --systemd WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP
+XDG_SESSION_TYPE XDG_SESSION_DESKTOP AURORA_IPC_SOCK` (non-blocking, reaped, killed after
+10 s; `session: environment import: ok` or the failure in comp.log), and again if XWayland's
+`DISPLAY` only becomes known later. DRM sessions only, never nested; turn it off with
+`[session] import_environment = false`. The design follows sway's `sway-session.target`
+and niri's `niri-session`: `graphical-session.target` refuses a manual start, so
+`aurora-session.target` binds to it. The launcher clears stale session variables from
+the systemd user manager (Hyprland's, or a crashed Aurora's), waits until Aurora's import
+shows up there, then starts `aurora-session.target`. When the compositor exits it stops
+the target, which stops `graphical-session.target` and every unit bound to it, and clears
+the variables again. So user units `WantedBy=graphical-session.target` start with Aurora
+and see its `WAYLAND_DISPLAY`. For the polkit agent:
+
+```sh
+systemctl --user enable hyprpolkitagent.service
+```
+
+(Hyprland sessions start it the same way, so enabling it is harmless there.)
+
+**Portals.** `aurora-portals.conf` is picked because `XDG_CURRENT_DESKTOP=Aurora`:
+`xdg-desktop-portal-gtk` for everything by default, `xdg-desktop-portal-wlr` for ScreenCast
+and Screenshot, `gnome-keyring` for Secret. Install `xdg-desktop-portal-gtk`,
+`xdg-desktop-portal-wlr` and `gnome-keyring` (or point Secret at `kwallet` in the file).
+Screen sharing through xdg-desktop-portal-wlr needs a capture protocol it speaks; Aurora
+offers ext-image-copy-capture, not wlr-screencopy, so this needs a portal-wlr release with
+ext-image-copy-capture support (not yet verified on hardware).
+
+**Daily config.** [contrib/config.daily.toml](contrib/config.daily.toml) is a complete,
+tested example to merge into your `config.toml`: the shell, launcher, notifd and lock
+services, `Mod+space` launcher, `Mod+l` lock, volume/mic/media keys (`wpctl`, `playerctl`),
+backlight keys (`brightnessctl`), `Print` / `Shift+Print` screenshots (`grim`, `slurp`,
+`wl-copy`), a hyprpolkitagent fallback that only runs when its systemd unit is not enabled,
+and this idle recipe:
+
+```sh
+swayidle -w timeout 300 'auroractl raw "\"Lock\""' \
+    timeout 600 'wlopm --off "*"' resume 'wlopm --on "*"' \
+    before-sleep 'auroractl raw "\"Lock\""'
+```
+
+`auroractl raw '"Lock"'` asks the compositor to start `[services.lock]`, exactly like the
+`lock` bind (it fails with Unsupported when no lock service is configured). Monitors
+off/on need wlr-output-power-management-v1 in Aurora (with the `power-off-monitors` /
+`power-on-monitors` actions, part of the display work) and `wlopm` from the AUR.
+
+**Input.** `config.toml` now has `[input.keyboard]` (`layout`, `variant`, `model`,
+`options`, `rules`, `repeat_rate`, `repeat_delay`), `[input.pointer]` and
+`[input.touchpad]` (`accel_profile` flat|adaptive, `accel_speed`, `natural_scroll`,
+`left_handed`, `scroll_method`; touchpads also `tap` and `dwt`). Without XKB fields the
+keymap comes from `keymap.xkb`, `XKB_DEFAULT_*` or `/etc/X11/xorg.conf.d/00-keyboard.conf`
+as before. A reload applies all of it live: a changed keymap is swapped for every client,
+repeat info is resent, and libinput settings go to every device (and to devices plugged in
+later). Defaults and ranges are in [config/aurora.example.toml](config/aurora.example.toml).
+
+**Leaving.** `Mod+m` (or Ctrl+Alt+BackSpace) quits back to SDDM. If a login fails, read
+`~/.local/state/aurora/aurora.log` and `comp.log` from another session or a TTY.
+
 ## Performance
 
 The desktop is built like a browser engine: retained scene, aggressive caching,

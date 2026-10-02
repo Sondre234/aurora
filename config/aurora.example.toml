@@ -291,3 +291,6 @@ scale = 1
 #   "Mod+q" = "spawn aurora-term"
 #   "Mod+e" = "spawn aurora-files"
 # Both follow theme.toml live and work without the IPC socket.
+#
+# A complete daily setup (services, media keys, screenshots, idle and lock) to merge into
+# this file: contrib/config.daily.toml. Logging in from SDDM: README, "Daily session".
