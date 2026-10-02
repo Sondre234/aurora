@@ -170,7 +170,9 @@ impl Aurora {
             if output.current_scale().fractional_scale() != scale.fractional_scale() {
                 output.change_current_state(None, None, Some(scale), None);
             }
-            if output.current_transform() != transform {
+            // The nested window draws flipped and owns its transform.
+            let drm = matches!(self.backend, crate::backend::Backend::Drm(_));
+            if drm && output.current_transform() != transform {
                 output.change_current_state(None, Some(transform), None, None);
             }
         }
