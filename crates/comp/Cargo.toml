@@ -33,3 +33,10 @@ features = [
     "backend_drm", "backend_gbm", "backend_egl", "renderer_gl", "backend_libinput",
     "backend_udev", "backend_session_libseat", "renderer_pixman", "xwayland",
 ]
+
+# Only for the `qa_display` example, a protocol client for scripts/qa-nested.sh. All already
+# in the tree through smithay and the ui crate.
+[dev-dependencies]
+wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["client", "staging"] }
+wayland-protocols-wlr = { version = "0.3", features = ["client"] }
