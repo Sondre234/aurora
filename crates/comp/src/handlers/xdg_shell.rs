@@ -64,6 +64,11 @@ impl XdgShellHandler for Aurora {
         self.xdg_app_id_changed(surface.wl_surface());
     }
 
+    /// xdg_toplevel.set_parent or an xdg-foreign import changed the parent.
+    fn parent_changed(&mut self, surface: ToplevelSurface) {
+        self.xdg_parent_changed(&surface);
+    }
+
     fn popup_destroyed(&mut self, _surface: PopupSurface) {
         self.queue_redraw_all();
     }
@@ -228,6 +233,31 @@ impl Aurora {
 }
 
 impl Aurora {
+    /// Keeps a known window's parent link current. Placement (floating, centred, on the
+    /// parent's workspace) reads it when the window is placed; a placed window only gets the
+    /// link that keeps it stacked with its parent.
+    fn xdg_parent_changed(&mut self, toplevel: &ToplevelSurface) {
+        let Some(id) = self.wm.id_of(toplevel.wl_surface()) else {
+            return;
+        };
+        let parent = toplevel
+            .parent()
+            .and_then(|p| self.wm.id_of(&p))
+            .filter(|p| *p != id);
+        let Some(win) = self.wm.windows.get_mut(&id) else {
+            return;
+        };
+        if win.parent == parent {
+            return;
+        }
+        win.parent = parent;
+        let (ws, placed) = (win.ws, win.placed);
+        if placed && let Some(workspace) = self.wm.workspaces.get_mut(&ws) {
+            workspace.set_parent(id, parent);
+            self.relayout_ws(ws);
+        }
+    }
+
     /// Ends the active popup grab unless `target` is the surface it belongs to. A popup
     /// grab swallows every focus change but its own, so a compositor-driven change (a
     /// workspace switch, a closed window) would otherwise leave keys going to the popup.

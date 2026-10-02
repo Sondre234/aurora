@@ -23,6 +23,7 @@ use smithay::{
         xdg_activation::{
             XdgActivationHandler, XdgActivationState, XdgActivationToken, XdgActivationTokenData,
         },
+        xdg_foreign::{XdgForeignHandler, XdgForeignState},
     },
 };
 
@@ -204,5 +205,13 @@ impl Aurora {
             tracing::info!("shortcuts inhibit: revoked");
             inhibitor.inactivate();
         }
+    }
+}
+
+/// Portal dialogs (file chooser, screen share picker) run in another process and name their
+/// parent through an exported handle; Smithay checks it and sets the toplevel's parent.
+impl XdgForeignHandler for Aurora {
+    fn xdg_foreign_state(&mut self) -> &mut XdgForeignState {
+        &mut self.protocols.xdg_foreign
     }
 }

@@ -28,6 +28,7 @@ use smithay::{
         single_pixel_buffer::SinglePixelBufferState,
         viewporter::ViewporterState,
         xdg_activation::XdgActivationState,
+        xdg_foreign::XdgForeignState,
         xwayland_shell::XWaylandShellState,
     },
 };
@@ -68,6 +69,8 @@ pub struct Protocols {
     _content_type: ContentTypeState,
     /// fifo-v1 and commit-timing-v1, signalled from the render loops (`pacing.rs`).
     _pacing: crate::pacing::Pacing,
+    /// zxdg_foreign_v2: Smithay sets the imported parent, `parent_changed` re-reads it.
+    pub xdg_foreign: XdgForeignState,
 }
 
 impl Protocols {
@@ -107,6 +110,7 @@ impl Protocols {
             _alpha_modifier: AlphaModifierState::new::<Aurora>(dh),
             _content_type: ContentTypeState::new::<Aurora>(dh),
             _pacing: crate::pacing::Pacing::new(dh),
+            xdg_foreign: XdgForeignState::new::<Aurora>(dh),
         }
     }
 }
