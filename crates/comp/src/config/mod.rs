@@ -606,6 +606,18 @@ mod tests {
     }
 
     #[test]
+    fn daily_snippet_parses_cleanly() {
+        let (config, warnings) = resolve(include_str!("../../../../contrib/config.daily.toml"));
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(config.autostart.len(), 2);
+        assert!(config.autostart[1].contains(r#"'auroractl raw "\"Lock\""'"#));
+        let names: Vec<_> = config.services.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, ["launcher", "lock", "notifd", "shell"]);
+        let (defaults, _) = resolve("");
+        assert_eq!(config.binds.len(), defaults.binds.len() + 14);
+    }
+
+    #[test]
     fn animation_overrides_inherit_and_disable() {
         let (config, warnings) = resolve(
             r#"
