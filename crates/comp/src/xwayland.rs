@@ -146,6 +146,8 @@ impl Aurora {
         self.xwayland.ready = true;
         self.xwayland.restarts.clear();
         tracing::info!("xwayland: ready display=:{number}");
+        // DISPLAY may be new to activated services if the first server never came up.
+        self.import_session_env();
     }
 
     /// The server is gone (or never came up). Teardown waits for an idle callback so it never

@@ -61,6 +61,16 @@ inactive_opacity = 1.0    # 0..=1, 1 leaves unfocused windows untouched
 [xwayland]
 scale = 1.0
 
+# Real sessions (--drm) only; nested runs never touch the host's environment. Once the socket
+# exists (and again when XWayland's DISPLAY is known) Aurora runs
+#   dbus-update-activation-environment --systemd WAYLAND_DISPLAY DISPLAY XDG_CURRENT_DESKTOP \
+#       XDG_SESSION_TYPE XDG_SESSION_DESKTOP AURORA_IPC_SOCK
+# so services that D-Bus or systemd start on demand (xdg-desktop-portal, gnome-keyring, polkit
+# agents, units WantedBy=graphical-session.target) reach this session. The log says
+# "session: environment import: ok" or why it failed. Read at startup.
+[session]
+import_environment = true
+
 # Binds: "<Mods>+<key>" = "<action>", or a table { action = "..", repeat = false,
 # bypass_inhibit = false }. Modifiers: Mod, Super (Logo, Win), Ctrl, Shift, Alt, AltGr.
 # The key is an xkb keysym name naming the UNSHIFTED key (write Shift+1, not exclam);

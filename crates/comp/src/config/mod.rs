@@ -17,6 +17,9 @@ use keybind::{BindTable, Mods};
 
 pub mod keybind;
 mod raw;
+mod session;
+
+pub use session::Session;
 
 /// Also the source of the built-in default binds.
 pub const EXAMPLE: &str = include_str!("../../../../config/aurora.example.toml");
@@ -404,6 +407,8 @@ pub struct Config {
     pub autostart: Vec<String>,
     /// `[services.<name>]`, supervised by `services.rs`, sorted by name.
     pub services: Vec<ServiceSpec>,
+    /// `[session]`.
+    pub session: Session,
     /// False when the file did not exist and everything is defaults.
     pub from_file: bool,
 }
@@ -439,6 +444,7 @@ impl Config {
             window_rules: raw::window_rules(raw.window_rule.as_ref(), general.workspaces, &mut w),
             autostart: raw::autostart(raw.autostart.as_ref(), &mut w),
             services: raw::services(raw.services.as_ref(), &mut w),
+            session: session::session(raw.session.as_ref(), &mut w),
             general,
             from_file: true,
         };
@@ -582,6 +588,7 @@ mod tests {
         assert_eq!(config.animations.duration_ms, a.duration_ms);
         assert_eq!(config.animations.curve, a.curve);
         assert_eq!(config.xwayland, XWayland::default());
+        assert_eq!(config.session, Session::default());
         assert_eq!(config.decoration.rounding, d.rounding);
         assert_eq!(config.decoration.shadow_radius, d.shadow_radius);
         assert_eq!(config.decoration.shadow_color, d.shadow_color);
@@ -653,7 +660,11 @@ mod tests {
 
     #[test]
     fn xwayland_scale_parses_and_rejects_bad_values() {
-        assert_eq!(XWayland::default().dpi(), None, "the default changes nothing");
+        assert_eq!(
+            XWayland::default().dpi(),
+            None,
+            "the default changes nothing"
+        );
         let (config, warnings) = resolve("[xwayland]\nscale = 1.25\n");
         assert_eq!(config.xwayland.scale, 1.25);
         assert_eq!(config.xwayland.dpi(), Some(120));

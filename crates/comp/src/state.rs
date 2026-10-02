@@ -79,6 +79,8 @@ pub struct Aurora {
     pub lock: Option<crate::lock::LockState>,
     /// Supervised `[services]` processes.
     pub services: crate::services::Services,
+    /// What D-Bus and systemd were last told about this session.
+    pub env_import: crate::session_env::EnvImport,
     /// The IPC server, `None` when it could not start.
     pub ipc: Option<crate::ipc::Ipc>,
     /// The live theme and where it is loaded from.
@@ -165,6 +167,7 @@ impl Aurora {
             layer_focus: Default::default(),
             lock: None,
             services,
+            env_import: Default::default(),
             ipc: None,
             theme,
             theme_path,

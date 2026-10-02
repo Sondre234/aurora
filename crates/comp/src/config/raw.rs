@@ -25,6 +25,7 @@ pub struct RawConfig {
     pub window_rule: Option<Value>,
     pub autostart: Option<Value>,
     pub services: Option<Value>,
+    pub session: Option<Value>,
     /// Unknown top-level keys, reported as warnings.
     #[serde(flatten)]
     pub extra: Table,
@@ -71,7 +72,7 @@ pub fn get_str<'a>(ctx: &str, table: &'a Table, key: &str) -> Result<Option<&'a 
     }
 }
 
-fn get_int(ctx: &str, table: &Table, key: &str) -> Result<Option<i64>, String> {
+pub(super) fn get_int(ctx: &str, table: &Table, key: &str) -> Result<Option<i64>, String> {
     match table.get(key) {
         None => Ok(None),
         Some(Value::Integer(n)) => Ok(Some(*n)),
@@ -79,7 +80,7 @@ fn get_int(ctx: &str, table: &Table, key: &str) -> Result<Option<i64>, String> {
     }
 }
 
-fn get_float(ctx: &str, table: &Table, key: &str) -> Result<Option<f64>, String> {
+pub(super) fn get_float(ctx: &str, table: &Table, key: &str) -> Result<Option<f64>, String> {
     match table.get(key) {
         None => Ok(None),
         Some(Value::Float(f)) => Ok(Some(*f)),
@@ -103,14 +104,14 @@ fn get_pair(ctx: &str, table: &Table, key: &str) -> Result<Option<(i32, i32)>, S
 }
 
 /// A soft error: the message is kept and the value falls back to its default.
-fn soft<T>(result: Result<Option<T>, String>, warnings: &mut Vec<String>) -> Option<T> {
+pub(super) fn soft<T>(result: Result<Option<T>, String>, warnings: &mut Vec<String>) -> Option<T> {
     result.unwrap_or_else(|err| {
         warnings.push(err);
         None
     })
 }
 
-fn ranged(
+pub(super) fn ranged(
     ctx: &str,
     key: &str,
     table: &Table,
@@ -215,7 +216,7 @@ const ANIMATION_KINDS: &[&str] = &[
 ];
 
 /// A section that must be a table; anything else is reported and gives `None`.
-fn table_of<'a>(
+pub(super) fn table_of<'a>(
     ctx: &str,
     section: Option<&'a Value>,
     warnings: &mut Vec<String>,
