@@ -216,6 +216,8 @@ impl Aurora {
                     }
                     continue;
                 }
+                // Another DRM master may have changed it; pushed at the first vblank.
+                surface.gamma_pending |= surface.gamma.is_some();
                 surface.render.after_resume = true;
                 surface.render.damage(&handle, *node, *crtc);
             }
@@ -707,7 +709,10 @@ pub fn vblank_handler(
     node: DrmNode,
 ) -> impl FnMut(DrmEvent, &mut Option<DrmEventMetadata>, &mut Aurora) {
     move |event, metadata, state| match event {
-        DrmEvent::VBlank(crtc) => state.frame_finish(node, crtc, metadata),
+        DrmEvent::VBlank(crtc) => {
+            state.frame_finish(node, crtc, metadata);
+            state.drm_retry_gamma(node, crtc);
+        }
         DrmEvent::Error(err) => tracing::error!(%err, "drm event error"),
     }
 }

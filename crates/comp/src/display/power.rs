@@ -147,12 +147,7 @@ impl Aurora {
                 true
             }
         });
-        power.any_off = self
-            .wm
-            .outputs
-            .iter()
-            .filter(|o| *o != output)
-            .any(is_off);
+        power.any_off = self.wm.outputs.iter().filter(|o| *o != output).any(is_off);
     }
 }
 

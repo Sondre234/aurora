@@ -22,6 +22,9 @@ aurora-ipc.workspace = true
 aurora-theme.workspace = true
 # Not used directly: enables the signals source in the calloop smithay re-exports.
 calloop = { version = "0.14", features = ["signals"] }
+# GAMMA_LUT blobs of any length (the drm crate only builds blobs from sized types). Already in
+# the tree through smithay's drm, same version.
+drm-ffi = "0.9"
 
 [dependencies.smithay]
 workspace = true

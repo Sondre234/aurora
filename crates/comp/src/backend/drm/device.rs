@@ -75,6 +75,10 @@ pub struct Surface {
     pub output: Output,
     pub render: RenderState,
     pub dmabuf_feedback: Option<SurfaceDmabufFeedback>,
+    /// The gamma ramp a client set (`None`: the driver default), and whether it still has to
+    /// reach the hardware.
+    pub gamma: Option<Vec<u16>>,
+    pub gamma_pending: bool,
     global: Option<GlobalId>,
     dh: DisplayHandle,
 }
@@ -452,6 +456,8 @@ impl Aurora {
                 global: Some(global),
                 render,
                 dmabuf_feedback,
+                gamma: None,
+                gamma_pending: false,
                 dh: self.display_handle.clone(),
             },
         );
