@@ -3,15 +3,27 @@
 //!
 //! - Power off: the DRM compositor clears the CRTC (planes off, connectors detached,
 //!   ACTIVE=0) and the output stops rendering; the next queued frame re-enables it with a
-//!   full modeset.
+//!   full modeset. Meanwhile a 1 s timer stands in for its vblank (FIFO barriers, frame
+//!   callbacks), so clients slow down instead of blocking until the output wakes.
 //! - Gamma: the atomic `GAMMA_LUT` blob when the driver has it, else the legacy ramp. The
 //!   wanted ramp is kept on the surface and pushed again after a session resume or power on,
 //!   since another DRM master may have changed it meanwhile.
 //! - VRR: `VRR_ENABLED` through the DRM compositor, toggled before the frame that needs it.
+use std::time::Duration;
+
 use smithay::{
-    backend::drm::{DrmNode, VrrSupport},
+    backend::{
+        drm::{DrmNode, VrrSupport},
+        renderer::element::RenderElementStates,
+    },
     output::Output,
-    reexports::drm::control::{connector, crtc},
+    reexports::{
+        calloop::{
+            LoopHandle, RegistrationToken,
+            timer::{TimeoutAction, Timer},
+        },
+        drm::control::{connector, crtc},
+    },
 };
 
 use smithay_drm_extras::display_info;
@@ -26,6 +38,24 @@ use crate::{
     },
     state::Aurora,
 };
+
+/// How often an output that is off stands in for its vblank.
+const OFF_TICK: Duration = Duration::from_secs(1);
+
+pub(super) fn arm_off_tick(
+    handle: &LoopHandle<'static, Aurora>,
+    node: DrmNode,
+    crtc: crtc::Handle,
+) -> Option<RegistrationToken> {
+    let timer = Timer::from_duration(OFF_TICK);
+    match handle.insert_source(timer, move |_, _, state| state.off_tick(node, crtc)) {
+        Ok(token) => Some(token),
+        Err(err) => {
+            tracing::warn!("power: cannot arm the off tick: {err}");
+            None
+        }
+    }
+}
 
 pub fn vrr_capability(drm_output: &ConnectorOutput, connector: connector::Handle) -> Capability {
     match drm_output.with_compositor(|c| c.vrr_supported(connector)) {
@@ -145,12 +175,45 @@ impl Aurora {
             surface.render.damage(&handle, id.device_id, id.crtc);
             // Pushed at the vblank of that frame.
             surface.gamma_pending |= surface.gamma.is_some();
-        } else if session_active {
+        } else {
             // Inactive: the resume path clears it once the device is ours again.
-            if let Err(err) = surface.drm_output.with_compositor(|c| c.clear()) {
+            if session_active
+                && let Err(err) = surface.drm_output.with_compositor(|c| c.clear())
+            {
                 tracing::warn!("power: cannot clear {}: {err}", output.name());
             }
+            surface.render.off_tick = arm_off_tick(&handle, id.device_id, id.crtc);
         }
+    }
+
+    /// One tick of an output that is off: what its vblank would do, minus the frame. FIFO
+    /// barriers of what it last showed are released and frame callbacks go out, so clients
+    /// crawl along at one frame per tick instead of stalling until the output wakes.
+    fn off_tick(&mut self, node: DrmNode, crtc: crtc::Handle) -> TimeoutAction {
+        let Backend::Drm(drm) = &mut self.backend else {
+            return TimeoutAction::Drop;
+        };
+        let session_active = drm.session_active;
+        let Some(surface) = drm
+            .devices
+            .get_mut(&node)
+            .and_then(|d| d.surfaces.get_mut(&crtc))
+        else {
+            return TimeoutAction::Drop;
+        };
+        let output = surface.output.clone();
+        if !crate::display::power::is_off(&output) {
+            surface.render.off_tick = None;
+            return TimeoutAction::Drop;
+        }
+        if session_active {
+            self.latch_fifo_barriers(&output);
+            self.signal_fifo_barriers(&output);
+            let now = std::time::Duration::from(self.clock.now());
+            self.post_repaint(&output, now, None, &RenderElementStates::default());
+            let _ = self.display_handle.flush_clients();
+        }
+        TimeoutAction::ToDuration(OFF_TICK)
     }
 
     /// Entries per channel of the output's gamma ramp; `None` when it has none.

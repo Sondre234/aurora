@@ -330,7 +330,8 @@ served, so `wlopm` and swayidle setups work per output:
 swayidle -w timeout 600 'wlopm --off \*' resume 'wlopm --on \*'
 ```
 
-Off means the CRTC is disabled and nothing renders for that output. Any key or button press,
+Off means the CRTC is disabled and nothing renders for that output; its clients get one frame
+callback (and FIFO release) per second, so games and players slow down instead of hanging. Any key or button press,
 pointer motion, scroll, touch or tablet input turns every output back on (releases do not,
 so the bind that turned them off cannot undo itself). Locking while off works; the lock
 surface is what shows on wake.

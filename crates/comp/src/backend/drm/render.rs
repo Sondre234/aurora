@@ -74,6 +74,8 @@ pub struct RenderState {
     /// Stand-in for the vblank of an empty frame, which never flips a page. Sends the frame
     /// callbacks so clients stay paced at the refresh rate.
     estimated_vblank: Option<RegistrationToken>,
+    /// While the output is powered off: the slow stand-in for its vblanks.
+    pub(super) off_tick: Option<RegistrationToken>,
     last_presentation: Option<Time<Monotonic>>,
     /// When frame callbacks last went out; paces empty frames. Not `last_presentation`, which
     /// only a real flip updates and which is therefore stale during no-damage commits.
@@ -139,6 +141,9 @@ impl RenderState {
             handle.remove(token);
         }
         if let Some(token) = self.estimated_vblank.take() {
+            handle.remove(token);
+        }
+        if let Some(token) = self.off_tick.take() {
             handle.remove(token);
         }
         self.frame_pending = false;
@@ -214,6 +219,7 @@ impl Aurora {
                     if let Err(err) = surface.drm_output.with_compositor(|c| c.clear()) {
                         tracing::warn!("power: cannot clear {}: {err}", surface.output.name());
                     }
+                    surface.render.off_tick = super::display::arm_off_tick(&handle, *node, *crtc);
                     continue;
                 }
                 // Another DRM master may have changed it; pushed at the first vblank.
@@ -429,7 +435,11 @@ impl Aurora {
         };
         let surface = drm.devices.get(&node)?.surfaces.get(&crtc)?;
         let render = &surface.render;
-        if !drm.session_active || render.frame_pending || !render.damaged {
+        if !drm.session_active
+            || render.frame_pending
+            || !render.damaged
+            || crate::display::power::is_off(&surface.output)
+        {
             return None;
         }
         let now = Duration::from(self.clock.now());
