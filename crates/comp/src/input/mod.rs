@@ -26,6 +26,8 @@ pub struct InputState {
     pub suppressed_buttons: Vec<u32>,
     /// Vertical wheel movement not yet worth a whole notch, in v120 units.
     pub wheel_v120: f64,
+    /// Every libinput device present (DRM only), so a reload can reconfigure them.
+    pub devices: Vec<smithay::reexports::input::Device>,
 }
 
 impl Aurora {

@@ -15,10 +15,12 @@ use crate::anim::Curve;
 use crate::state::Aurora;
 use keybind::{BindTable, Mods};
 
+mod input;
 pub mod keybind;
 mod raw;
 mod session;
 
+pub use input::{AccelProfile, Input, ScrollMethod};
 pub use session::Session;
 
 /// Also the source of the built-in default binds.
@@ -409,6 +411,8 @@ pub struct Config {
     pub services: Vec<ServiceSpec>,
     /// `[session]`.
     pub session: Session,
+    /// `[input.*]`: keymap, key repeat and libinput settings.
+    pub input: Input,
     /// False when the file did not exist and everything is defaults.
     pub from_file: bool,
 }
@@ -445,6 +449,7 @@ impl Config {
             autostart: raw::autostart(raw.autostart.as_ref(), &mut w),
             services: raw::services(raw.services.as_ref(), &mut w),
             session: session::session(raw.session.as_ref(), &mut w),
+            input: input::input(raw.input.as_ref(), &mut w),
             general,
             from_file: true,
         };
@@ -540,7 +545,9 @@ impl Aurora {
                 self.protocols
                     .virtual_keyboard
                     .set_allowed(config.general.allow_virtual_keyboard);
-                self.config = Arc::new(config);
+                let old = std::mem::replace(&mut self.config, Arc::new(config));
+                self.reapply_keyboard_config(&old.input);
+                self.reapply_device_config(&old.input);
                 self.apply_config();
                 self.reapply_output_config();
                 self.drm_apply_output_config();
@@ -589,6 +596,7 @@ mod tests {
         assert_eq!(config.animations.curve, a.curve);
         assert_eq!(config.xwayland, XWayland::default());
         assert_eq!(config.session, Session::default());
+        assert_eq!(config.input, Input::default());
         assert_eq!(config.decoration.rounding, d.rounding);
         assert_eq!(config.decoration.shadow_radius, d.shadow_radius);
         assert_eq!(config.decoration.shadow_color, d.shadow_color);

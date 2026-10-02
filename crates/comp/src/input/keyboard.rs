@@ -16,7 +16,7 @@ use crate::{
     config::keybind::{Bind, Chord, Mods, Trigger},
     emergency::{self, Emergency},
     overview::input::{OverviewKey, key_for},
-    state::{Aurora, REPEAT_DELAY, REPEAT_RATE},
+    state::Aurora,
 };
 
 /// What the filter decided for a key press.
@@ -189,10 +189,18 @@ impl Aurora {
         }
     }
 
-    /// Fires `action` again after `REPEAT_DELAY`, then at `REPEAT_RATE`, until the key goes up.
+    /// Fires `action` again after the keyboard's repeat delay, then at its rate, until the key
+    /// goes up. A rate of 0 (`[input.keyboard] repeat_rate`) turns repeat off.
     fn start_repeat(&mut self, keycode: Keycode, action: Action) {
-        let period = Duration::from_micros(1_000_000 / REPEAT_RATE as u64);
-        let timer = Timer::from_duration(Duration::from_millis(REPEAT_DELAY as u64));
+        let keyboard = &self.config.input.keyboard;
+        let Ok(rate) = u64::try_from(keyboard.repeat_rate) else {
+            return;
+        };
+        if rate == 0 {
+            return;
+        }
+        let period = Duration::from_micros(1_000_000 / rate);
+        let timer = Timer::from_duration(Duration::from_millis(keyboard.repeat_delay as u64));
         let token = self.handle.insert_source(timer, move |_, _, state| {
             // Also stops if the release was absorbed elsewhere (another source, a pause).
             let held = state.keyboard.pressed_keys().contains(&keycode);

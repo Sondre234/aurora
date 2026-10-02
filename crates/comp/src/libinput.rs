@@ -6,11 +6,11 @@ use smithay::{
     },
     reexports::{
         calloop::LoopHandle,
-        input::{AccelProfile, Device, DeviceCapability, Libinput},
+        input::{AccelProfile, Device, DeviceCapability, Libinput, ScrollMethod},
     },
 };
 
-use crate::{backend::Backend, state::Aurora};
+use crate::{backend::Backend, config, state::Aurora};
 
 /// Creates the libinput context bound to the session's seat.
 pub fn new_context(
@@ -45,7 +45,8 @@ pub fn insert_source(
 impl Aurora {
     fn device_added(&mut self, device: &mut Device) {
         tracing::info!(name = %device.name(), "input device added");
-        configure_device(device);
+        configure_device(device, &self.config.input);
+        self.input.devices.push(device.clone());
         if device.has_capability(DeviceCapability::Keyboard)
             && let Backend::Drm(drm) = &mut self.backend
         {
@@ -56,25 +57,73 @@ impl Aurora {
 
     fn device_removed(&mut self, device: &Device) {
         tracing::info!(name = %device.name(), "input device removed");
+        self.input.devices.retain(|d| d != device);
         if let Backend::Drm(drm) = &mut self.backend {
             drm.keyboards.retain(|d| d != device);
         }
     }
 }
 
-/// Sane defaults: adaptive acceleration on pointers, tap-to-click and
-/// disable-while-typing on touchpads, no natural scrolling.
-fn configure_device(device: &mut Device) {
-    if device.has_capability(DeviceCapability::Pointer) {
-        if device.config_accel_is_available() {
-            let _ = device.config_accel_set_profile(AccelProfile::Adaptive);
-            let _ = device.config_accel_set_speed(0.0);
+impl Aurora {
+    /// Applies `[input.pointer]` / `[input.touchpad]` to every device already there after a
+    /// reload changed them; new devices get the current settings in `device_added`.
+    pub fn reapply_device_config(&mut self, old: &config::Input) {
+        let input = &self.config.input;
+        if old.pointer == input.pointer && old.touchpad == input.touchpad {
+            return;
         }
-        // Only touchpads report tap fingers.
-        if device.config_tap_finger_count() > 0 {
-            let _ = device.config_tap_set_enabled(true);
-            let _ = device.config_scroll_set_natural_scroll_enabled(false);
-            let _ = device.config_dwt_set_enabled(true);
+        for device in &mut self.input.devices {
+            configure_device(device, input);
+        }
+        tracing::info!(
+            devices = self.input.devices.len(),
+            "input: device settings applied"
+        );
+    }
+}
+
+/// `[input.touchpad]` for touchpads (the only devices with tap fingers), `[input.pointer]`
+/// for every other pointer. What a device does not support is skipped.
+fn configure_device(device: &mut Device, input: &config::Input) {
+    if !device.has_capability(DeviceCapability::Pointer) {
+        return;
+    }
+    let touchpad = device.config_tap_finger_count() > 0;
+    let p = if touchpad {
+        &input.touchpad
+    } else {
+        &input.pointer
+    };
+    if device.config_accel_is_available() {
+        let profile = match p.accel_profile {
+            config::AccelProfile::Flat => AccelProfile::Flat,
+            config::AccelProfile::Adaptive => AccelProfile::Adaptive,
+        };
+        let _ = device.config_accel_set_profile(profile);
+        let _ = device.config_accel_set_speed(p.accel_speed);
+    }
+    if device.config_scroll_has_natural_scroll() {
+        let _ = device.config_scroll_set_natural_scroll_enabled(p.natural_scroll);
+    }
+    if device.config_left_handed_is_available() {
+        let _ = device.config_left_handed_set(p.left_handed);
+    }
+    let method = match p.scroll_method {
+        None => device.config_scroll_default_method(),
+        Some(config::ScrollMethod::None) => Some(ScrollMethod::NoScroll),
+        Some(config::ScrollMethod::TwoFinger) => Some(ScrollMethod::TwoFinger),
+        Some(config::ScrollMethod::Edge) => Some(ScrollMethod::Edge),
+        Some(config::ScrollMethod::OnButtonDown) => Some(ScrollMethod::OnButtonDown),
+    };
+    if let Some(method) = method
+        && device.config_scroll_methods().contains(&method)
+    {
+        let _ = device.config_scroll_set_method(method);
+    }
+    if touchpad {
+        let _ = device.config_tap_set_enabled(p.tap);
+        if device.config_dwt_is_available() {
+            let _ = device.config_dwt_set_enabled(p.dwt);
         }
     }
 }

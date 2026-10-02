@@ -26,6 +26,7 @@ pub struct RawConfig {
     pub autostart: Option<Value>,
     pub services: Option<Value>,
     pub session: Option<Value>,
+    pub input: Option<Value>,
     /// Unknown top-level keys, reported as warnings.
     #[serde(flatten)]
     pub extra: Table,
