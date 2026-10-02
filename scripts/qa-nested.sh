@@ -31,8 +31,9 @@
 #             AURORA_FILES_TEST_SCRIPT select/mkdir/rename/copy/move/trash/delete with filesystem
 #             and $XDG_DATA_HOME/Trash assertions (scratch only), chmod 000 dir, kill, no IPC
 #
-# Isolation: every scenario sets AURORA_IPC_SOCK to a file in its scratch dir (never touch the
-# live $XDG_RUNTIME_DIR/aurora/ipc.sock) and points DBUS_SESSION_BUS_ADDRESS at a dead path, so
+# Isolation: every scenario sets AURORA_IPC_SOCK to a file in its scratch dir, or in a private
+# mktemp dir when that path is too long for a socket (never touch the live
+# $XDG_RUNTIME_DIR/aurora/ipc.sock) and points DBUS_SESSION_BUS_ADDRESS at a dead path, so
 # no client can reach your session bus (and dunst). notifd gets its own dbus-daemon.
 #   AURORA_BIN_DIR  where aurora-shell, aurora-launcher, aurora-notifd, aurora-lock and
 #                   auroractl live, default: the directory of AURORA_BIN
@@ -66,8 +67,8 @@ export DBUS_SESSION_BUS_ADDRESS="unix:path=$SCRATCH/no-such-bus"
 BINDIR=${AURORA_BIN_DIR:-$(dirname "$BIN")}
 
 PASS=0 FAIL=0 SKIP=0
-IPC="" PBUS="" PBPID=""
-APID="" SOCK="" XD="" LOG="" OFF=0 SDIR="" NAME="" CFG="" LASTPID="" MATCH=""
+IPC="" IPCDIR="" PBUS="" PBPID=""
+APID="" SOCK="" XD="" LOG="" OFF=0 LOFF=0 SDIR="" NAME="" CFG="" LASTPID="" MATCH=""
 CPIDS=()
 
 pass() { PASS=$((PASS + 1)); echo "PASS [$NAME] $1"; }
@@ -122,7 +123,7 @@ stop_pbus() {
     PBPID=""
 }
 trap 'stop_aurora; stop_pbus; exit 130' INT TERM
-trap 'stop_aurora; stop_pbus' EXIT
+trap 'stop_aurora; stop_pbus; [ -z "$IPCDIR" ] || rm -rf "$IPCDIR"' EXIT
 
 mark() { OFF=$(stat -c %s "$LOG" 2>/dev/null || echo 0); }
 newlog() { tail -c +$((OFF + 1)) "$LOG" 2>/dev/null | sed -E 's/\x1b\[[0-9;]*m//g'; }
@@ -168,6 +169,11 @@ begin() {
     : >"$SDIR/clients.log"
     SOCK="" XD=""
     IPC=$SDIR/run/ipc.sock
+    # sun_path holds 108 bytes: under a deep SCRATCH the socket goes to a short private dir.
+    if [ ${#IPC} -ge 108 ]; then
+        [ -n "$IPCDIR" ] || IPCDIR=$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/aurora-qa.XXXXXX")
+        IPC=$IPCDIR/$NAME.sock
+    fi
     echo "== $NAME"
 }
 
@@ -185,7 +191,7 @@ launch() {
         "$BIN" --winit --qa --timeout "${QA_TIMEOUT:-40}" --config "$CFG" -c true \
         >"$SDIR/stdout.log" 2>&1 &
     APID=$!
-    OFF=0
+    OFF=0 LOFF=0
     if ! wait_log 'aurora listening' 15; then
         fail "aurora did not start"
         return 1
@@ -197,7 +203,10 @@ launch() {
     return 0
 }
 
+# Searches from the launch (comp.log is rotated per run), not the last mark: Xwayland can be
+# ready before launch marks.
 wait_x() {
+    OFF=$LOFF
     if wait_log 'xwayland: ready display=' 15; then
         XD=$(sed -E 's/.*display=(:[0-9]+).*/\1/' <<<"$MATCH")
         if [ -n "$XD" ]; then pass "xwayland ready $XD"; else fail "no display in: $MATCH"; fi
@@ -1605,14 +1614,15 @@ sc_term() {
         colors=$(magick "$full" -crop "${w}x${h}+${x}+${y}" +repage -format %k info: 2>/dev/null)
         if [ "${colors:-0}" -gt 3 ]; then pass "glyph pixels are not background only ($colors colors in the window)"; else fail "window is a flat color (${colors:-?} colors), no glyphs painted"; fi
     fi
-    if matches '^term=xterm-256color colorterm=truecolor program=aurora-term tty0 tty1$' "$(cat "$run/term-env" 2>/dev/null)"; then pass "child sees TERM/COLORTERM/TERM_PROGRAM and a tty"; else fail "child environment: $(cat "$run/term-env" 2>/dev/null)"; fi
+    if matches '^term=xterm-256color colorterm=truecolor program=aurora-term tty0 tty1 ctty$' "$(cat "$run/term-env" 2>/dev/null)"; then pass "child sees TERM/COLORTERM/TERM_PROGRAM and a controlling tty"; else fail "child environment: $(cat "$run/term-env" 2>/dev/null)"; fi
 
     # 2. A layout change resizes the pty: SIGWINCH reaches the child with a new size.
     local rbase
     rbase=$(clog | grep -acE 'term: resize cols=')
     term sz1
     need ':sz1:' 10
-    if waitfor 6 test "$(wc -l <"$run/size.log" 2>/dev/null || echo 0)" -ge 2; then pass "child got SIGWINCH on resize"; else fail "no SIGWINCH after a layout change (size.log: $(tr '\n' ';' <"$run/size.log"))"; fi
+    # The line count is re-read on every try (a plain `test "$(..)"` would expand only once).
+    if waitfor 6 bash -c '[ "$(wc -l <"$1")" -ge 2 ]' _ "$run/size.log"; then pass "child got SIGWINCH on resize"; else fail "no SIGWINCH after a layout change (size.log: $(tr '\n' ';' <"$run/size.log"))"; fi
     if [ "$(head -1 "$run/size.log")" != "$(tail -1 "$run/size.log")" ]; then pass "stty size changed: $(head -1 "$run/size.log") -> $(tail -1 "$run/size.log")"; else fail "stty size did not change"; fi
     expect_count 'term: resize cols=[0-9]+ rows=[0-9]+' $((rbase + 1)) 5 'term: resize'
 
@@ -1646,16 +1656,28 @@ sc_term() {
     if waitfor 10 test -s "$run/typed" && [ "$(cat "$run/typed")" = qa-roundtrip ]; then pass "typed line reached the child through the pty"; else fail "round trip failed (typed: '$(cat "$run/typed" 2>/dev/null)')"; fi
     expect_count 'term: exit pid=[0-9]+ code=0' 2 8 'term: exit code=0'
 
-    # 4. Flooding: 50 MB of output finishes in time and the compositor keeps answering.
+    # 4. Flooding: 50 MB of output finishes in time and the compositor keeps answering. The
+    # fixture holds the output until flood.go, then snapshots are probed back to back until it
+    # is done; at least one answer must arrive while the flood is still running.
+    rm -f "$run/flood.ready" "$run/flood.go" "$run/flood.done"
     appc aurora-term -e "$Q/term-flood.sh"
-    local t0=$SECONDS answered=0
-    for i in 1 2 3; do
-        sleep 0.5
-        [ -x "$BINDIR/auroractl" ] || break
-        if timeout 5 env -u DISPLAY AURORA_IPC_SOCK="$IPC" "$BINDIR/auroractl" snapshot >/dev/null 2>&1; then answered=$((answered + 1)); fi
-    done
+    waitfor 10 test -e "$run/flood.ready" || fail "flood fixture never started (no flood.ready)"
+    local t0=$SECONDS probes=0 answered=0 during=0
+    : >"$run/flood.go"
     if [ -x "$BINDIR/auroractl" ]; then
-        if [ "$answered" = 3 ]; then pass "compositor answers auroractl snapshot during a flood"; else fail "auroractl snapshot answered $answered/3 during the flood"; fi
+        while [ "$probes" -lt 3 ] || { [ ! -e "$run/flood.done" ] && [ $((SECONDS - t0)) -lt 60 ]; }; do
+            probes=$((probes + 1))
+            if timeout 5 env -u DISPLAY AURORA_IPC_SOCK="$IPC" "$BINDIR/auroractl" snapshot >/dev/null 2>&1; then
+                answered=$((answered + 1))
+                [ -e "$run/flood.done" ] || during=$((during + 1))
+            fi
+            sleep 0.05
+        done
+        if [ "$answered" = "$probes" ] && [ "$during" -ge 1 ]; then
+            pass "compositor answers auroractl snapshot during a flood ($during answered mid-flood, $answered/$probes total)"
+        else
+            fail "auroractl snapshot during the flood: $answered/$probes answered, $during while it ran"
+        fi
     else
         skip "auroractl not built: flood responsiveness check"
     fi
@@ -1700,8 +1722,8 @@ sc_term() {
 # ------------------------------------------------------------------------------------------
 
 # fstart LABEL KEYS...: fresh fixture, then aurora-files on it driven by a key script
-# (qa-hooks). Script format assumed: one key per line, xkb keysym names with ctrl+/shift+/alt+
-# prefixes, and `text:<string>` to type a string. Adapt `fstart` if the app's format differs.
+# (qa-hooks). One argument per script line, format of crates/files/src/testscript.rs: key names
+# with ctrl+/shift+/alt+ prefixes, `type <string>` types a string.
 FP_PID=""
 FP_BASE=0
 fstart() {
@@ -1764,12 +1786,12 @@ sc_files() {
         expect_count 'files: select count=6' 1 10 'files: select count=6'
         fend
 
-        fstart mkdir ctrl+shift+n text:qa-newdir Return
+        fstart mkdir ctrl+shift+n 'type qa-newdir' Return
         fwait mkdir
         if waitfor 3 test -d "$W/qa-newdir"; then pass "new folder created"; else fail "qa-newdir missing"; fi
         fend
 
-        fstart rename Home Down Down F2 ctrl+a text:renamed.txt Return
+        fstart rename Home Down Down F2 ctrl+a 'type renamed.txt' Return
         fwait rename
         if [ -f "$W/renamed.txt" ] && [ ! -e "$W/a.txt" ] && [ "$(cat "$W/renamed.txt")" = a-content ]; then pass "a.txt renamed, content intact"; else fail "rename result wrong: $(ls "$W" | tr '\n' ' ')"; fi
         fend
