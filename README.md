@@ -276,14 +276,14 @@ and this idle recipe:
 
 ```sh
 swayidle -w timeout 300 'auroractl raw "\"Lock\""' \
-    timeout 600 'wlopm --off "*"' resume 'wlopm --on "*"' \
+    timeout 600 'auroractl raw "\"PowerOffMonitors\""' resume 'auroractl raw "\"PowerOnMonitors\""' \
     before-sleep 'auroractl raw "\"Lock\""'
 ```
 
 `auroractl raw '"Lock"'` asks the compositor to start `[services.lock]`, exactly like the
 `lock` bind (it fails with Unsupported when no lock service is configured). Monitors
-off/on need wlr-output-power-management-v1 in Aurora (with the `power-off-monitors` /
-`power-on-monitors` actions, part of the display work) and `wlopm` from the AUR.
+off/on use the `PowerOffMonitors` / `PowerOnMonitors` requests (the `power-off-monitors` /
+`power-on-monitors` actions); `wlopm` over wlr-output-power-management-v1 works as well.
 
 **Input.** `config.toml` now has `[input.keyboard]` (`layout`, `variant`, `model`,
 `options`, `rules`, `repeat_rate`, `repeat_delay`), `[input.pointer]` and

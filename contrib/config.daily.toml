@@ -5,7 +5,7 @@
 # the file (a bare key after a table header belongs to that table).
 #
 # Programs used here (Arch packages): wireplumber (wpctl), brightnessctl, playerctl, grim,
-# slurp, wl-clipboard, swayidle, hyprpolkitagent, and wlopm (AUR) for turning monitors off.
+# slurp, wl-clipboard, swayidle and hyprpolkitagent.
 
 # Commands run once at login, through `sh -c`, after the socket exists.
 #
@@ -15,15 +15,14 @@
 #
 # Idle and lock: lock after 5 min, monitors off after 10 min (on again at the first input),
 # lock before suspend. Locking goes through the IPC (`auroractl raw '"Lock"'` is the same as
-# the `lock` bind and needs [services.lock]). Monitors off/on use
-# wlr-output-power-management-v1 through wlopm; Aurora's support for that protocol and the
-# `power-off-monitors` / `power-on-monitors` actions come with the display work, so until it
-# is merged swayidle's monitor lines do nothing harmful but also nothing visible.
+# the `lock` bind and needs [services.lock]). Monitors off/on go through the IPC as well
+# (`PowerOffMonitors` / `PowerOnMonitors`, the same as the `power-off-monitors` /
+# `power-on-monitors` actions); any real input also wakes them. `wlopm` works too.
 # `-w` makes swayidle wait for before-sleep; `auroractl raw` returns once the compositor has
 # accepted the request, the lock surface follows a moment later.
 autostart = [
     "systemctl --user -q is-enabled hyprpolkitagent.service 2>/dev/null || exec /usr/lib/hyprpolkitagent/hyprpolkitagent",
-    '''exec swayidle -w timeout 300 'auroractl raw "\"Lock\""' timeout 600 'wlopm --off "*"' resume 'wlopm --on "*"' before-sleep 'auroractl raw "\"Lock\""' ''',
+    '''exec swayidle -w timeout 300 'auroractl raw "\"Lock\""' timeout 600 'auroractl raw "\"PowerOffMonitors\""' resume 'auroractl raw "\"PowerOnMonitors\""' before-sleep 'auroractl raw "\"Lock\""' ''',
 ]
 
 # Supervised services (see the example config for every key). Leave out notifd if you keep
