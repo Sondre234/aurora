@@ -341,6 +341,21 @@ impl WindowElement {
             .map_or_else(Default::default, |s| crate::protocols::content_type(&s))
     }
 
+    /// The icon name the client set with xdg-toplevel-icon-v1 (pixel icons are not read).
+    /// Stored only: the IPC window info does not carry it yet.
+    #[allow(dead_code)]
+    pub fn icon_name(&self) -> Option<String> {
+        let surface = self.window.wl_surface()?;
+        with_states(&surface, |states| {
+            states
+                .cached_state
+                .get::<smithay::wayland::xdg_toplevel_icon::ToplevelIconCachedState>()
+                .current()
+                .icon_name()
+                .map(str::to_owned)
+        })
+    }
+
     /// Window geometry in output-relative logical pixels for a surface origin `at`.
     fn output_geometry(&self, at: Point<i32, Logical>) -> Rectangle<i32, Logical> {
         let geo = SpaceElement::geometry(&self.window);

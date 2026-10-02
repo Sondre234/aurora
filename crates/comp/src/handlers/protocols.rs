@@ -215,3 +215,6 @@ impl XdgForeignHandler for Aurora {
         &mut self.protocols.xdg_foreign
     }
 }
+
+/// The icon is double-buffered on the surface by Smithay and read when needed.
+impl smithay::wayland::xdg_toplevel_icon::XdgToplevelIconHandler for Aurora {}

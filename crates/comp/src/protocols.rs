@@ -32,6 +32,7 @@ use smithay::{
         viewporter::ViewporterState,
         xdg_activation::XdgActivationState,
         xdg_foreign::XdgForeignState,
+        xdg_toplevel_icon::XdgToplevelIconManager,
         xwayland_shell::XWaylandShellState,
     },
 };
@@ -76,6 +77,9 @@ pub struct Protocols {
     pub xdg_foreign: XdgForeignState,
     /// xdg_wm_dialog_v1: modal dialogs always float, centred on their parent.
     _dialog: XdgDialogState,
+    /// xdg_toplevel_icon_v1: Smithay keeps the committed icon on the surface; nothing draws
+    /// it yet (`WindowElement::icon_name`).
+    _toplevel_icon: XdgToplevelIconManager,
 }
 
 impl Protocols {
@@ -117,6 +121,7 @@ impl Protocols {
             _pacing: crate::pacing::Pacing::new(dh),
             xdg_foreign: XdgForeignState::new::<Aurora>(dh),
             _dialog: XdgDialogState::new::<Aurora>(dh),
+            _toplevel_icon: XdgToplevelIconManager::new::<Aurora>(dh),
         }
     }
 }
