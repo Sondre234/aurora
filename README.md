@@ -264,8 +264,8 @@ systemctl --user enable hyprpolkitagent.service
 and Screenshot, `kwallet` for Secret. Install `xdg-desktop-portal-gtk`,
 `xdg-desktop-portal-wlr` and `kwallet` (or point Secret at `gnome-keyring` in the file).
 Screen sharing through xdg-desktop-portal-wlr needs a capture protocol it speaks; Aurora
-offers ext-image-copy-capture, not wlr-screencopy, so this needs a portal-wlr release with
-ext-image-copy-capture support (not yet verified on hardware).
+offers ext-image-copy-capture, not wlr-screencopy. xdg-desktop-portal-wlr 0.8 speaks
+ext-image-copy-capture (logs `wayland: using ext_image_copy_capture`); not yet verified on hardware.
 
 **Daily config.** [contrib/config.daily.toml](contrib/config.daily.toml) is a complete,
 tested example to merge into your `config.toml`: the shell, launcher, notifd and lock
