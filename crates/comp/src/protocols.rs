@@ -92,6 +92,8 @@ pub struct Protocols {
     _pointer_gestures: smithay::wayland::pointer_gestures::PointerGesturesState,
     /// xdg_system_bell_v1: logged, nothing rings.
     _system_bell: smithay::wayland::xdg_system_bell::XdgSystemBellState,
+    /// zwp_tablet_manager_v2, fed from libinput in `input/tablet.rs`.
+    _tablet_manager: smithay::wayland::tablet_manager::TabletManagerState,
 }
 
 impl Protocols {
@@ -147,6 +149,9 @@ impl Protocols {
                 Aurora,
             >(dh),
             _system_bell: smithay::wayland::xdg_system_bell::XdgSystemBellState::new::<Aurora>(dh),
+            _tablet_manager: smithay::wayland::tablet_manager::TabletManagerState::new::<Aurora>(
+                dh,
+            ),
         }
     }
 }
