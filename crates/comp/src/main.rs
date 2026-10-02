@@ -20,6 +20,7 @@ mod lock;
 mod log;
 mod outputs;
 mod overview;
+mod pacing;
 mod protocols;
 mod safety;
 mod scene;

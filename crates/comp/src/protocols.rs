@@ -66,6 +66,8 @@ pub struct Protocols {
     _alpha_modifier: AlphaModifierState,
     /// wp_content_type_v1: stored by Smithay per surface, read with [`content_type`].
     _content_type: ContentTypeState,
+    /// fifo-v1 and commit-timing-v1, signalled from the render loops (`pacing.rs`).
+    _pacing: crate::pacing::Pacing,
 }
 
 impl Protocols {
@@ -104,6 +106,7 @@ impl Protocols {
             _single_pixel: SinglePixelBufferState::new::<Aurora>(dh),
             _alpha_modifier: AlphaModifierState::new::<Aurora>(dh),
             _content_type: ContentTypeState::new::<Aurora>(dh),
+            _pacing: crate::pacing::Pacing::new(dh),
         }
     }
 }

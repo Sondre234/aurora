@@ -45,6 +45,7 @@ impl CompositorHandler for Aurora {
 
     fn new_surface(&mut self, surface: &WlSurface) {
         crate::syncobj::install_blocker_hook(surface);
+        crate::pacing::install_commit_timer_hook(surface);
     }
 
     fn commit(&mut self, surface: &WlSurface) {
