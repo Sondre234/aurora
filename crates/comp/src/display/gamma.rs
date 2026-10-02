@@ -169,6 +169,10 @@ impl GlobalDispatch2<ZwlrGammaControlManagerV1, Aurora> for ManagerGlobal {
     ) {
         data_init.init(resource, Manager);
     }
+
+    fn can_view(&self, client: &Client) -> bool {
+        crate::sandbox::can_view(crate::sandbox::Privileged::GammaControl, client)
+    }
 }
 
 impl Dispatch2<ZwlrGammaControlManagerV1, Aurora> for Manager {

@@ -727,6 +727,10 @@ impl GlobalDispatch2<ZwlrOutputManagerV1, Aurora> for ManagerGlobal {
         manager.done(om.serial);
         om.managers.push(ManagerEntry { manager, heads });
     }
+
+    fn can_view(&self, client: &Client) -> bool {
+        crate::sandbox::can_view(crate::sandbox::Privileged::OutputManagement, client)
+    }
 }
 
 impl Dispatch2<ZwlrOutputManagerV1, Aurora> for ManagerData {
