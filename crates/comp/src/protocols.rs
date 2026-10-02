@@ -90,6 +90,8 @@ pub struct Protocols {
     _ime: crate::ime::Ime,
     /// zwp_pointer_gestures_v1, fed from libinput in `input/gestures.rs`.
     _pointer_gestures: smithay::wayland::pointer_gestures::PointerGesturesState,
+    /// xdg_system_bell_v1: logged, nothing rings.
+    _system_bell: smithay::wayland::xdg_system_bell::XdgSystemBellState,
 }
 
 impl Protocols {
@@ -144,6 +146,7 @@ impl Protocols {
             _pointer_gestures: smithay::wayland::pointer_gestures::PointerGesturesState::new::<
                 Aurora,
             >(dh),
+            _system_bell: smithay::wayland::xdg_system_bell::XdgSystemBellState::new::<Aurora>(dh),
         }
     }
 }
