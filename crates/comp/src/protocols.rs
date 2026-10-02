@@ -21,6 +21,7 @@ use smithay::{
         selection::{primary_selection::PrimarySelectionState, wlr_data_control::DataControlState},
         session_lock::SessionLockManagerState,
         shell::{wlr_layer::WlrLayerShellState, xdg::decoration::XdgDecorationState},
+        single_pixel_buffer::SinglePixelBufferState,
         viewporter::ViewporterState,
         xdg_activation::XdgActivationState,
         xwayland_shell::XWaylandShellState,
@@ -53,6 +54,9 @@ pub struct Protocols {
     pub idle_inhibitors: HashSet<WlSurface>,
     /// The inhibitor currently taking the shortcuts from the focused surface.
     pub active_inhibitor: Option<KeyboardShortcutsInhibitor>,
+    /// Solid-colour buffers: Smithay's surface elements draw them as solid quads and the DRM
+    /// compositor can scan them out, so nothing else needs to know.
+    _single_pixel: SinglePixelBufferState,
 }
 
 impl Protocols {
@@ -88,6 +92,7 @@ impl Protocols {
             foreign_toplevel: ForeignToplevelListState::new::<Aurora>(dh),
             idle_inhibitors: HashSet::new(),
             active_inhibitor: None,
+            _single_pixel: SinglePixelBufferState::new::<Aurora>(dh),
         }
     }
 }
