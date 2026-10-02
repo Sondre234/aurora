@@ -78,6 +78,10 @@ scale = 1.0
 #   revoke-inhibit             end the focused client's keyboard-shortcuts inhibitor and take
 #                              the keyboard back from an exclusive layer surface
 #   lock                       start the `lock` service (see [services])
+#   power-off-monitors         turn every output off (DPMS); any key press, click, pointer
+#                              motion or scroll turns them back on, so does
+#                              power-on-monitors. Works while locked.
+#   power-on-monitors
 #   reload-config | quit | none
 #   drag-move | drag-resize    mouse binds only
 [keybinds]

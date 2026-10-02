@@ -206,6 +206,26 @@ for `qa-hooks` builds (`cargo build --features qa-hooks` in the app crate). The 
 were written from the plan before the binaries existed; check the PASS/FAIL list once the
 apps land.
 
+## Display
+
+Monitor power, gamma, adaptive sync, tearing and live output configuration. Everything here
+works on the DRM backend; under the nested (winit) backend the protocols are served but
+changes to the hardware are logged no-ops.
+
+**Monitor power (DPMS).** The actions `power-off-monitors` and `power-on-monitors` (bindable,
+also allowed while locked) and the IPC requests `PowerOffMonitors` / `PowerOnMonitors`
+(`auroractl raw '"PowerOffMonitors"'`) switch every output. `zwlr_output_power_manager_v1` is
+served, so `wlopm` and swayidle setups work per output:
+
+```sh
+swayidle -w timeout 600 'wlopm --off \*' resume 'wlopm --on \*'
+```
+
+Off means the CRTC is disabled and nothing renders for that output. Any key or button press,
+pointer motion, scroll, touch or tablet input turns every output back on (releases do not,
+so the bind that turned them off cannot undo itself). Locking while off works; the lock
+surface is what shows on wake.
+
 ## Performance
 
 The desktop is built like a browser engine: retained scene, aggressive caching,
