@@ -261,8 +261,8 @@ systemctl --user enable hyprpolkitagent.service
 
 **Portals.** `aurora-portals.conf` is picked because `XDG_CURRENT_DESKTOP=Aurora`:
 `xdg-desktop-portal-gtk` for everything by default, `xdg-desktop-portal-wlr` for ScreenCast
-and Screenshot, `gnome-keyring` for Secret. Install `xdg-desktop-portal-gtk`,
-`xdg-desktop-portal-wlr` and `gnome-keyring` (or point Secret at `kwallet` in the file).
+and Screenshot, `kwallet` for Secret. Install `xdg-desktop-portal-gtk`,
+`xdg-desktop-portal-wlr` and `kwallet` (or point Secret at `gnome-keyring` in the file).
 Screen sharing through xdg-desktop-portal-wlr needs a capture protocol it speaks; Aurora
 offers ext-image-copy-capture, not wlr-screencopy, so this needs a portal-wlr release with
 ext-image-copy-capture support (not yet verified on hardware).
