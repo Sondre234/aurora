@@ -6,6 +6,7 @@ mod capture;
 mod cli;
 mod config;
 mod debug;
+mod display;
 mod dmabuf;
 mod effects;
 mod emergency;

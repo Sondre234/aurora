@@ -77,6 +77,8 @@ fn all_requests() -> Vec<Request> {
         Request::SetTheme(Theme::default()),
         Request::Lock,
         Request::Unlock,
+        Request::PowerOffMonitors,
+        Request::PowerOnMonitors,
     ]
 }
 

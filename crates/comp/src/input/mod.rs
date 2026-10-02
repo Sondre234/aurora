@@ -31,6 +31,7 @@ pub struct InputState {
 impl Aurora {
     pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>) {
         self.notify_activity();
+        self.wake_on_input(&event);
         match event {
             InputEvent::Keyboard { event, .. } => {
                 self.on_key(

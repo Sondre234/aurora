@@ -336,6 +336,9 @@ pub enum Request {
     /// connection is that client's. Present so the lock service can tell the compositor
     /// its authentication succeeded before it destroys the lock object.
     Unlock,
+    /// Every output off (DPMS) until input or `PowerOnMonitors`. Allowed while locked.
+    PowerOffMonitors,
+    PowerOnMonitors,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

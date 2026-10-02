@@ -88,6 +88,7 @@ impl Aurora {
             self.wm.active_output = Some(output.clone());
         }
         let returned = self.return_rescued(output);
+        self.display_output_added(output);
         self.arrange_outputs();
         let geo = self.space.output_geometry(output).unwrap_or_default();
         tracing::info!(
@@ -276,6 +277,7 @@ impl Aurora {
     /// windows keep their workspace and return with the next output. Returns the window count.
     pub fn wm_output_removed(&mut self, output: &Output) -> usize {
         self.captures.output_removed(output);
+        self.display_output_removed(output);
         let name = output.name();
         let shown = self.wm.active_ws.get(output).copied();
         let target = self

@@ -36,7 +36,9 @@ pub fn gate(request: &Request, locked: bool) -> Result<(), Fail> {
         | Request::ReloadConfig
         | Request::SetTheme(_)
         | Request::Lock
-        | Request::Unlock => Ok(()),
+        | Request::Unlock
+        | Request::PowerOffMonitors
+        | Request::PowerOnMonitors => Ok(()),
         Request::SwitchWorkspace { .. }
         | Request::FocusWindow { .. }
         | Request::CloseWindow { .. }
@@ -226,6 +228,14 @@ impl Aurora {
                 tracing::info!("lock: unlock acknowledged over ipc");
                 Ok(Response::Ok)
             }
+            Request::PowerOffMonitors => {
+                self.power_all(false);
+                Ok(Response::Ok)
+            }
+            Request::PowerOnMonitors => {
+                self.power_all(true);
+                Ok(Response::Ok)
+            }
         }
     }
 }
@@ -265,6 +275,8 @@ mod tests {
             Request::SetTheme(Theme::default()),
             Request::Lock,
             Request::Unlock,
+            Request::PowerOffMonitors,
+            Request::PowerOnMonitors,
         ];
         for r in &passive {
             assert!(gate(r, true).is_ok(), "{r:?}");

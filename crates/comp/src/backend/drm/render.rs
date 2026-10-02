@@ -80,7 +80,7 @@ pub struct RenderState {
     last_frame_callback: Option<Time<Monotonic>>,
     failures: u32,
     /// Set by a session resume until the first frame lands; a failure then means stale buffers.
-    after_resume: bool,
+    pub(super) after_resume: bool,
 }
 
 impl RenderState {
@@ -209,6 +209,13 @@ impl Aurora {
                 // compositor that would block every later submit. Ok(None) means clean.
                 while let Ok(Some(_)) = surface.drm_output.frame_submitted() {}
                 surface.render.cancel(&handle);
+                // Powered off: keep it dark, whatever state the other VT left behind.
+                if crate::display::power::is_off(&surface.output) {
+                    if let Err(err) = surface.drm_output.with_compositor(|c| c.clear()) {
+                        tracing::warn!("power: cannot clear {}: {err}", surface.output.name());
+                    }
+                    continue;
+                }
                 surface.render.after_resume = true;
                 surface.render.damage(&handle, *node, *crtc);
             }
@@ -242,7 +249,11 @@ impl Aurora {
         };
         // This is the repaint that was scheduled, whatever happens next.
         surface.render.scheduled = None;
-        if !*session_active || surface.render.frame_pending || !surface.render.damaged {
+        if !*session_active
+            || surface.render.frame_pending
+            || !surface.render.damaged
+            || crate::display::power::is_off(&surface.output)
+        {
             return;
         }
         let Some(renderer) = renderer.as_mut() else {

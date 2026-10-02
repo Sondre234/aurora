@@ -1,5 +1,6 @@
 mod cursor;
 mod device;
+mod display;
 pub mod gpu;
 mod render;
 
