@@ -28,6 +28,10 @@ mod_key = "super"
 allow_virtual_keyboard = true
 # xdg-activation (an app asking to be raised): focus the window, or only mark it urgent.
 focus_on_activate = false
+# Let a fullscreen window that asks for it (wp_tearing_control_v1 "async", e.g. games with
+# vsync off) be presented with tearing for lower latency. Currently only recorded and logged:
+# the DRM backend cannot do async page flips yet, so presentation stays vsynced.
+allow_tearing = false
 
 # Animations. Render-only: windows get their final size at once and only the drawing
 # moves. `enabled = false` snaps everything exactly like before. Reload applies live.

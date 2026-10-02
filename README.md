@@ -240,6 +240,15 @@ is on that output, like sway and niri. At startup each connector logs its capabi
 connectors (smithay reports HDMI as such) `on-demand` stays off because each toggle would be
 a modeset, while `on` works. Toggles are logged as `vrr: output=DP-3 on|off`.
 
+**Tearing.** `wp_tearing_control_v1` is served and `[general] allow_tearing` (default `false`)
+says whether a fullscreen window hinting `async` may tear. For now this is bookkeeping only:
+smithay's DRM compositor at the pinned revision always commits page flips with
+`PAGE_FLIP_EVENT | NONBLOCK` and has no async flip option, so frames stay vsynced. The
+decision is computed per output and logged when it changes
+(`tearing: output=DP-3 fullscreen surface asks for async presentation; ...`), so the moment
+the backend can flip async only the commit flag is missing. Use VRR for low-latency games
+meanwhile.
+
 ## Performance
 
 The desktop is built like a browser engine: retained scene, aggressive caching,
