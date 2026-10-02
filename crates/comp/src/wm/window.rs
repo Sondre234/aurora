@@ -332,6 +332,15 @@ impl WindowElement {
         })
     }
 
+    /// The content type the main surface declared (wp_content_type_v1). Nothing acts on it
+    /// yet; it is here for on-demand VRR and similar per-window policy.
+    #[allow(dead_code)]
+    pub fn content_type(&self) -> crate::protocols::ContentType {
+        self.window
+            .wl_surface()
+            .map_or_else(Default::default, |s| crate::protocols::content_type(&s))
+    }
+
     /// Window geometry in output-relative logical pixels for a surface origin `at`.
     fn output_geometry(&self, at: Point<i32, Logical>) -> Rectangle<i32, Logical> {
         let geo = SpaceElement::geometry(&self.window);

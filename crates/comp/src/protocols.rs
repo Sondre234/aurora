@@ -5,10 +5,13 @@ use std::collections::HashSet;
 use smithay::{
     reexports::{
         calloop::LoopHandle,
+        wayland_protocols::wp::content_type::v1::server::wp_content_type_v1::Type as WpContentType,
         wayland_server::{DisplayHandle, protocol::wl_surface::WlSurface},
     },
     wayland::{
         alpha_modifier::AlphaModifierState,
+        compositor::with_states,
+        content_type::{ContentTypeState, ContentTypeSurfaceCachedState},
         cursor_shape::CursorShapeManagerState,
         foreign_toplevel_list::ForeignToplevelListState,
         fractional_scale::FractionalScaleManagerState,
@@ -61,6 +64,8 @@ pub struct Protocols {
     /// wp_alpha_modifier_v1: Smithay's surface elements multiply the client's factor into the
     /// alpha Aurora passes (fades, inactive opacity); the shadow follows it in `wm/window.rs`.
     _alpha_modifier: AlphaModifierState,
+    /// wp_content_type_v1: stored by Smithay per surface, read with [`content_type`].
+    _content_type: ContentTypeState,
 }
 
 impl Protocols {
@@ -98,6 +103,34 @@ impl Protocols {
             active_inhibitor: None,
             _single_pixel: SinglePixelBufferState::new::<Aurora>(dh),
             _alpha_modifier: AlphaModifierState::new::<Aurora>(dh),
+            _content_type: ContentTypeState::new::<Aurora>(dh),
         }
     }
+}
+
+/// What a surface says it shows (wp_content_type_v1), for policy such as on-demand VRR.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ContentType {
+    #[default]
+    None,
+    Photo,
+    Video,
+    Game,
+}
+
+/// The committed content type of `surface`; `None` when the client never set one.
+pub fn content_type(surface: &WlSurface) -> ContentType {
+    with_states(surface, |states| {
+        match states
+            .cached_state
+            .get::<ContentTypeSurfaceCachedState>()
+            .current()
+            .content_type()
+        {
+            WpContentType::Photo => ContentType::Photo,
+            WpContentType::Video => ContentType::Video,
+            WpContentType::Game => ContentType::Game,
+            _ => ContentType::None,
+        }
+    })
 }
