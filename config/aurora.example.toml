@@ -155,6 +155,11 @@ scale = 1.0
 #   position = [x, y] in layout pixels (after scaling)
 #   mode     = "WxH" or "WxH@Hz" (Hz may be fractional)
 #   scale    = 0.25..=8, fractional values use wp_fractional_scale
+#   vrr      = "off" | "on" | "on-demand" (variable refresh rate / adaptive sync; default
+#              "off"). "on-demand" enables it only while a fullscreen window is on the
+#              output. The log says what each connector supports at startup
+#              ("output: DP-3 vrr=supported"); "requires-modeset" connectors (HDMI) honour
+#              "on" but keep "on-demand" off, since toggling would blank the screen.
 # HDMI-A-1 and DP-3 are the two halves (2560x1440 each) of the 49 inch ultrawide in PBP
 # mode, DP-1 is a separate 1080p monitor. Positions are in scaled (logical) pixels:
 # 2560 / 1.25 = 2048 wide per half.

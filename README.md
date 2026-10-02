@@ -233,6 +233,13 @@ it), the size advertised is the driver's, and the default ramp comes back as soo
 client's control goes away (including the client dying). Outputs without hardware gamma, and
 the nested backend, fail the control right away.
 
+**Variable refresh rate.** `[[output]] vrr = "off" | "on" | "on-demand"` (default `off`,
+applied live on reload). `on-demand` turns adaptive sync on only while a fullscreen window
+is on that output, like sway and niri. At startup each connector logs its capability
+(`output: DP-3 vrr=supported|requires-modeset|unsupported`); on `requires-modeset`
+connectors (smithay reports HDMI as such) `on-demand` stays off because each toggle would be
+a modeset, while `on` works. Toggles are logged as `vrr: output=DP-3 on|off`.
+
 ## Performance
 
 The desktop is built like a browser engine: retained scene, aggressive caching,
