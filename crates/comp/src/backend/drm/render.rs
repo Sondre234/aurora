@@ -74,13 +74,15 @@ pub struct RenderState {
     /// Stand-in for the vblank of an empty frame, which never flips a page. Sends the frame
     /// callbacks so clients stay paced at the refresh rate.
     estimated_vblank: Option<RegistrationToken>,
+    /// While the output is powered off: the slow stand-in for its vblanks.
+    pub(super) off_tick: Option<RegistrationToken>,
     last_presentation: Option<Time<Monotonic>>,
     /// When frame callbacks last went out; paces empty frames. Not `last_presentation`, which
     /// only a real flip updates and which is therefore stale during no-damage commits.
     last_frame_callback: Option<Time<Monotonic>>,
     failures: u32,
     /// Set by a session resume until the first frame lands; a failure then means stale buffers.
-    after_resume: bool,
+    pub(super) after_resume: bool,
 }
 
 impl RenderState {
@@ -139,6 +141,9 @@ impl RenderState {
             handle.remove(token);
         }
         if let Some(token) = self.estimated_vblank.take() {
+            handle.remove(token);
+        }
+        if let Some(token) = self.off_tick.take() {
             handle.remove(token);
         }
         self.frame_pending = false;
@@ -209,6 +214,16 @@ impl Aurora {
                 // compositor that would block every later submit. Ok(None) means clean.
                 while let Ok(Some(_)) = surface.drm_output.frame_submitted() {}
                 surface.render.cancel(&handle);
+                // Powered off: keep it dark, whatever state the other VT left behind.
+                if crate::display::power::is_off(&surface.output) {
+                    if let Err(err) = surface.drm_output.with_compositor(|c| c.clear()) {
+                        tracing::warn!("power: cannot clear {}: {err}", surface.output.name());
+                    }
+                    surface.render.off_tick = super::display::arm_off_tick(&handle, *node, *crtc);
+                    continue;
+                }
+                // Another DRM master may have changed it; pushed at the first vblank.
+                surface.gamma_pending |= surface.gamma.is_some();
                 surface.render.after_resume = true;
                 surface.render.damage(&handle, *node, *crtc);
             }
@@ -246,7 +261,11 @@ impl Aurora {
         };
         // This is the repaint that was scheduled, whatever happens next.
         surface.render.scheduled = None;
-        if !*session_active || surface.render.frame_pending || !surface.render.damaged {
+        if !*session_active
+            || surface.render.frame_pending
+            || !surface.render.damaged
+            || crate::display::power::is_off(&surface.output)
+        {
             return;
         }
         let Some(renderer) = renderer.as_mut() else {
@@ -259,6 +278,14 @@ impl Aurora {
             self.wm.tick(now) | crate::overview::Overview::tick(&mut self.overview, &self.wm, now);
         let output = surface.output.clone();
         let _span = tracing::debug_span!("render_surface", output = %output.name()).entered();
+        let vrr_mode = crate::display::vrr::mode_for(&self.display.rules, &output.name());
+        let fullscreen = self.wm.output_fullscreen(&output);
+        if super::display::sync_vrr(surface, vrr_mode, fullscreen) {
+            self.display.output_management.dirty = true;
+        }
+        let tearing =
+            crate::display::tearing::wanted(&self.wm, &output, self.config.general.allow_tearing);
+        self.display.tearing.note(&output, tearing);
 
         self.space.refresh();
         self.xwayland.unmanaged.refresh();
@@ -408,7 +435,11 @@ impl Aurora {
         };
         let surface = drm.devices.get(&node)?.surfaces.get(&crtc)?;
         let render = &surface.render;
-        if !drm.session_active || render.frame_pending || !render.damaged {
+        if !drm.session_active
+            || render.frame_pending
+            || !render.damaged
+            || crate::display::power::is_off(&surface.output)
+        {
             return None;
         }
         let now = Duration::from(self.clock.now());
@@ -541,7 +572,13 @@ impl Aurora {
                 surface.render.frame_pending = false;
                 presented = Some(surface.output.clone());
                 if let Some(mut feedback) = feedback.flatten() {
-                    feedback.presented(clock, Refresh::fixed(frame_duration), seq as u64, flags);
+                    // With VRR the frame duration is only the fastest the panel goes.
+                    let refresh = if surface.drm_output.with_compositor(|c| c.vrr_enabled()) {
+                        Refresh::variable(frame_duration)
+                    } else {
+                        Refresh::fixed(frame_duration)
+                    };
+                    feedback.presented(clock, refresh, seq as u64, flags);
                 }
             }
             Err(err) => {
@@ -730,7 +767,10 @@ pub fn vblank_handler(
     node: DrmNode,
 ) -> impl FnMut(DrmEvent, &mut Option<DrmEventMetadata>, &mut Aurora) {
     move |event, metadata, state| match event {
-        DrmEvent::VBlank(crtc) => state.frame_finish(node, crtc, metadata),
+        DrmEvent::VBlank(crtc) => {
+            state.frame_finish(node, crtc, metadata);
+            state.drm_retry_gamma(node, crtc);
+        }
         DrmEvent::Error(err) => tracing::error!(%err, "drm event error"),
     }
 }

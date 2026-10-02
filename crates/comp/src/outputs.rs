@@ -180,6 +180,8 @@ mod tests {
             position,
             mode: None,
             scale: None,
+            vrr: Default::default(),
+            transform: None,
         }
     }
 

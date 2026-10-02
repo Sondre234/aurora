@@ -85,6 +85,9 @@ pub enum Action {
     },
     /// `--qa` only: remove a headless output.
     DebugRemoveOutput(String),
+    /// Every output off (DPMS); any input or `power-on-monitors` turns them on again.
+    PowerOffMonitors,
+    PowerOnMonitors,
 }
 
 /// Workspaces are capped at 32 (`general.workspaces`); the config resolver applies the
@@ -294,6 +297,8 @@ impl FromStr for Action {
             "debug-pointer" => return Ok(Self::DebugPointer(parse_debug_pointer(rest)?)),
             "debug-add-output" => return parse_debug_add_output(rest),
             "debug-remove-output" => Self::DebugRemoveOutput(arg()?.to_string()),
+            "power-off-monitors" => Self::PowerOffMonitors,
+            "power-on-monitors" => Self::PowerOnMonitors,
             "" => return Err("empty action".into()),
             other => return Err(format!("unknown action {other:?}")),
         };
@@ -347,6 +352,8 @@ impl fmt::Display for Action {
                 }
             }
             Self::DebugRemoveOutput(name) => write!(f, "debug-remove-output {name}"),
+            Self::PowerOffMonitors => f.write_str("power-off-monitors"),
+            Self::PowerOnMonitors => f.write_str("power-on-monitors"),
         }
     }
 }
@@ -390,6 +397,8 @@ mod tests {
             "debug-pointer scroll up",
             "debug-add-output HEADLESS-2 1920x1080@60 +1280+0",
             "debug-remove-output HEADLESS-2",
+            "power-off-monitors",
+            "power-on-monitors",
         ];
         for text in ok {
             let action: Action = text.parse().unwrap_or_else(|e| panic!("{text}: {e}"));
@@ -413,6 +422,7 @@ mod tests {
             "close now",
             "overview now",
             "lock now",
+            "power-off-monitors now",
             "teleport",
         ];
         for text in bad {

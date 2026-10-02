@@ -19,12 +19,12 @@
 //! | `zwlr_layer_shell_v1` | overlays above every window, exclusive keyboard focus |
 //! | `ext_foreign_toplevel_list_v1` | lists every window with title and app id |
 //! | `wp_security_context_manager_v1` | a sandbox must not mint new contexts |
-//!
-//! Output management and gamma control (the DISPLAY stream) belong in this table too: filter
-//! them with [`can_view`] and a new [`Privileged`] variant.
+//! | `zwlr_output_power_manager_v1` | turns every monitor off |
+//! | `zwlr_gamma_control_manager_v1` | recolors (or blacks out) every output |
+//! | `zwlr_output_manager_v1` | reconfigures or disables outputs |
 //!
 //! Everything else (xdg-shell, xdg-activation, idle-inhibit, pointer constraints, text input,
-//! fifo, dmabuf, ...) is an ordinary client's right and stays visible.
+//! fifo, dmabuf, tearing control, ...) is an ordinary client's right and stays visible.
 use smithay::{
     reexports::wayland_server::{Client, DisplayHandle},
     wayland::security_context::{
@@ -47,6 +47,9 @@ pub enum Privileged {
     LayerShell,
     ForeignToplevelList,
     SecurityContext,
+    OutputPower,
+    GammaControl,
+    OutputManagement,
 }
 
 impl Privileged {
@@ -60,7 +63,10 @@ impl Privileged {
             | Self::SessionLock
             | Self::LayerShell
             | Self::ForeignToplevelList
-            | Self::SecurityContext => !sandboxed,
+            | Self::SecurityContext
+            | Self::OutputPower
+            | Self::GammaControl
+            | Self::OutputManagement => !sandboxed,
         }
     }
 }
@@ -111,7 +117,7 @@ impl SecurityContextHandler for Aurora {
 mod tests {
     use super::*;
 
-    const ALL: [Privileged; 8] = [
+    const ALL: [Privileged; 11] = [
         Privileged::DataControl,
         Privileged::VirtualKeyboard,
         Privileged::InputMethod,
@@ -120,6 +126,9 @@ mod tests {
         Privileged::LayerShell,
         Privileged::ForeignToplevelList,
         Privileged::SecurityContext,
+        Privileged::OutputPower,
+        Privileged::GammaControl,
+        Privileged::OutputManagement,
     ];
 
     #[test]

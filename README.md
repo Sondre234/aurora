@@ -315,6 +315,70 @@ Clients that connect through a security context (Flatpak) do not see data-contro
 keyboard, input method, image capture, session lock, layer shell, foreign toplevel list or
 the security context manager itself; the policy table is in `crates/comp/src/sandbox.rs`.
 
+## Display
+
+Monitor power, gamma, adaptive sync, tearing and live output configuration. Everything here
+works on the DRM backend; under the nested (winit) backend the protocols are served but
+changes to the hardware are logged no-ops.
+
+**Monitor power (DPMS).** The actions `power-off-monitors` and `power-on-monitors` (bindable,
+also allowed while locked) and the IPC requests `PowerOffMonitors` / `PowerOnMonitors`
+(`auroractl raw '"PowerOffMonitors"'`) switch every output. `zwlr_output_power_manager_v1` is
+served, so `wlopm` and swayidle setups work per output:
+
+```sh
+swayidle -w timeout 600 'wlopm --off \*' resume 'wlopm --on \*'
+```
+
+Off means the CRTC is disabled and nothing renders for that output; its clients get one frame
+callback (and FIFO release) per second, so games and players slow down instead of hanging. Any key or button press,
+pointer motion, scroll, touch or tablet input turns every output back on (releases do not,
+so the bind that turned them off cannot undo itself). Locking while off works; the lock
+surface is what shows on wake.
+
+**Gamma (night light).** `zwlr_gamma_control_manager_v1` is served, so gammastep
+(`gammastep -m wayland`) and wlsunset work. One client per output at a time; a second one
+gets `failed`. The ramp goes to the CRTC's `GAMMA_LUT` (legacy gamma ramp on drivers without
+it), the size advertised is the driver's, and the default ramp comes back as soon as the
+client's control goes away (including the client dying). Outputs without hardware gamma, and
+the nested backend, fail the control right away.
+
+**Variable refresh rate.** `[[output]] vrr = "off" | "on" | "on-demand"` (default `off`,
+applied live on reload). `on-demand` turns adaptive sync on only while a fullscreen window
+is on that output, like sway and niri. At startup each connector logs its capability
+(`output: DP-3 vrr=supported|requires-modeset|unsupported`); on `requires-modeset`
+connectors (smithay reports HDMI as such) `on-demand` stays off because each toggle would be
+a modeset, while `on` works. Toggles are logged as `vrr: output=DP-3 on|off`.
+
+**Tearing.** `wp_tearing_control_v1` is served and `[general] allow_tearing` (default `false`)
+says whether a fullscreen window hinting `async` may tear. For now this is bookkeeping only:
+smithay's DRM compositor at the pinned revision always commits page flips with
+`PAGE_FLIP_EVENT | NONBLOCK` and has no async flip option, so frames stay vsynced. The
+decision is computed per output and logged when it changes
+(`tearing: output=DP-3 fullscreen surface asks for async presentation; ...`), so the moment
+the backend can flip async only the commit flag is missing. Use VRR for low-latency games
+meanwhile.
+
+**Output configuration.** `zwlr_output_manager_v1` (version 4) is served: `wlr-randr`,
+`wdisplays` and `kanshi` see every connected output, including ones the config turned off,
+with all the modes the connector offers, and can change mode, position, scale, transform,
+enabled and adaptive sync live. `test` validates the whole configuration (every head must be
+named, the mode must be one the head offers; custom modes are accepted only when they match
+an offered one within 0.5 Hz; at least one output stays on). `apply` turns it into runtime
+overrides of the `[[output]]` rules, applies them the way a reload would, and reverts with
+`failed` if an output did not end up as asked. A configuration made against an older serial
+gets `cancelled`. Overrides are runtime only: the next config reload drops them (logged as
+`output-management: reload drops runtime changes ...`). `adaptive_sync` reports whether VRR
+is on right now; setting it to the reported value keeps the configured policy (so
+`on-demand` survives kanshi round trips), anything else overrides it with `on` or `off`. The
+nested window can only be moved and scaled. `[[output]] transform` sets the rotation in the
+file.
+
+```sh
+wlr-randr --output DP-3 --mode 2560x1440@144 --pos 2048,0 --scale 1.25
+wlr-randr --output DP-1 --off
+```
+
 ## Performance
 
 The desktop is built like a browser engine: retained scene, aggressive caching,

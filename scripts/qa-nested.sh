@@ -30,6 +30,9 @@
 #   files     aurora-files on a fixture tree: ready entries, toplevel, live theme, then via
 #             AURORA_FILES_TEST_SCRIPT select/mkdir/rename/copy/move/trash/delete with filesystem
 #             and $XDG_DATA_HOME/Trash assertions (scratch only), chmod 000 dir, kill, no IPC
+#            display   (needs the qa_display example: cargo build -p aurora-comp --examples)
+#   display   wlr-output-management heads/apply/test/cancel and reload, output power over the
+#             protocol, a bind and IPC, gamma refused on the nested backend, tearing control
 #
 # Isolation: every scenario sets AURORA_IPC_SOCK to a file in its scratch dir, or in a private
 # mktemp dir when that path is too long for a socket (never touch the live
@@ -1868,7 +1871,75 @@ sc_files() {
     end_scenario
 }
 
-ALL=(keys emergency reload tiling workspaces layer xwayland multi robust anim effects overview xscale ipc services theme shell launcher notifd lock term files)
+# Display protocols through the qa_display example client (a dev-only build:
+# `cargo build -p aurora-comp --examples`), plus the power actions over a bind and IPC.
+sc_display() {
+    NAME=display
+    local qd=${AURORA_QA_DISPLAY:-$ROOT/target/debug/examples/qa_display}
+    if [ ! -x "$qd" ]; then
+        skip "qa_display is not built at $qd (cargo build -p aurora-comp --examples)"
+        return
+    fi
+    begin display
+    add_binds <<'EOF'
+"Mod+F10" = "power-off-monitors"
+EOF
+    launch || { end_scenario; return; }
+    local out
+
+    out=$(wl timeout 10 "$qd" heads 2>&1)
+    if contains "$out" 'global=zwlr_output_manager_v1 version=4'; then pass "output manager v4 advertised"; else fail "no output manager: ${out:0:200}"; fi
+    if matches '^head name=winit enabled=1 mode=[0-9]+x[0-9]+@[0-9]+ pos=0,0 scale=1.00 transform=0 modes=1' "$out"; then pass "winit head described"; else fail "winit head: ${out:0:300}"; fi
+    if matches '^serial=Some\([0-9]+\)' "$out"; then pass "done carries a serial"; else fail "no done: ${out:0:300}"; fi
+
+    mark
+    out=$(wl timeout 10 "$qd" place winit 0 0 2 2>&1)
+    if contains "$out" 'result=succeeded'; then pass "apply succeeds"; else fail "apply: ${out:0:300}"; fi
+    need 'output-management: applied 1 head' 3
+    if matches 'head name=winit enabled=1 .* scale=2.00' "$out"; then pass "head reports the applied scale"; else fail "scale not applied: ${out:0:300}"; fi
+
+    out=$(wl timeout 10 "$qd" test-scale winit 9 2>&1)
+    if contains "$out" 'result=failed'; then pass "test refuses scale 9"; else fail "test scale 9: ${out:0:200}"; fi
+    out=$(wl timeout 10 "$qd" test-scale winit 1.5 2>&1)
+    if contains "$out" 'result=succeeded'; then pass "test accepts scale 1.5"; else fail "test scale 1.5: ${out:0:200}"; fi
+    out=$(wl timeout 10 "$qd" stale 2>&1)
+    if contains "$out" 'result=cancelled'; then pass "outdated serial is cancelled"; else fail "stale: ${out:0:200}"; fi
+
+    mark
+    kill -USR1 "$APID"
+    need 'output-management: reload drops runtime changes to 1 output' 5
+    out=$(wl timeout 10 "$qd" heads 2>&1)
+    if matches 'head name=winit enabled=1 .* scale=1.00' "$out"; then pass "reload puts the config scale back"; else fail "after reload: ${out:0:300}"; fi
+
+    mark
+    out=$(wl timeout 10 "$qd" power winit off 2>&1)
+    if contains "$out" 'power modes=[1, 0] failed=false'; then pass "power control reports on, then off"; else fail "power: ${out:0:300}"; fi
+    need 'power: output=winit off' 3
+    if [ -x "$BINDIR/auroractl" ]; then
+        mark
+        ctl raw '"PowerOnMonitors"' >/dev/null
+        need 'power: output=winit on' 3
+        key logo F10
+        need 'action: power-off-monitors' 3
+        need 'power: output=winit off' 3
+        ctl raw '"PowerOnMonitors"' >/dev/null
+    else
+        skip "auroractl not built, IPC power requests not run"
+    fi
+
+    mark
+    out=$(wl timeout 10 "$qd" gamma winit 2>&1)
+    if contains "$out" 'gamma size=None failed=true'; then pass "gamma control fails on the nested backend"; else fail "gamma: ${out:0:200}"; fi
+    need 'gamma: output=winit has no hardware gamma' 3
+
+    out=$(wl timeout 10 "$qd" tearing-twice 2>&1)
+    if contains "$out" 'tearing first=ok' && contains "$out" 'tearing second=protocol-error'; then pass "second tearing control is a protocol error"; else fail "tearing: ${out:0:300}"; fi
+
+    if alive; then pass "compositor alive after the display clients"; else fail "compositor died"; fi
+    end_scenario
+}
+
+ALL=(keys emergency reload tiling workspaces layer xwayland multi robust anim effects overview xscale ipc services theme shell launcher notifd lock term files display)
 if [ $# -eq 0 ]; then set -- "${ALL[@]}"; fi
 for s in "$@"; do
     declare -F "sc_$s" >/dev/null || { echo "unknown scenario $s" >&2; exit 2; }

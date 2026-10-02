@@ -28,6 +28,10 @@ mod_key = "super"
 allow_virtual_keyboard = true
 # xdg-activation (an app asking to be raised): focus the window, or only mark it urgent.
 focus_on_activate = false
+# Let a fullscreen window that asks for it (wp_tearing_control_v1 "async", e.g. games with
+# vsync off) be presented with tearing for lower latency. Currently only recorded and logged:
+# the DRM backend cannot do async page flips yet, so presentation stays vsynced.
+allow_tearing = false
 
 # Animations. Render-only: windows get their final size at once and only the drawing
 # moves. `enabled = false` snaps everything exactly like before. Reload applies live.
@@ -129,6 +133,10 @@ dwt = true
 #   revoke-inhibit             end the focused client's keyboard-shortcuts inhibitor and take
 #                              the keyboard back from an exclusive layer surface
 #   lock                       start the `lock` service (see [services])
+#   power-off-monitors         turn every output off (DPMS); any key press, click, pointer
+#                              motion or scroll turns them back on, so does
+#                              power-on-monitors. Works while locked.
+#   power-on-monitors
 #   reload-config | quit | none
 #   drag-move | drag-resize    mouse binds only
 [keybinds]
@@ -202,6 +210,15 @@ dwt = true
 #   position = [x, y] in layout pixels (after scaling)
 #   mode     = "WxH" or "WxH@Hz" (Hz may be fractional)
 #   scale    = 0.25..=8, fractional values use wp_fractional_scale
+#   vrr      = "off" | "on" | "on-demand" (variable refresh rate / adaptive sync; default
+#              "off"). "on-demand" enables it only while a fullscreen window is on the
+#              output. The log says what each connector supports at startup
+#              ("output: DP-3 vrr=supported"); "requires-modeset" connectors (HDMI) honour
+#              "on" but keep "on-demand" off, since toggling would blank the screen.
+#   transform = "normal" | "90" | "180" | "270" | "flipped" | "flipped-90" | "flipped-180" |
+#              "flipped-270" (rotation, counter-clockwise like wl_output; default "normal")
+# wlr-randr, wdisplays and kanshi can change all of this live (wlr-output-management); such
+# changes are runtime only and the next reload puts this file back in charge.
 # HDMI-A-1 and DP-3 are the two halves (2560x1440 each) of the 49 inch ultrawide in PBP
 # mode, DP-1 is a separate 1080p monitor. Positions are in scaled (logical) pixels:
 # 2560 / 1.25 = 2048 wide per half.

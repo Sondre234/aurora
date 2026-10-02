@@ -106,6 +106,8 @@ pub struct Aurora {
     pub seat: Seat<Self>,
     pub keyboard: KeyboardHandle<Self>,
     pub pointer: PointerHandle<Self>,
+    /// Monitor power and the output-control protocols (`display/`).
+    pub display: crate::display::DisplayState,
 }
 
 impl Aurora {
@@ -131,6 +133,7 @@ impl Aurora {
         );
 
         let captures = crate::capture::Captures::new(&dh);
+        let display_state = crate::display::DisplayState::new(&dh, &config);
         let mut seat_state = SeatState::new();
         let mut seat: Seat<Self> = seat_state.new_wl_seat(&dh, backend.seat_name());
         let keyboard = seat
@@ -188,6 +191,7 @@ impl Aurora {
             seat,
             keyboard,
             pointer,
+            display: display_state,
         })
     }
 

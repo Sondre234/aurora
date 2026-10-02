@@ -54,6 +54,11 @@ pub fn logical_size(output: &Output) -> Size {
     }
 }
 
+/// The transform a config rule asks for, normal when it names none.
+pub fn rule_transform(rule: Option<&OutputRule>) -> Transform {
+    rule.and_then(|r| r.transform).unwrap_or(Transform::Normal)
+}
+
 /// The scale a config rule asks for; anything unusable means 1.
 pub fn rule_scale(rule: Option<&OutputRule>) -> Scale {
     match rule.and_then(|r| r.scale) {
@@ -64,7 +69,7 @@ pub fn rule_scale(rule: Option<&OutputRule>) -> Scale {
 
 impl Aurora {
     pub fn output_rule(&self, name: &str) -> Option<&OutputRule> {
-        self.config.outputs.iter().find(|r| r.name == name)
+        self.display.rules.iter().find(|r| r.name == name)
     }
 
     /// The `primary = true` output if one is connected, else the first.
@@ -88,6 +93,7 @@ impl Aurora {
             self.wm.active_output = Some(output.clone());
         }
         let returned = self.return_rescued(output);
+        self.display_output_added(output);
         self.arrange_outputs();
         let geo = self.space.output_geometry(output).unwrap_or_default();
         tracing::info!(
@@ -139,6 +145,7 @@ impl Aurora {
     /// Something about the arrangement changed (position, size, scale, an output came or
     /// went): lay everything out again, keep the pointer on an output and tell clients.
     pub fn wm_output_geometry_changed(&mut self) {
+        self.display.output_management.dirty = true;
         self.space.refresh();
         // Layout rebases floating windows whose output rectangle moved.
         self.relayout_all();
@@ -155,13 +162,19 @@ impl Aurora {
         self.queue_redraw_all();
     }
 
-    /// Applies the config's scale and positions to the running outputs.
+    /// Applies the config's scale, transform and positions to the running outputs.
     pub fn reapply_output_config(&mut self) {
         let outputs = self.wm.outputs.clone();
         for output in &outputs {
-            let scale = rule_scale(self.output_rule(&output.name()));
+            let rule = self.output_rule(&output.name());
+            let (scale, transform) = (rule_scale(rule), rule_transform(rule));
             if output.current_scale().fractional_scale() != scale.fractional_scale() {
                 output.change_current_state(None, None, Some(scale), None);
+            }
+            // The nested window draws flipped and owns its transform.
+            let drm = matches!(self.backend, crate::backend::Backend::Drm(_));
+            if drm && output.current_transform() != transform {
+                output.change_current_state(None, Some(transform), None, None);
             }
         }
         self.arrange_outputs();
@@ -281,6 +294,7 @@ impl Aurora {
     /// windows keep their workspace and return with the next output. Returns the window count.
     pub fn wm_output_removed(&mut self, output: &Output) -> usize {
         self.captures.output_removed(output);
+        self.display_output_removed(output);
         let name = output.name();
         let shown = self.wm.active_ws.get(output).copied();
         let target = self

@@ -21,8 +21,17 @@ impl Aurora {
     pub fn dispatch(&mut self, action: Action) {
         tracing::info!("action: {action}");
         // Whatever the source (bind, repeat, mouse bind), a locked session runs nothing but
-        // quitting and introspection.
-        if self.is_locked() && !matches!(action, Action::Quit | Action::DebugDump | Action::None) {
+        // quitting, introspection and monitor power.
+        if self.is_locked()
+            && !matches!(
+                action,
+                Action::Quit
+                    | Action::DebugDump
+                    | Action::None
+                    | Action::PowerOffMonitors
+                    | Action::PowerOnMonitors
+            )
+        {
             tracing::info!("action: ignored while locked");
             return;
         }
@@ -77,6 +86,8 @@ impl Aurora {
                     tracing::warn!("debug-remove-output ignored: not running with --qa");
                 }
             }
+            Action::PowerOffMonitors => self.power_all(false),
+            Action::PowerOnMonitors => self.power_all(true),
             // Drags start from the button press itself (see `on_pointer_button`), so as a
             // key bind they do nothing.
             Action::DragMove | Action::DragResize | Action::None => {}

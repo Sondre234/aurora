@@ -13,6 +13,7 @@ use std::{
 
 use crate::anim::Curve;
 use crate::state::Aurora;
+use smithay::utils::Transform;
 use keybind::{BindTable, Mods};
 
 mod input;
@@ -94,6 +95,8 @@ pub struct General {
     pub allow_virtual_keyboard: bool,
     /// xdg-activation requests focus the window instead of only marking it urgent.
     pub focus_on_activate: bool,
+    /// Fullscreen surfaces asking for async presentation (wp_tearing_control) may tear.
+    pub allow_tearing: bool,
 }
 
 impl Default for General {
@@ -120,6 +123,7 @@ impl Default for General {
             mod_key: ModKey::Super,
             allow_virtual_keyboard: true,
             focus_on_activate: false,
+            allow_tearing: false,
         }
     }
 }
@@ -296,6 +300,46 @@ pub struct OutputRule {
     pub position: Option<(i32, i32)>,
     pub mode: Option<ModeSpec>,
     pub scale: Option<f64>,
+    pub vrr: VrrMode,
+    /// `None` is normal (no rotation).
+    pub transform: Option<Transform>,
+}
+
+/// `[[output]] transform`: the wl_output transform names, `normal`, `90`, `180`, `270`,
+/// `flipped`, `flipped-90`, `flipped-180`, `flipped-270`.
+pub fn parse_transform(text: &str) -> Option<Transform> {
+    Some(match text {
+        "normal" => Transform::Normal,
+        "90" => Transform::_90,
+        "180" => Transform::_180,
+        "270" => Transform::_270,
+        "flipped" => Transform::Flipped,
+        "flipped-90" => Transform::Flipped90,
+        "flipped-180" => Transform::Flipped180,
+        "flipped-270" => Transform::Flipped270,
+        _ => return None,
+    })
+}
+
+/// `[[output]] vrr`: variable refresh rate (adaptive sync).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum VrrMode {
+    #[default]
+    Off,
+    On,
+    /// Only while a fullscreen window is on the output.
+    OnDemand,
+}
+
+impl VrrMode {
+    pub fn parse(text: &str) -> Option<Self> {
+        Some(match text {
+            "off" => Self::Off,
+            "on" => Self::On,
+            "on-demand" => Self::OnDemand,
+            _ => return None,
+        })
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -546,6 +590,7 @@ impl Aurora {
                     .virtual_keyboard
                     .set_allowed(config.general.allow_virtual_keyboard);
                 let old = std::mem::replace(&mut self.config, Arc::new(config));
+                self.display_config_reloaded();
                 self.reapply_keyboard_config(&old.input);
                 self.reapply_device_config(&old.input);
                 self.apply_config();
@@ -851,5 +896,57 @@ mod tests {
             Some(true)
         );
         assert_eq!(Color::parse("ff0000"), None);
+    }
+
+    #[test]
+    fn output_vrr_parses_and_rejects_bad_values() {
+        let (config, warnings) = resolve(
+            r#"
+            [[output]]
+            name = "A-1"
+            vrr = "on-demand"
+            [[output]]
+            name = "B-1"
+            vrr = "on"
+            [[output]]
+            name = "C-1"
+            [[output]]
+            name = "D-1"
+            vrr = "sometimes"
+            [[output]]
+            name = "E-1"
+            vrr = true
+            "#,
+        );
+        let vrr: Vec<_> = config.outputs.iter().map(|o| (o.name.as_str(), o.vrr)).collect();
+        assert_eq!(
+            vrr,
+            [
+                ("A-1", VrrMode::OnDemand),
+                ("B-1", VrrMode::On),
+                ("C-1", VrrMode::Off)
+            ]
+        );
+        assert_eq!(warnings.len(), 2, "{warnings:?}");
+        assert!(warnings.iter().all(|w| w.contains("vrr")), "{warnings:?}");
+    }
+    #[test]
+    fn output_transform_parses_names() {
+        let (config, warnings) = resolve(
+            r#"
+            [[output]]
+            name = "A-1"
+            transform = "flipped-90"
+            [[output]]
+            name = "B-1"
+            [[output]]
+            name = "C-1"
+            transform = "sideways"
+            "#,
+        );
+        let got: Vec<_> = config.outputs.iter().map(|o| o.transform).collect();
+        assert_eq!(got, [Some(Transform::Flipped90), None]);
+        assert!(warnings.iter().any(|w| w.contains("transform")), "{warnings:?}");
+        assert_eq!(parse_transform("270"), Some(Transform::_270));
     }
 }

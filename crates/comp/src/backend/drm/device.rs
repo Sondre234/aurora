@@ -41,7 +41,7 @@ use crate::{
     dmabuf::{SurfaceDmabufFeedback, surface_feedback},
     outputs::choose_mode,
     state::Aurora,
-    wm::outputs::rule_scale,
+    wm::outputs::{rule_scale, rule_transform},
 };
 
 pub type Allocator = GbmAllocator<DrmDeviceFd>;
@@ -75,6 +75,14 @@ pub struct Surface {
     pub output: Output,
     pub render: RenderState,
     pub dmabuf_feedback: Option<SurfaceDmabufFeedback>,
+    /// The gamma ramp a client set (`None`: the driver default), and whether it still has to
+    /// reach the hardware.
+    pub gamma: Option<Vec<u16>>,
+    pub gamma_pending: bool,
+    /// The connector's VRR capability, read once at connect.
+    pub vrr: crate::display::vrr::Capability,
+    /// The VRR state the driver last refused, so a failure is not retried every frame.
+    pub vrr_refused: Option<bool>,
     global: Option<GlobalId>,
     dh: DisplayHandle,
 }
@@ -92,7 +100,7 @@ impl Drop for Surface {
 pub struct Device {
     pub surfaces: HashMap<crtc::Handle, Surface>,
     pub output_manager: OutputManager,
-    scanner: DrmScanner,
+    pub(super) scanner: DrmScanner,
     /// Connectors the config turned off, kept so a reload can turn them on again.
     disabled: HashMap<crtc::Handle, connector::Info>,
     pub render_node: DrmNode,
@@ -224,6 +232,8 @@ impl Aurora {
         let Some(device) = drm.devices.get_mut(&node) else {
             return;
         };
+        // Disabled connectors coming and going are heads too.
+        self.display.output_management.dirty = true;
         let events = match device
             .scanner
             .scan_connectors(device.output_manager.device())
@@ -406,7 +416,12 @@ impl Aurora {
         );
         // The DRM compositor refuses an output without a current mode.
         output.set_preferred(wl_mode);
-        output.change_current_state(Some(wl_mode), None, Some(rule_scale(rule.as_ref())), None);
+        output.change_current_state(
+            Some(wl_mode),
+            Some(rule_transform(rule.as_ref())),
+            Some(rule_scale(rule.as_ref())),
+            None,
+        );
 
         let drm_output = match device
             .output_manager
@@ -426,6 +441,9 @@ impl Aurora {
                 return;
             }
         };
+
+        let vrr = super::display::vrr_capability(&drm_output, connector.handle());
+        tracing::info!("output: {name} vrr={}", vrr.name());
 
         let dmabuf_feedback = drm_output.with_compositor(|c| {
             surface_feedback(device.render_node, &renderer.dmabuf_formats(), c.surface())
@@ -452,6 +470,10 @@ impl Aurora {
                 global: Some(global),
                 render,
                 dmabuf_feedback,
+                gamma: None,
+                gamma_pending: false,
+                vrr,
+                vrr_refused: None,
                 dh: self.display_handle.clone(),
             },
         );
@@ -500,7 +522,7 @@ impl Aurora {
     }
 }
 
-fn connector_name(connector: &connector::Info) -> String {
+pub(super) fn connector_name(connector: &connector::Info) -> String {
     format!(
         "{}-{}",
         connector.interface().as_str(),
@@ -567,7 +589,7 @@ impl Aurora {
     /// modes that changed. A mode the driver refuses keeps the old one. Not exercised by the
     /// nested backend, so it is checked by reading only.
     pub fn drm_apply_output_config(&mut self) {
-        let config = self.config.clone();
+        let rules = self.display.rules.clone();
         let mut disable = Vec::new();
         let mut enable = Vec::new();
         let mut mode_changed = false;
@@ -588,7 +610,7 @@ impl Aurora {
                     .collect();
                 for (info, crtc) in connectors {
                     let name = connector_name(&info);
-                    let rule = config.outputs.iter().find(|r| r.name == name);
+                    let rule = rules.iter().find(|r| r.name == name);
                     let enabled =
                         rule.is_none_or(|r| r.enabled) || forced.as_deref() == Some(name.as_str());
                     let live = device.surfaces.contains_key(&crtc);
