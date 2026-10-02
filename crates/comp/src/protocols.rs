@@ -8,6 +8,7 @@ use smithay::{
         wayland_server::{DisplayHandle, protocol::wl_surface::WlSurface},
     },
     wayland::{
+        alpha_modifier::AlphaModifierState,
         cursor_shape::CursorShapeManagerState,
         foreign_toplevel_list::ForeignToplevelListState,
         fractional_scale::FractionalScaleManagerState,
@@ -57,6 +58,9 @@ pub struct Protocols {
     /// Solid-colour buffers: Smithay's surface elements draw them as solid quads and the DRM
     /// compositor can scan them out, so nothing else needs to know.
     _single_pixel: SinglePixelBufferState,
+    /// wp_alpha_modifier_v1: Smithay's surface elements multiply the client's factor into the
+    /// alpha Aurora passes (fades, inactive opacity); the shadow follows it in `wm/window.rs`.
+    _alpha_modifier: AlphaModifierState,
 }
 
 impl Protocols {
@@ -93,6 +97,7 @@ impl Protocols {
             idle_inhibitors: HashSet::new(),
             active_inhibitor: None,
             _single_pixel: SinglePixelBufferState::new::<Aurora>(dh),
+            _alpha_modifier: AlphaModifierState::new::<Aurora>(dh),
         }
     }
 }
