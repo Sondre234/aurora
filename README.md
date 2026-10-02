@@ -226,6 +226,13 @@ pointer motion, scroll, touch or tablet input turns every output back on (releas
 so the bind that turned them off cannot undo itself). Locking while off works; the lock
 surface is what shows on wake.
 
+**Gamma (night light).** `zwlr_gamma_control_manager_v1` is served, so gammastep
+(`gammastep -m wayland`) and wlsunset work. One client per output at a time; a second one
+gets `failed`. The ramp goes to the CRTC's `GAMMA_LUT` (legacy gamma ramp on drivers without
+it), the size advertised is the driver's, and the default ramp comes back as soon as the
+client's control goes away (including the client dying). Outputs without hardware gamma, and
+the nested backend, fail the control right away.
+
 ## Performance
 
 The desktop is built like a browser engine: retained scene, aggressive caching,
